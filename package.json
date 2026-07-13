@@ -1,0 +1,24 @@
+{
+  "name": "earned-signal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.12.0",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "pnpm --recursive build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "lint": "eslint .",
+    "test": "pnpm --recursive test",
+    "typecheck": "pnpm --recursive typecheck",
+    "types:worker": "pnpm --dir apps/web types:worker"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.7.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.63.0"
+  }
+}

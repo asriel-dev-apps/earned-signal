@@ -1,0 +1,40 @@
+:root {
+  color: #17211c;
+  background: #edf2ec;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+}
+
+body {
+  display: grid;
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  place-items: center;
+}
+
+main {
+  width: min(42rem, calc(100% - 3rem));
+}
+
+h1 {
+  margin: 0;
+  color: #134b36;
+  font-size: clamp(3rem, 10vw, 6rem);
+  letter-spacing: -0.06em;
+}
+
+p {
+  max-width: 36rem;
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  margin-bottom: 0.5rem;
+  color: #486556;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
