@@ -6,7 +6,6 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite dev",
-    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "types:worker": "wrangler types worker-configuration.d.ts"
   },
