@@ -6,7 +6,8 @@ This repository currently contains an early technical slice:
 
 - deterministic scheduling calculations for finish-to-start dependencies;
 - earned value calculations for 0/100 and physical-percent measurement;
-- a React shell and Hono health endpoint built as one Cloudflare Worker with Static Assets.
+- an editable AG Grid Community workspace that immediately recalculates schedule and EVM outputs;
+- a React application and Hono health endpoint built as one Cloudflare Worker with Static Assets.
 
 See [docs/mvp-spec.md](docs/mvp-spec.md) for the bounded MVP specification.
 

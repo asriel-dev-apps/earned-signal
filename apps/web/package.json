@@ -10,7 +10,10 @@
     "types:worker": "wrangler types worker-configuration.d.ts"
   },
   "dependencies": {
+    "@earned-signal/application": "workspace:*",
     "@earned-signal/domain": "workspace:*",
+    "ag-grid-community": "36.0.0",
+    "ag-grid-react": "36.0.0",
     "hono": "4.12.30",
     "react": "19.2.7",
     "react-dom": "19.2.7"
