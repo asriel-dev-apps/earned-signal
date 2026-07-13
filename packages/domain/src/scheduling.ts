@@ -118,6 +118,81 @@ function validateActivity(activity: ScheduleActivityInput): void {
   }
 }
 
+function findCycleActivityIds(
+  activities: readonly ScheduleActivityInput[],
+  byId: ReadonlyMap<string, ScheduleActivityInput>,
+  unresolvedIds: ReadonlySet<string>,
+): readonly string[] {
+  let nextIndex = 0;
+  const indices = new Map<string, number>();
+  const lowLinks = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const cycleIds = new Set<string>();
+
+  const visit = (activityId: string): void => {
+    const index = nextIndex;
+    nextIndex += 1;
+    indices.set(activityId, index);
+    lowLinks.set(activityId, index);
+    stack.push(activityId);
+    onStack.add(activityId);
+
+    const activity = byId.get(activityId);
+    if (activity === undefined) {
+      throw new Error(`Unknown activity: ${activityId}`);
+    }
+    for (const dependency of activity.dependencies) {
+      const predecessorId = dependency.predecessorId;
+      if (!unresolvedIds.has(predecessorId)) {
+        continue;
+      }
+      if (!indices.has(predecessorId)) {
+        visit(predecessorId);
+        lowLinks.set(
+          activityId,
+          Math.min(lowLinks.get(activityId) ?? index, lowLinks.get(predecessorId) ?? index),
+        );
+      } else if (onStack.has(predecessorId)) {
+        lowLinks.set(
+          activityId,
+          Math.min(lowLinks.get(activityId) ?? index, indices.get(predecessorId) ?? index),
+        );
+      }
+    }
+
+    if (lowLinks.get(activityId) !== index) {
+      return;
+    }
+    const component: string[] = [];
+    let member: string | undefined;
+    do {
+      member = stack.pop();
+      if (member === undefined) {
+        throw new Error("Invalid cycle detection state");
+      }
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== activityId);
+
+    const selfReferential =
+      component.length === 1 &&
+      activity.dependencies.some((dependency) => dependency.predecessorId === activityId);
+    if (component.length > 1 || selfReferential) {
+      for (const id of component) {
+        cycleIds.add(id);
+      }
+    }
+  };
+
+  for (const activity of activities) {
+    if (unresolvedIds.has(activity.id) && !indices.has(activity.id)) {
+      visit(activity.id);
+    }
+  }
+  return activities.filter((activity) => cycleIds.has(activity.id)).map((activity) => activity.id);
+}
+
 function topologicalOrder(
   activities: readonly ScheduleActivityInput[],
   byId: ReadonlyMap<string, ScheduleActivityInput>,
@@ -152,11 +227,10 @@ function topologicalOrder(
 
   if (ordered.length !== activities.length) {
     const orderedIds = new Set(ordered.map((activity) => activity.id));
-    throw new ScheduleCycleError(
-      activities
-        .filter((activity) => !orderedIds.has(activity.id))
-        .map((activity) => activity.id),
+    const unresolvedIds = new Set(
+      activities.filter((activity) => !orderedIds.has(activity.id)).map((activity) => activity.id),
     );
+    throw new ScheduleCycleError(findCycleActivityIds(activities, byId, unresolvedIds));
   }
   return ordered;
 }

@@ -108,14 +108,21 @@ function validateWorkPackage(workPackage: EvmWorkPackage): void {
   }
   if (
     workPackage.measurementMethod === "PHYSICAL_PERCENT" &&
-    (workPackage.physicalPercent < 0 || workPackage.physicalPercent > 100)
+    (!Number.isFinite(workPackage.physicalPercent) ||
+      workPackage.physicalPercent < 0 ||
+      workPackage.physicalPercent > 100)
   ) {
     throw new Error(`Work package ${workPackage.id} physical percent must be from 0 to 100`);
   }
   for (const worklog of workPackage.worklogs) {
     asUtcDate(worklog.workDate);
-    if (worklog.minutes < 0 || worklog.ratePerMinute < 0) {
-      throw new Error(`Work package ${workPackage.id} has a negative actual cost input`);
+    if (
+      !Number.isFinite(worklog.minutes) ||
+      !Number.isFinite(worklog.ratePerMinute) ||
+      worklog.minutes < 0 ||
+      worklog.ratePerMinute < 0
+    ) {
+      throw new Error(`Work package ${workPackage.id} has an invalid actual cost input`);
     }
   }
   asUtcDate(workPackage.measurementDate);
@@ -150,8 +157,8 @@ export function calculateEvm(input: EvmInput): EvmResult {
     ac += workPackage.worklogs
       .filter((worklog) => worklog.workDate <= input.statusDate)
       .reduce(
-      (total, worklog) => total + worklog.minutes * worklog.ratePerMinute,
-      0,
+        (total, worklog) => total + worklog.minutes * worklog.ratePerMinute,
+        0,
       );
   }
 

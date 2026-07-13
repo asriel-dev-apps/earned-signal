@@ -78,4 +78,29 @@ describe("calculateSchedule", () => {
       }),
     ).toThrowError(new ScheduleCycleError(["A", "B", "C"]));
   });
+
+  it("does not report activities that are only blocked by a cycle", () => {
+    expect(() =>
+      calculateSchedule({
+        projectStart: "2026-07-13",
+        activities: [
+          {
+            id: "A",
+            durationWorkingDays: 1,
+            dependencies: [{ predecessorId: "B", lagWorkingDays: 0 }],
+          },
+          {
+            id: "B",
+            durationWorkingDays: 1,
+            dependencies: [{ predecessorId: "A", lagWorkingDays: 0 }],
+          },
+          {
+            id: "C",
+            durationWorkingDays: 1,
+            dependencies: [{ predecessorId: "A", lagWorkingDays: 0 }],
+          },
+        ],
+      }),
+    ).toThrowError(new ScheduleCycleError(["A", "B"]));
+  });
 });

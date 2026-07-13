@@ -87,4 +87,28 @@ describe("calculateEvm", () => {
       }),
     ).toMatchObject({ pv: 10_000, ev: 0, ac: 0, cpi: null, eac: null });
   });
+
+  it.each([
+    { physicalPercent: Number.NaN, minutes: 60, ratePerMinute: 100 },
+    { physicalPercent: 50, minutes: Number.POSITIVE_INFINITY, ratePerMinute: 100 },
+    { physicalPercent: 50, minutes: 60, ratePerMinute: Number.NaN },
+  ])("rejects non-finite numeric inputs", ({ physicalPercent, minutes, ratePerMinute }) => {
+    expect(() =>
+      calculateEvm({
+        statusDate: "2026-07-24",
+        workPackages: [
+          {
+            id: "A",
+            measurementMethod: "PHYSICAL_PERCENT",
+            baselineBudget: 50_000,
+            baselineStart: "2026-07-20",
+            baselineFinish: "2026-07-24",
+            physicalPercent,
+            measurementDate: "2026-07-24",
+            worklogs: [{ workDate: "2026-07-24", minutes, ratePerMinute }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });
