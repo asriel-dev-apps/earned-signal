@@ -113,6 +113,35 @@ describe("OIDC bearer authentication", () => {
     ).rejects.toBeInstanceOf(AuthenticationRequiredError);
   });
 
+  it("rejects a token shared with another audience", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256", {
+      extractable: true,
+    });
+    const publicJwk = await exportJWK(publicKey);
+    const authenticator = createOidcBearerAuthenticator(
+      createJoseOidcTokenVerifier(() =>
+        createLocalJWKSet({ keys: [{ ...publicJwk, kid: "test-key", alg: "RS256" }] }),
+      ),
+    );
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: "test-key", typ: "JWT" })
+      .setIssuer(config.issuer)
+      .setAudience([config.audience, "another-api"])
+      .setSubject("human-editor")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
+    await expect(
+      authenticator.authenticate(
+        new Request("https://api.example.test/commands", {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+        config,
+      ),
+    ).rejects.toBeInstanceOf(AuthenticationRequiredError);
+  });
+
   it("rejects tokens with a missing or expired expiry", async () => {
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,

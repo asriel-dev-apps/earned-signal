@@ -9,7 +9,7 @@ import {
   UuidSchema,
   toCommand,
 } from "./project-command-contract.js";
-import type { ApiDependencies } from "./api.js";
+import type { ApiDependencies, ProjectCommandSession } from "./api.js";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
 
@@ -46,10 +46,12 @@ async function executeCommand(
   environment: Env,
   identity: AuthenticatedIdentity,
   context: ProjectCommandContext,
-  command: ProjectCommand,
+  createCommand: () => ProjectCommand,
 ) {
-  const session = await dependencies.openCommandSession(environment);
+  let session: ProjectCommandSession | undefined;
   try {
+    const command = createCommand();
+    session = await dependencies.openCommandSession(environment);
     const actor = await session.authorizer.authorize({
       identity,
       tenantId: context.tenantId,
@@ -75,18 +77,31 @@ async function executeCommand(
     };
   } catch (error) {
     const resolution = resolveProjectCommandError(error);
-    if (resolution === null) throw error;
+    if (resolution === null) {
+      console.error(
+        JSON.stringify({
+          message: "Unhandled MCP tool error",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     return {
       isError: true as const,
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify({ error: resolution.error }),
+          text: JSON.stringify({
+            error:
+              resolution?.error ?? {
+                code: "INTERNAL_ERROR",
+                message: "Internal server error",
+              },
+          }),
         },
       ],
     };
   } finally {
-    await session.close();
+    await session?.close();
   }
 }
 
@@ -120,7 +135,7 @@ function createServer(
         environment,
         identity,
         { tenantId, projectId, expectedRevision, idempotencyKey },
-        toCommand({ type: "task.update", taskId, changes }),
+        () => toCommand({ type: "task.update", taskId, changes }),
       ),
   );
   server.registerTool(
@@ -146,7 +161,7 @@ function createServer(
         environment,
         identity,
         { tenantId, projectId, expectedRevision, idempotencyKey },
-        toCommand({ type: "task.add", task }),
+        () => toCommand({ type: "task.add", task }),
       ),
   );
   server.registerTool(
@@ -172,7 +187,7 @@ function createServer(
         environment,
         identity,
         { tenantId, projectId, expectedRevision, idempotencyKey },
-        toCommand({ type: "task.delete", taskId }),
+        () => toCommand({ type: "task.delete", taskId }),
       ),
   );
   return server;

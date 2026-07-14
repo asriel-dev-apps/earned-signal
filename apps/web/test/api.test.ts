@@ -37,6 +37,7 @@ describe("project command REST API", () => {
   let agentAccessToken: string;
   let humanMcpAccessToken: string;
   let agentMcpAccessToken: string;
+  let multiAudienceAccessToken: string;
   const humanPrincipalId = "90000000-0000-4000-8000-000000000001";
   const agentPrincipalId = "90000000-0000-4000-8000-000000000002";
 
@@ -121,7 +122,11 @@ describe("project command REST API", () => {
       throw new Error("Could not start the OIDC JWKS integration server");
     }
     oidcIssuer = `http://127.0.0.1:${jwksAddress.port}/`;
-    const signAccessToken = (subject: string, audience: string, scope?: string) => {
+    const signAccessToken = (
+      subject: string,
+      audience: string | string[],
+      scope?: string,
+    ) => {
       const token = new SignJWT(scope === undefined ? {} : { scope })
         .setProtectedHeader({ alg: "RS256", kid: "integration-key", typ: "JWT" })
         .setIssuer(oidcIssuer)
@@ -145,6 +150,10 @@ describe("project command REST API", () => {
       `${workerOrigin}/mcp`,
       "project:progress:write project:actuals:write",
     );
+    multiAudienceAccessToken = await signAccessToken("human-editor", [
+      "earned-signal-api",
+      `${workerOrigin}/mcp`,
+    ]);
     workerProcess = spawn(
       "wrangler",
       [
@@ -574,6 +583,55 @@ describe("project command REST API", () => {
     );
   });
 
+  it("rejects a token shared by the REST and MCP audiences at both boundaries", async () => {
+    const rest = await fetch(
+      `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/commands`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${multiAudienceAccessToken}`,
+          "content-type": "application/json",
+          "idempotency-key": "multi-audience-rest",
+        },
+        body: JSON.stringify({
+          expectedRevision: "1",
+          command: {
+            type: "task.update",
+            taskId: demoProjectRecord.activities[2]!.id,
+            changes: { progressBasisPoints: 7_500 },
+          },
+        }),
+      },
+    );
+    const mcp = await fetch(`${workerOrigin}/mcp`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${multiAudienceAccessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "earned-signal-test", version: "1.0.0" },
+        },
+      }),
+    });
+
+    expect(rest.status).toBe(401);
+    expect(mcp.status).toBe(401);
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.project.revision).toBe(1n);
+    expect(stored?.auditEvents).toHaveLength(1);
+  });
+
   it("rejects a cross-origin MCP request before protocol handling", async () => {
     const response = await fetch(`${workerOrigin}/mcp`, {
       method: "POST",
@@ -838,6 +896,85 @@ describe("project command REST API", () => {
             error: {
               code: "PROJECT_ACCESS_DENIED",
               message: "Project command is not permitted",
+            },
+          }),
+        },
+      ]);
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.project.revision).toBe(1n);
+    expect(stored?.auditEvents).toHaveLength(1);
+  });
+
+  it("returns stable validation errors for unsafe update and add money values", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${humanMcpAccessToken}` } },
+    });
+    const expectedError = [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            code: "COMMAND_INVALID",
+            message: "actualCostMinor exceeds the supported API range",
+          },
+        }),
+      },
+    ];
+
+    try {
+      await mcp.connect(transport as Transport);
+      const update = await mcp.callTool({
+        name: "update_project_task",
+        arguments: {
+          tenantId: demoProjectRecord.tenant.id,
+          projectId: demoProjectRecord.project.id,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-unsafe-update-money",
+          taskId: demoProjectRecord.activities[2]!.id,
+          changes: { actualCostMinor: "9007199254740992" },
+        },
+      });
+      expect(update.isError).toBe(true);
+      expect(update.content).toEqual(expectedError);
+
+      const add = await mcp.callTool({
+        name: "add_project_task",
+        arguments: {
+          tenantId: demoProjectRecord.tenant.id,
+          projectId: demoProjectRecord.project.id,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-unsafe-add-money",
+          task: {
+            id: "30000000-0000-4000-8000-000000000098",
+            wbs: "1.10",
+            name: "Unsafe budget",
+            owner: "Delivery lead",
+            durationWorkingDays: 2,
+            measurementMethod: "ZERO_HUNDRED",
+            predecessorId: null,
+            budgetMinor: "9007199254740992",
+            progressBasisPoints: 0,
+            actualCostMinor: "0",
+            actualMinutes: 0,
+          },
+        },
+      });
+      expect(add.isError).toBe(true);
+      expect(add.content).toEqual([
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "COMMAND_INVALID",
+              message: "budgetMinor exceeds the supported API range",
             },
           }),
         },

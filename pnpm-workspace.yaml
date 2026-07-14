@@ -11,6 +11,12 @@ allowBuilds:
   ssh2: false
   workerd: true
 
+peerDependencyRules:
+  # partyserver's Workers types peer is compile-time only; Wrangler-generated
+  # bindings are the source of truth for this Worker.
+  ignoreMissing:
+    - '@cloudflare/workers-types'
+
 minimumReleaseAgeExclude:
   - hono@4.12.30
   - '@hono/zod-openapi@1.5.0'

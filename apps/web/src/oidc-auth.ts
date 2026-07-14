@@ -61,7 +61,13 @@ export function createJoseOidcTokenVerifier(
         algorithms: ["RS256", "PS256", "ES256", "EdDSA"],
         requiredClaims: ["sub", "exp"],
       });
+      const exactAudience =
+        payload.aud === config.audience ||
+        (Array.isArray(payload.aud) &&
+          payload.aud.length === 1 &&
+          payload.aud[0] === config.audience);
       if (
+        !exactAudience ||
         typeof payload.sub !== "string" ||
         payload.sub.length === 0 ||
         (typeof payload.scope !== "string" && payload.scope !== undefined)
