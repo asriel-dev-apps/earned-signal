@@ -6,21 +6,28 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite dev",
+    "test": "vitest --config vitest.config.ts run",
     "typecheck": "tsc --noEmit",
     "types:worker": "wrangler types worker-configuration.d.ts"
   },
   "dependencies": {
     "@earned-signal/application": "workspace:*",
     "@earned-signal/domain": "workspace:*",
+    "@earned-signal/persistence": "workspace:*",
+    "@hono/zod-openapi": "1.5.0",
     "ag-grid-community": "36.0.0",
     "ag-grid-react": "36.0.0",
     "hono": "4.12.30",
+    "pg": "8.22.0",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.44.0",
     "@types/node": "24.1.0",
+    "@types/pg": "8.20.0",
+    "@testcontainers/postgresql": "12.0.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",

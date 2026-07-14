@@ -6,7 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "types": ["./worker-configuration.d.ts", "vite/client"]
+    "types": ["./worker-configuration.d.ts", "vite/client", "vitest/globals", "node"]
   },
-  "include": ["src", "vite.config.ts", "worker-configuration.d.ts"]
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts", "worker-configuration.d.ts"]
 }

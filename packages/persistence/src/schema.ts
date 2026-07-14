@@ -521,6 +521,37 @@ export const auditEvents = pgTable(
   ],
 );
 
+export const commandReceipts = pgTable(
+  "command_receipts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: char("request_hash", { length: 64 }).notNull(),
+    resultRevision: bigint("result_revision", { mode: "bigint" }).notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("command_receipts_project_key_unique").on(
+      table.tenantId,
+      table.projectId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "command_receipts_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("restrict"),
+    check(
+      "command_receipts_idempotency_key_length",
+      sql`length(trim(${table.idempotencyKey})) between 1 and 200`,
+    ),
+    check("command_receipts_request_hash_hex", sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check("command_receipts_revision_positive", sql`${table.resultRevision} > 0`),
+  ],
+);
+
 export const schema = {
   tenants,
   projects,
@@ -535,4 +566,5 @@ export const schema = {
   worklogs,
   directActualCosts,
   auditEvents,
+  commandReceipts,
 };

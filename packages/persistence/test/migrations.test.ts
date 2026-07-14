@@ -33,6 +33,7 @@ describe("persistence migrations", () => {
       "baseline_dependencies",
       "baseline_versions",
       "baseline_wbs_nodes",
+      "command_receipts",
       "dependencies",
       "direct_actual_costs",
       "progress_measurements",
@@ -193,6 +194,19 @@ describe("persistence migrations", () => {
     await expect(
       client.query(
         "update audit_events set payload = '{\"changed\":true}' where project_id = $1",
+        [projectId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+
+    await client.query(
+      `insert into command_receipts
+         (tenant_id, project_id, idempotency_key, request_hash, result_revision)
+       values ($1, $2, 'immutable-key', repeat('0', 64), 1)`,
+      [tenantId, projectId],
+    );
+    await expect(
+      client.query(
+        "update command_receipts set result_revision = 2 where project_id = $1",
         [projectId],
       ),
     ).rejects.toMatchObject({ code: "55000" });

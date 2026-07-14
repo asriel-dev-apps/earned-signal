@@ -12,3 +12,4 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - hono@4.12.30
+  - '@hono/zod-openapi@1.5.0'

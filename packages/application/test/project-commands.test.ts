@@ -132,4 +132,14 @@ describe("applyProjectCommand", () => {
       }),
     ).toThrow("whole minutes");
   });
+
+  it("stores money as safe whole minor units", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { actualCost: 420_000.5 },
+      }),
+    ).toThrow("whole minor units");
+  });
 });

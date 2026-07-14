@@ -25,6 +25,8 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - Add and delete commands plus typed cell updates through the shared application command boundary.
 - A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
+- A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
+- A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
 - Node.js 24 LTS and pnpm for development and CI.
 
 ## Explicitly out of scope
@@ -33,7 +35,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - Production PostgreSQL provisioning and Hyperdrive bindings.
 - Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
 - Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.
-- REST command API, MCP server, and server-side command transport.
+- MCP server and remote agent command transport.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 

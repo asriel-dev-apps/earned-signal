@@ -18,3 +18,4 @@ export * from "./schema.js";
 export * from "./demo-project.js";
 export * from "./project-record.js";
 export * from "./project-repository.js";
+export * from "./project-command-unit-of-work.js";

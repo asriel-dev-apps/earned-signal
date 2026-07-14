@@ -1,0 +1,1942 @@
+{
+  "id": "f61bdc09-7e1d-4ee9-a241-51ef31a9b1dd",
+  "prevId": "78a1412d-ac5c-4d01-b32a-fed682ad33a0",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.activities": {
+      "name": "activities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wbs_node_id": {
+          "name": "wbs_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner": {
+          "name": "owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "duration_working_days": {
+          "name": "duration_working_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_minor": {
+          "name": "budget_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "measurement_method": {
+          "name": "measurement_method",
+          "type": "measurement_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "activities_wbs_node_idx": {
+          "name": "activities_wbs_node_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "wbs_node_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "activities_wbs_node_fk": {
+          "name": "activities_wbs_node_fk",
+          "tableFrom": "activities",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "wbs_node_id"
+          ],
+          "tableTo": "wbs_nodes",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "activities_tenant_project_id_unique": {
+          "name": "activities_tenant_project_id_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "activities_name_not_blank": {
+          "name": "activities_name_not_blank",
+          "value": "length(trim(\"activities\".\"name\")) > 0"
+        },
+        "activities_duration_positive": {
+          "name": "activities_duration_positive",
+          "value": "\"activities\".\"duration_working_days\" > 0"
+        },
+        "activities_budget_non_negative": {
+          "name": "activities_budget_non_negative",
+          "value": "\"activities\".\"budget_minor\" >= 0"
+        },
+        "activities_sort_order_non_negative": {
+          "name": "activities_sort_order_non_negative",
+          "value": "\"activities\".\"sort_order\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.audit_events": {
+      "name": "audit_events",
+      "schema": "",
+      "columns": {
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_revision": {
+          "name": "project_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "audit_actor_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "command_type": {
+          "name": "command_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "audit_events_project_revision_unique": {
+          "name": "audit_events_project_revision_unique",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_revision",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "audit_events_project_fk": {
+          "name": "audit_events_project_fk",
+          "tableFrom": "audit_events",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "audit_events_id_unique": {
+          "name": "audit_events_id_unique",
+          "columns": [
+            "id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "audit_events_revision_positive": {
+          "name": "audit_events_revision_positive",
+          "value": "\"audit_events\".\"project_revision\" > 0"
+        },
+        "audit_events_actor_id_not_blank": {
+          "name": "audit_events_actor_id_not_blank",
+          "value": "length(trim(\"audit_events\".\"actor_id\")) > 0"
+        },
+        "audit_events_command_type_not_blank": {
+          "name": "audit_events_command_type_not_blank",
+          "value": "length(trim(\"audit_events\".\"command_type\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.baseline_activities": {
+      "name": "baseline_activities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_version_id": {
+          "name": "baseline_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_activity_id": {
+          "name": "source_activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_wbs_node_id": {
+          "name": "source_wbs_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "wbs_code": {
+          "name": "wbs_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duration_working_days": {
+          "name": "duration_working_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_start": {
+          "name": "baseline_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_finish": {
+          "name": "baseline_finish",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "budget_minor": {
+          "name": "budget_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "measurement_method": {
+          "name": "measurement_method",
+          "type": "measurement_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "baseline_activities_version_fk": {
+          "name": "baseline_activities_version_fk",
+          "tableFrom": "baseline_activities",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id"
+          ],
+          "tableTo": "baseline_versions",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        },
+        "baseline_activities_wbs_node_fk": {
+          "name": "baseline_activities_wbs_node_fk",
+          "tableFrom": "baseline_activities",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_wbs_node_id"
+          ],
+          "tableTo": "baseline_wbs_nodes",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_wbs_node_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "baseline_activities_source_unique": {
+          "name": "baseline_activities_source_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_activity_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "baseline_activities_name_not_blank": {
+          "name": "baseline_activities_name_not_blank",
+          "value": "length(trim(\"baseline_activities\".\"name\")) > 0"
+        },
+        "baseline_activities_wbs_code_not_blank": {
+          "name": "baseline_activities_wbs_code_not_blank",
+          "value": "length(trim(\"baseline_activities\".\"wbs_code\")) > 0"
+        },
+        "baseline_activities_duration_positive": {
+          "name": "baseline_activities_duration_positive",
+          "value": "\"baseline_activities\".\"duration_working_days\" > 0"
+        },
+        "baseline_activities_budget_non_negative": {
+          "name": "baseline_activities_budget_non_negative",
+          "value": "\"baseline_activities\".\"budget_minor\" >= 0"
+        },
+        "baseline_activities_finish_after_start": {
+          "name": "baseline_activities_finish_after_start",
+          "value": "\"baseline_activities\".\"baseline_finish\" >= \"baseline_activities\".\"baseline_start\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.baseline_dependencies": {
+      "name": "baseline_dependencies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_version_id": {
+          "name": "baseline_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "predecessor_source_activity_id": {
+          "name": "predecessor_source_activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "successor_source_activity_id": {
+          "name": "successor_source_activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "dependency_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lag_working_days": {
+          "name": "lag_working_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "baseline_dependencies_edge_unique": {
+          "name": "baseline_dependencies_edge_unique",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "baseline_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "predecessor_source_activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "successor_source_activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "baseline_dependencies_predecessor_fk": {
+          "name": "baseline_dependencies_predecessor_fk",
+          "tableFrom": "baseline_dependencies",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "predecessor_source_activity_id"
+          ],
+          "tableTo": "baseline_activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_activity_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        },
+        "baseline_dependencies_successor_fk": {
+          "name": "baseline_dependencies_successor_fk",
+          "tableFrom": "baseline_dependencies",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "successor_source_activity_id"
+          ],
+          "tableTo": "baseline_activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_activity_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "baseline_dependencies_distinct_activities": {
+          "name": "baseline_dependencies_distinct_activities",
+          "value": "\"baseline_dependencies\".\"predecessor_source_activity_id\" <> \"baseline_dependencies\".\"successor_source_activity_id\""
+        },
+        "baseline_dependencies_lag_non_negative": {
+          "name": "baseline_dependencies_lag_non_negative",
+          "value": "\"baseline_dependencies\".\"lag_working_days\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.baseline_versions": {
+      "name": "baseline_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "baseline_versions_project_version_unique": {
+          "name": "baseline_versions_project_version_unique",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "baseline_versions_project_fk": {
+          "name": "baseline_versions_project_fk",
+          "tableFrom": "baseline_versions",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "baseline_versions_tenant_project_id_unique": {
+          "name": "baseline_versions_tenant_project_id_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "baseline_versions_version_positive": {
+          "name": "baseline_versions_version_positive",
+          "value": "\"baseline_versions\".\"version\" > 0"
+        },
+        "baseline_versions_label_not_blank": {
+          "name": "baseline_versions_label_not_blank",
+          "value": "length(trim(\"baseline_versions\".\"label\")) > 0"
+        },
+        "baseline_versions_approval_complete": {
+          "name": "baseline_versions_approval_complete",
+          "value": "(\"baseline_versions\".\"approved_at\" is null and \"baseline_versions\".\"approved_by\" is null) or (\"baseline_versions\".\"approved_at\" is not null and length(trim(\"baseline_versions\".\"approved_by\")) > 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.baseline_wbs_nodes": {
+      "name": "baseline_wbs_nodes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "baseline_version_id": {
+          "name": "baseline_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_wbs_node_id": {
+          "name": "source_wbs_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_source_wbs_node_id": {
+          "name": "parent_source_wbs_node_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "baseline_wbs_nodes_version_fk": {
+          "name": "baseline_wbs_nodes_version_fk",
+          "tableFrom": "baseline_wbs_nodes",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id"
+          ],
+          "tableTo": "baseline_versions",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        },
+        "baseline_wbs_nodes_parent_fk": {
+          "name": "baseline_wbs_nodes_parent_fk",
+          "tableFrom": "baseline_wbs_nodes",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "parent_source_wbs_node_id"
+          ],
+          "tableTo": "baseline_wbs_nodes",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_wbs_node_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "baseline_wbs_nodes_snapshot_source_unique": {
+          "name": "baseline_wbs_nodes_snapshot_source_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "baseline_version_id",
+            "source_wbs_node_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "baseline_wbs_nodes_code_not_blank": {
+          "name": "baseline_wbs_nodes_code_not_blank",
+          "value": "length(trim(\"baseline_wbs_nodes\".\"code\")) > 0"
+        },
+        "baseline_wbs_nodes_name_not_blank": {
+          "name": "baseline_wbs_nodes_name_not_blank",
+          "value": "length(trim(\"baseline_wbs_nodes\".\"name\")) > 0"
+        },
+        "baseline_wbs_nodes_sort_order_non_negative": {
+          "name": "baseline_wbs_nodes_sort_order_non_negative",
+          "value": "\"baseline_wbs_nodes\".\"sort_order\" >= 0"
+        },
+        "baseline_wbs_nodes_not_own_parent": {
+          "name": "baseline_wbs_nodes_not_own_parent",
+          "value": "\"baseline_wbs_nodes\".\"parent_source_wbs_node_id\" is null or \"baseline_wbs_nodes\".\"parent_source_wbs_node_id\" <> \"baseline_wbs_nodes\".\"source_wbs_node_id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.command_receipts": {
+      "name": "command_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "result_revision": {
+          "name": "result_revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "command_receipts_project_fk": {
+          "name": "command_receipts_project_fk",
+          "tableFrom": "command_receipts",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "command_receipts_project_key_unique": {
+          "name": "command_receipts_project_key_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "idempotency_key"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "command_receipts_idempotency_key_length": {
+          "name": "command_receipts_idempotency_key_length",
+          "value": "length(trim(\"command_receipts\".\"idempotency_key\")) between 1 and 200"
+        },
+        "command_receipts_request_hash_hex": {
+          "name": "command_receipts_request_hash_hex",
+          "value": "\"command_receipts\".\"request_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "command_receipts_revision_positive": {
+          "name": "command_receipts_revision_positive",
+          "value": "\"command_receipts\".\"result_revision\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dependencies": {
+      "name": "dependencies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "predecessor_activity_id": {
+          "name": "predecessor_activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "successor_activity_id": {
+          "name": "successor_activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "dependency_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'FS'"
+        },
+        "lag_working_days": {
+          "name": "lag_working_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "dependencies_edge_unique": {
+          "name": "dependencies_edge_unique",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "predecessor_activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "successor_activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "dependencies_successor_idx": {
+          "name": "dependencies_successor_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "successor_activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "dependencies_predecessor_fk": {
+          "name": "dependencies_predecessor_fk",
+          "tableFrom": "dependencies",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "predecessor_activity_id"
+          ],
+          "tableTo": "activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "dependencies_successor_fk": {
+          "name": "dependencies_successor_fk",
+          "tableFrom": "dependencies",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "successor_activity_id"
+          ],
+          "tableTo": "activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "dependencies_distinct_activities": {
+          "name": "dependencies_distinct_activities",
+          "value": "\"dependencies\".\"predecessor_activity_id\" <> \"dependencies\".\"successor_activity_id\""
+        },
+        "dependencies_lag_non_negative": {
+          "name": "dependencies_lag_non_negative",
+          "value": "\"dependencies\".\"lag_working_days\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.direct_actual_costs": {
+      "name": "direct_actual_costs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "activity_id": {
+          "name": "activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_date": {
+          "name": "cost_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_minor": {
+          "name": "amount_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "direct_actual_costs_activity_date_idx": {
+          "name": "direct_actual_costs_activity_date_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "cost_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "direct_actual_costs_activity_fk": {
+          "name": "direct_actual_costs_activity_fk",
+          "tableFrom": "direct_actual_costs",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "activity_id"
+          ],
+          "tableTo": "activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "direct_actual_costs_amount_non_negative": {
+          "name": "direct_actual_costs_amount_non_negative",
+          "value": "\"direct_actual_costs\".\"amount_minor\" >= 0"
+        },
+        "direct_actual_costs_description_not_blank": {
+          "name": "direct_actual_costs_description_not_blank",
+          "value": "length(trim(\"direct_actual_costs\".\"description\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.progress_measurements": {
+      "name": "progress_measurements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "activity_id": {
+          "name": "activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "measurement_date": {
+          "name": "measurement_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "measurement_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "progress_basis_points": {
+          "name": "progress_basis_points",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "progress_measurements_activity_fk": {
+          "name": "progress_measurements_activity_fk",
+          "tableFrom": "progress_measurements",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "activity_id"
+          ],
+          "tableTo": "activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "progress_measurements_activity_date_unique": {
+          "name": "progress_measurements_activity_date_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "activity_id",
+            "measurement_date"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "progress_measurements_range": {
+          "name": "progress_measurements_range",
+          "value": "\"progress_measurements\".\"progress_basis_points\" between 0 and 10000"
+        },
+        "progress_measurements_zero_hundred_values": {
+          "name": "progress_measurements_zero_hundred_values",
+          "value": "\"progress_measurements\".\"method\" <> 'ZERO_HUNDRED' or \"progress_measurements\".\"progress_basis_points\" in (0, 10000)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.projects": {
+      "name": "projects",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'JPY'"
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Asia/Tokyo'"
+        },
+        "project_start": {
+          "name": "project_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_date": {
+          "name": "status_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "projects_tenant_id_idx": {
+          "name": "projects_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "projects_tenant_id_tenants_id_fk": {
+          "name": "projects_tenant_id_tenants_id_fk",
+          "tableFrom": "projects",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "tableTo": "tenants",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "projects_tenant_id_id_unique": {
+          "name": "projects_tenant_id_id_unique",
+          "columns": [
+            "tenant_id",
+            "id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "projects_name_not_blank": {
+          "name": "projects_name_not_blank",
+          "value": "length(trim(\"projects\".\"name\")) > 0"
+        },
+        "projects_currency_uppercase": {
+          "name": "projects_currency_uppercase",
+          "value": "\"projects\".\"currency\" ~ '^[A-Z]{3}$'"
+        },
+        "projects_revision_non_negative": {
+          "name": "projects_revision_non_negative",
+          "value": "\"projects\".\"revision\" >= 0"
+        },
+        "projects_status_after_start": {
+          "name": "projects_status_after_start",
+          "value": "\"projects\".\"status_date\" >= \"projects\".\"project_start\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenants": {
+      "name": "tenants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.wbs_nodes": {
+      "name": "wbs_nodes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "wbs_nodes_project_code_unique": {
+          "name": "wbs_nodes_project_code_unique",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "wbs_nodes_parent_idx": {
+          "name": "wbs_nodes_parent_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "wbs_nodes_project_fk": {
+          "name": "wbs_nodes_project_fk",
+          "tableFrom": "wbs_nodes",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "wbs_nodes_parent_fk": {
+          "name": "wbs_nodes_parent_fk",
+          "tableFrom": "wbs_nodes",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "parent_id"
+          ],
+          "tableTo": "wbs_nodes",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "wbs_nodes_tenant_project_id_unique": {
+          "name": "wbs_nodes_tenant_project_id_unique",
+          "columns": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "wbs_nodes_code_not_blank": {
+          "name": "wbs_nodes_code_not_blank",
+          "value": "length(trim(\"wbs_nodes\".\"code\")) > 0"
+        },
+        "wbs_nodes_name_not_blank": {
+          "name": "wbs_nodes_name_not_blank",
+          "value": "length(trim(\"wbs_nodes\".\"name\")) > 0"
+        },
+        "wbs_nodes_sort_order_non_negative": {
+          "name": "wbs_nodes_sort_order_non_negative",
+          "value": "\"wbs_nodes\".\"sort_order\" >= 0"
+        },
+        "wbs_nodes_not_own_parent": {
+          "name": "wbs_nodes_not_own_parent",
+          "value": "\"wbs_nodes\".\"parent_id\" is null or \"wbs_nodes\".\"parent_id\" <> \"wbs_nodes\".\"id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.worklogs": {
+      "name": "worklogs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "activity_id": {
+          "name": "activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "work_date": {
+          "name": "work_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actual_minutes": {
+          "name": "actual_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate_minor_per_hour": {
+          "name": "rate_minor_per_hour",
+          "type": "numeric(20, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "person_ref": {
+          "name": "person_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp(6) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "worklogs_activity_date_idx": {
+          "name": "worklogs_activity_date_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "activity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "work_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "worklogs_activity_fk": {
+          "name": "worklogs_activity_fk",
+          "tableFrom": "worklogs",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id",
+            "activity_id"
+          ],
+          "tableTo": "activities",
+          "columnsTo": [
+            "tenant_id",
+            "project_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "worklogs_actual_minutes_positive": {
+          "name": "worklogs_actual_minutes_positive",
+          "value": "\"worklogs\".\"actual_minutes\" > 0"
+        },
+        "worklogs_rate_non_negative": {
+          "name": "worklogs_rate_non_negative",
+          "value": "\"worklogs\".\"rate_minor_per_hour\" >= 0"
+        },
+        "worklogs_person_ref_not_blank": {
+          "name": "worklogs_person_ref_not_blank",
+          "value": "length(trim(\"worklogs\".\"person_ref\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.audit_actor_type": {
+      "name": "audit_actor_type",
+      "schema": "public",
+      "values": [
+        "HUMAN",
+        "AGENT",
+        "SYSTEM"
+      ]
+    },
+    "public.dependency_type": {
+      "name": "dependency_type",
+      "schema": "public",
+      "values": [
+        "FS",
+        "SS",
+        "FF",
+        "SF"
+      ]
+    },
+    "public.measurement_method": {
+      "name": "measurement_method",
+      "schema": "public",
+      "values": [
+        "ZERO_HUNDRED",
+        "PHYSICAL_PERCENT"
+      ]
+    }
+  },
+  "schemas": {},
+  "views": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
