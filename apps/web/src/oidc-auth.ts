@@ -59,9 +59,13 @@ export function createJoseOidcTokenVerifier(
         issuer: config.issuer,
         audience: config.audience,
         algorithms: ["RS256", "PS256", "ES256", "EdDSA"],
-        requiredClaims: ["sub"],
+        requiredClaims: ["sub", "exp"],
       });
-      if (payload.sub === undefined || typeof payload.scope !== "string" && payload.scope !== undefined) {
+      if (
+        typeof payload.sub !== "string" ||
+        payload.sub.length === 0 ||
+        (typeof payload.scope !== "string" && payload.scope !== undefined)
+      ) {
         throw new Error("OIDC access token claims are invalid");
       }
       const scopes =
