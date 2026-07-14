@@ -22,7 +22,7 @@ const project: ProjectState = {
       budget: 600_000,
       progressPercent: 100,
       actualCost: 580_000,
-      actualHours: 38,
+      actualMinutes: 2_280,
     },
     {
       id: "task-2",
@@ -34,7 +34,7 @@ const project: ProjectState = {
       budget: 900_000,
       progressPercent: 40,
       actualCost: 420_000,
-      actualHours: 52,
+      actualMinutes: 3_120,
     },
   ],
 };
@@ -47,7 +47,7 @@ describe("applyProjectCommand", () => {
       changes: {
         owner: "鈴木",
         progressPercent: 55,
-        actualHours: 61,
+        actualMinutes: 3_660,
       },
     });
 
@@ -59,14 +59,14 @@ describe("applyProjectCommand", () => {
           ...project.tasks[1],
           owner: "鈴木",
           progressPercent: 55,
-          actualHours: 61,
+          actualMinutes: 3_660,
         },
       ],
     });
     expect(project.tasks[1]).toMatchObject({
       owner: "田中",
       progressPercent: 40,
-      actualHours: 52,
+      actualMinutes: 3_120,
     });
   });
 
@@ -81,7 +81,7 @@ describe("applyProjectCommand", () => {
       budget: 1_200_000,
       progressPercent: 0,
       actualCost: 0,
-      actualHours: 0,
+      actualMinutes: 0,
     } as const;
 
     const next = applyProjectCommand(project, {
@@ -101,5 +101,35 @@ describe("applyProjectCommand", () => {
 
     expect(next.tasks).toEqual([project.tasks[0]]);
     expect(project.tasks).toHaveLength(2);
+  });
+
+  it("rejects task updates that violate project invariants", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { progressPercent: 120 },
+      }),
+    ).toThrow("Progress must be between 0 and 100");
+  });
+
+  it("rejects dependencies that create a schedule cycle", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-1",
+        changes: { predecessorId: "task-2" },
+      }),
+    ).toThrow("dependency cycle");
+  });
+
+  it("stores actual effort as whole minutes", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { actualMinutes: 1.5 },
+      }),
+    ).toThrow("whole minutes");
   });
 });

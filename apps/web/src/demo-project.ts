@@ -11,7 +11,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 600_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A2",
@@ -23,7 +23,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 400_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A3",
@@ -35,7 +35,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 900_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A4",
@@ -47,7 +47,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 950_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A5",
@@ -59,7 +59,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 650_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A6",
@@ -71,7 +71,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 350_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A7",
@@ -83,7 +83,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 500_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A8",
@@ -95,7 +95,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 250_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
   {
     id: "A9",
@@ -107,7 +107,7 @@ const baselineTasks: readonly ProjectTask[] = [
     budget: 100_000,
     progressPercent: 0,
     actualCost: 0,
-    actualHours: 0,
+    actualMinutes: 0,
   },
 ];
 
@@ -121,12 +121,12 @@ export const baselineProject: ProjectState = {
 };
 
 const currentOverrides: Readonly<Record<string, Partial<ProjectTask>>> = {
-  A1: { progressPercent: 100, actualCost: 650_000, actualHours: 46 },
-  A2: { progressPercent: 100, actualCost: 450_000, actualHours: 35 },
-  A3: { durationWorkingDays: 7, progressPercent: 65, actualCost: 800_000, actualHours: 68 },
-  A4: { durationWorkingDays: 10, progressPercent: 45, actualCost: 700_000, actualHours: 61 },
-  A5: { durationWorkingDays: 6, progressPercent: 10, actualCost: 100_000, actualHours: 12 },
-  A6: { progressPercent: 20, actualCost: 120_000, actualHours: 16 },
+  A1: { progressPercent: 100, actualCost: 650_000, actualMinutes: 2_760 },
+  A2: { progressPercent: 100, actualCost: 450_000, actualMinutes: 2_100 },
+  A3: { durationWorkingDays: 7, progressPercent: 65, actualCost: 800_000, actualMinutes: 4_080 },
+  A4: { durationWorkingDays: 10, progressPercent: 45, actualCost: 700_000, actualMinutes: 3_660 },
+  A5: { durationWorkingDays: 6, progressPercent: 10, actualCost: 100_000, actualMinutes: 720 },
+  A6: { progressPercent: 20, actualCost: 120_000, actualMinutes: 960 },
 };
 
 export const initialProject: ProjectState = {

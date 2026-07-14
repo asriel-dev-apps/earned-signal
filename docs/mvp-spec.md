@@ -31,7 +31,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - PostgreSQL and Hyperdrive bindings.
 - Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
 - Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.
-- REST command API, MCP server, and application command implementation.
+- REST command API, MCP server, and server-side command transport.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 

@@ -9,6 +9,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@earned-signal/domain": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "6.0.3",
     "vitest": "4.1.10"

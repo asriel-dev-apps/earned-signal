@@ -57,10 +57,11 @@ export function analyzeProject(
         baselineFinish: baselineActivity.earlyFinish,
         physicalPercent: task.progressPercent,
         measurementDate: project.statusDate,
-        worklogs:
+        worklogs: [],
+        actualCosts:
           task.actualCost === 0
             ? []
-            : [{ workDate: project.statusDate, minutes: 1, ratePerMinute: task.actualCost }],
+            : [{ costDate: project.statusDate, amount: task.actualCost }],
       };
     }),
   });

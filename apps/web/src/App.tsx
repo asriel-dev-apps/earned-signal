@@ -16,6 +16,7 @@ import { AgGridProvider, AgGridReact } from "ag-grid-react";
 import { useCallback, useMemo, useState } from "react";
 import {
   applyProjectCommand,
+  type ProjectCommand,
   type ProjectState,
   type ProjectTask,
 } from "@earned-signal/application";
@@ -25,6 +26,7 @@ import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 type ProjectMode = "current" | "baseline";
 
 interface TaskRow extends ProjectTask {
+  readonly actualHours: number;
   readonly earlyStart: string;
   readonly earlyFinish: string;
   readonly totalFloatWorkingDays: number;
@@ -76,6 +78,16 @@ function formatCurrency(value: number | null): string {
 
 function formatRatio(value: number | null): string {
   return value === null ? "—" : value.toFixed(2);
+}
+
+function formatBudgetVariance(value: number | null): string {
+  if (value === null) {
+    return "Forecast unavailable";
+  }
+  if (value === 0) {
+    return "On budget";
+  }
+  return `${formatCurrency(Math.abs(value))} ${value < 0 ? "over" : "under"} budget`;
 }
 
 function formatDate(value: string): string {
@@ -204,7 +216,7 @@ function TaskDetail({
           </div>
           <div>
             <dt>Actual effort</dt>
-            <dd>{task.actualHours.toLocaleString()} h</dd>
+            <dd>{(task.actualMinutes / 60).toLocaleString()} h</dd>
           </div>
           <div>
             <dt>Total float</dt>
@@ -224,25 +236,16 @@ function changesForField(field: string, value: unknown): Partial<Omit<ProjectTas
     return { predecessorId: value === null || value === "" ? null : String(value) };
   }
   const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    throw new Error("Enter a valid number");
-  }
   if (field === "durationWorkingDays") {
-    if (!Number.isInteger(numericValue) || numericValue < 1) {
-      throw new Error("Duration must be a positive whole number");
-    }
     return { durationWorkingDays: numericValue };
   }
   if (field === "progressPercent") {
-    if (numericValue < 0 || numericValue > 100) {
-      throw new Error("Progress must be between 0 and 100");
-    }
     return { progressPercent: numericValue };
   }
-  if (field === "budget" || field === "actualCost" || field === "actualHours") {
-    if (numericValue < 0) {
-      throw new Error("Value must not be negative");
-    }
+  if (field === "actualHours") {
+    return { actualMinutes: Math.round(numericValue * 60) };
+  }
+  if (field === "budget" || field === "actualCost") {
     return { [field]: numericValue };
   }
   return {};
@@ -265,21 +268,24 @@ export function App() {
         if (scheduled === undefined) {
           throw new Error(`Task ${task.id} has no schedule result`);
         }
-        return { ...task, ...scheduled };
+        return { ...task, actualHours: task.actualMinutes / 60, ...scheduled };
       }),
     [analysis, displayedProject.tasks],
   );
 
-  const updateProject = useCallback((candidate: ProjectState) => {
+  const executeCommand = useCallback((command: ProjectCommand): boolean => {
     try {
+      const candidate = applyProjectCommand(currentProject, command);
       analyzeProject(candidate, baselineProject);
       setCurrentProject(candidate);
       setNotice(null);
+      return true;
     } catch (error) {
       setCurrentProject((project) => ({ ...project }));
       setNotice(error instanceof Error ? error.message : "The edit could not be applied");
+      return false;
     }
-  }, []);
+  }, [currentProject]);
 
   const onCellValueChanged = useCallback(
     (event: CellValueChangedEvent<TaskRow>) => {
@@ -288,19 +294,17 @@ export function App() {
       }
       try {
         const changes = changesForField(event.colDef.field, event.newValue);
-        updateProject(
-          applyProjectCommand(currentProject, {
-            type: "task.update",
-            taskId: event.data.id,
-            changes,
-          }),
-        );
+        executeCommand({
+          type: "task.update",
+          taskId: event.data.id,
+          changes,
+        });
       } catch (error) {
         setCurrentProject((project) => ({ ...project }));
         setNotice(error instanceof Error ? error.message : "The edit could not be applied");
       }
     },
-    [currentProject, mode, updateProject],
+    [executeCommand, mode],
   );
 
   const predecessorValues = useMemo(
@@ -369,20 +373,29 @@ export function App() {
         valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0),
         cellClass: "editable-cell numeric-cell",
       },
+      {
+        field: "actualHours",
+        headerName: "Actual hours",
+        width: 104,
+        editable,
+        valueFormatter: ({ value }) => `${String(value)} h`,
+        cellClass: "editable-cell numeric-cell",
+      },
     ],
     [editable, predecessorValues],
   );
 
   const selectedTask = displayedProject.tasks.find((task) => task.id === selectedTaskId) ?? null;
   const selectedRow = rows.find((row) => row.id === selectedTaskId);
-  const forecastDelay = Math.max(
-    0,
-    Math.round(
-      (new Date(`${analysis.projectFinish}T00:00:00Z`).getTime() -
-        new Date(`${analysis.baselineFinish}T00:00:00Z`).getTime()) /
-        86_400_000,
-    ),
+  const forecastDifference = Math.round(
+    (new Date(`${analysis.projectFinish}T00:00:00Z`).getTime() -
+      new Date(`${analysis.baselineFinish}T00:00:00Z`).getTime()) /
+      86_400_000,
   );
+  const forecastDetail =
+    forecastDifference === 0
+      ? "On baseline"
+      : `${Math.abs(forecastDifference)} calendar days ${forecastDifference > 0 ? "after" : "ahead of"} baseline`;
 
   const addTask = () => {
     const nextNumber =
@@ -397,20 +410,20 @@ export function App() {
       budget: 0,
       progressPercent: 0,
       actualCost: 0,
-      actualHours: 0,
+      actualMinutes: 0,
     };
-    updateProject(applyProjectCommand(currentProject, { type: "task.add", task }));
-    setSelectedTaskId(task.id);
+    if (executeCommand({ type: "task.add", task })) {
+      setSelectedTaskId(task.id);
+    }
   };
 
   const deleteTask = () => {
     if (selectedTaskId === null) {
       return;
     }
-    updateProject(
-      applyProjectCommand(currentProject, { type: "task.delete", taskId: selectedTaskId }),
-    );
-    setSelectedTaskId(null);
+    if (executeCommand({ type: "task.delete", taskId: selectedTaskId })) {
+      setSelectedTaskId(null);
+    }
   };
 
   return (
@@ -448,7 +461,7 @@ export function App() {
               <span>STATUS DATE</span>
               <strong>{formatDate(displayedProject.statusDate)}, 2026</strong>
             </div>
-            <div className="saved-state"><span /> All changes applied</div>
+            <div className="saved-state"><span /> Demo session · not persisted</div>
             <button className="avatar-button" aria-label="Account">TM</button>
           </header>
 
@@ -486,8 +499,8 @@ export function App() {
               <MetricCard
                 label="FORECAST FINISH"
                 value={formatDate(analysis.projectFinish)}
-                detail={forecastDelay === 0 ? "On baseline" : `${forecastDelay} calendar days after baseline`}
-                tone={forecastDelay === 0 ? "good" : "risk"}
+                detail={forecastDetail}
+                tone={forecastDifference <= 0 ? "good" : "risk"}
               />
               <MetricCard
                 label="SCHEDULE INDEX"
@@ -504,7 +517,7 @@ export function App() {
               <MetricCard
                 label="ESTIMATE AT COMPLETION"
                 value={formatCurrency(analysis.evm.eac)}
-                detail={`${formatCurrency(Math.abs(analysis.evm.vac ?? 0))} over budget`}
+                detail={formatBudgetVariance(analysis.evm.vac)}
                 tone={(analysis.evm.vac ?? 0) < 0 ? "risk" : "good"}
               />
             </section>

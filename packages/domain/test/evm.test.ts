@@ -111,4 +111,28 @@ describe("calculateEvm", () => {
       }),
     ).toThrow();
   });
+
+  it("includes direct actual costs recorded through the status date", () => {
+    expect(
+      calculateEvm({
+        statusDate: "2026-07-24",
+        workPackages: [
+          {
+            id: "A",
+            measurementMethod: "PHYSICAL_PERCENT",
+            baselineBudget: 100,
+            baselineStart: "2026-07-24",
+            baselineFinish: "2026-07-24",
+            physicalPercent: 100,
+            measurementDate: "2026-07-24",
+            worklogs: [],
+            actualCosts: [
+              { costDate: "2026-07-24", amount: 80 },
+              { costDate: "2026-07-25", amount: 20 },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({ ac: 80, cv: 20, cpi: 1.25 });
+  });
 });

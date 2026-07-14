@@ -4,6 +4,11 @@ export interface WorklogCost {
   readonly ratePerMinute: number;
 }
 
+export interface DirectActualCost {
+  readonly costDate: string;
+  readonly amount: number;
+}
+
 interface WorkPackageBase {
   readonly id: string;
   readonly baselineBudget: number;
@@ -11,6 +16,7 @@ interface WorkPackageBase {
   readonly baselineFinish: string;
   readonly measurementDate: string;
   readonly worklogs: readonly WorklogCost[];
+  readonly actualCosts?: readonly DirectActualCost[];
 }
 
 export interface ZeroHundredWorkPackage extends WorkPackageBase {
@@ -125,6 +131,12 @@ function validateWorkPackage(workPackage: EvmWorkPackage): void {
       throw new Error(`Work package ${workPackage.id} has an invalid actual cost input`);
     }
   }
+  for (const actualCost of workPackage.actualCosts ?? []) {
+    asUtcDate(actualCost.costDate);
+    if (!Number.isFinite(actualCost.amount) || actualCost.amount < 0) {
+      throw new Error(`Work package ${workPackage.id} has an invalid direct actual cost`);
+    }
+  }
   asUtcDate(workPackage.measurementDate);
 }
 
@@ -160,6 +172,9 @@ export function calculateEvm(input: EvmInput): EvmResult {
         (total, worklog) => total + worklog.minutes * worklog.ratePerMinute,
         0,
       );
+    ac += (workPackage.actualCosts ?? [])
+      .filter((actualCost) => actualCost.costDate <= input.statusDate)
+      .reduce((total, actualCost) => total + actualCost.amount, 0);
   }
 
   const rawSpi = ratio(ev, pv);

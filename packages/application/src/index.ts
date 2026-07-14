@@ -8,7 +8,7 @@ export interface ProjectTask {
   readonly budget: number;
   readonly progressPercent: number;
   readonly actualCost: number;
-  readonly actualHours: number;
+  readonly actualMinutes: number;
 }
 
 export interface ProjectState {
@@ -41,25 +41,77 @@ export type ProjectCommand =
   | AddTaskCommand
   | DeleteTaskCommand;
 
+function validateFiniteNonNegative(value: number, message: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(message);
+  }
+}
+
+function validateProject(project: ProjectState): void {
+  const ids = new Set<string>();
+  for (const task of project.tasks) {
+    if (task.id.length === 0 || ids.has(task.id)) {
+      throw new Error(`Task ID must be unique: ${task.id}`);
+    }
+    ids.add(task.id);
+    if (!Number.isInteger(task.durationWorkingDays) || task.durationWorkingDays < 1) {
+      throw new Error("Duration must be a positive whole number");
+    }
+    validateFiniteNonNegative(task.budget, "Budget must not be negative");
+    validateFiniteNonNegative(task.actualCost, "Actual cost must not be negative");
+    validateFiniteNonNegative(task.actualMinutes, "Actual effort must not be negative");
+    if (!Number.isInteger(task.actualMinutes)) {
+      throw new Error("Actual effort must be stored as whole minutes");
+    }
+    if (
+      !Number.isFinite(task.progressPercent) ||
+      task.progressPercent < 0 ||
+      task.progressPercent > 100
+    ) {
+      throw new Error("Progress must be between 0 and 100");
+    }
+  }
+
+  calculateSchedule({
+    projectStart: project.projectStart,
+    activities: project.tasks.map((task) => ({
+      id: task.id,
+      durationWorkingDays: task.durationWorkingDays,
+      dependencies:
+        task.predecessorId === null
+          ? []
+          : [{ predecessorId: task.predecessorId, lagWorkingDays: 0 }],
+    })),
+  });
+}
+
 export function applyProjectCommand(
   state: ProjectState,
   command: ProjectCommand,
 ): ProjectState {
+  let next: ProjectState;
   if (command.type === "task.add") {
-    return { ...state, tasks: [...state.tasks, command.task] };
-  }
-
-  if (command.type === "task.delete") {
-    return {
+    next = { ...state, tasks: [...state.tasks, command.task] };
+  } else if (command.type === "task.delete") {
+    if (!state.tasks.some((task) => task.id === command.taskId)) {
+      throw new Error(`Unknown task: ${command.taskId}`);
+    }
+    next = {
       ...state,
       tasks: state.tasks.filter((task) => task.id !== command.taskId),
     };
+  } else {
+    if (!state.tasks.some((task) => task.id === command.taskId)) {
+      throw new Error(`Unknown task: ${command.taskId}`);
+    }
+    next = {
+      ...state,
+      tasks: state.tasks.map((task) =>
+        task.id === command.taskId ? { ...task, ...command.changes } : task,
+      ),
+    };
   }
-
-  return {
-    ...state,
-    tasks: state.tasks.map((task) =>
-      task.id === command.taskId ? { ...task, ...command.changes } : task,
-    ),
-  };
+  validateProject(next);
+  return next;
 }
+import { calculateSchedule } from "@earned-signal/domain";
