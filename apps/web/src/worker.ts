@@ -9,6 +9,7 @@ import {
 } from "@earned-signal/persistence";
 import { Client } from "pg";
 import { createApiApp, type ProjectCommandSession } from "./api.js";
+import { createProjectMcpHandler } from "./mcp.js";
 import {
   createJoseOidcTokenVerifier,
   createOidcBearerAuthenticator,
@@ -43,4 +44,19 @@ const app = createApiApp({
   openCommandSession: openHyperdriveCommandSession,
 });
 
-export default app;
+const mcp = createProjectMcpHandler({
+  authenticate: (request, environment) =>
+    authenticator.authenticate(request, {
+      issuer: environment.OIDC_ISSUER,
+      audience: environment.MCP_RESOURCE_URL,
+      jwksUrl: environment.OIDC_JWKS_URL,
+    }),
+  openCommandSession: openHyperdriveCommandSession,
+});
+
+export default {
+  async fetch(request, environment, context) {
+    const mcpResponse = await mcp(request, environment, context);
+    return mcpResponse ?? app.fetch(request, environment, context);
+  },
+} satisfies ExportedHandler<Env>;

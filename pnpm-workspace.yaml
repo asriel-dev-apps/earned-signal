@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
+  core-js-pure: false
   cpu-features: false
   esbuild: true
   protobufjs: false
@@ -13,3 +14,6 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - hono@4.12.30
   - '@hono/zod-openapi@1.5.0'
+  - '@cloudflare/codemode@0.4.3'
+  - agents@0.17.4
+  - '@cloudflare/workers-types@5.20260714.1'

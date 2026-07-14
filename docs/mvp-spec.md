@@ -29,6 +29,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
 - An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
 - Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.
+- A stateless Streamable HTTP MCP endpoint with OAuth protected-resource metadata, a resource-specific token audience, focused task tools, and the same authorization, validation, idempotency, transaction, and audit boundary as REST.
 - Node.js 24 LTS and pnpm for development and CI.
 
 ## Explicitly out of scope
@@ -37,8 +38,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - Production PostgreSQL provisioning and Hyperdrive bindings.
 - Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
 - Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.
-- MCP server and remote agent command transport.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 
-Production Worker persistence will connect to PostgreSQL through Hyperdrive. Future remote MCP support will use a stateless `createMcpHandler` under `agents/mcp`.
+Production deployments connect the Worker to PostgreSQL through Hyperdrive. The deployed identity provider remains responsible for OAuth authorization-server metadata, client registration policy, and issuing tokens whose audience is the canonical MCP resource URL.

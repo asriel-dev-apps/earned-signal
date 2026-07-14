@@ -12,6 +12,9 @@ import {
   ProjectRepository,
 } from "@earned-signal/persistence";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { type ChildProcess, spawn } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
@@ -32,6 +35,8 @@ describe("project command REST API", () => {
   let oidcIssuer: string;
   let humanAccessToken: string;
   let agentAccessToken: string;
+  let humanMcpAccessToken: string;
+  let agentMcpAccessToken: string;
   const humanPrincipalId = "90000000-0000-4000-8000-000000000001";
   const agentPrincipalId = "90000000-0000-4000-8000-000000000002";
 
@@ -116,23 +121,30 @@ describe("project command REST API", () => {
       throw new Error("Could not start the OIDC JWKS integration server");
     }
     oidcIssuer = `http://127.0.0.1:${jwksAddress.port}/`;
-    const signAccessToken = (subject: string, scope?: string) => {
+    const signAccessToken = (subject: string, audience: string, scope?: string) => {
       const token = new SignJWT(scope === undefined ? {} : { scope })
         .setProtectedHeader({ alg: "RS256", kid: "integration-key", typ: "JWT" })
         .setIssuer(oidcIssuer)
-        .setAudience("earned-signal-api")
+        .setAudience(audience)
         .setSubject(subject)
         .setIssuedAt()
         .setExpirationTime("1h");
       return token.sign(privateKey);
     };
-    humanAccessToken = await signAccessToken("human-editor");
+    humanAccessToken = await signAccessToken("human-editor", "earned-signal-api");
     agentAccessToken = await signAccessToken(
       "progress-agent",
+      "earned-signal-api",
       "project:progress:write project:actuals:write",
     );
     const port = await reservePort();
     workerOrigin = `http://127.0.0.1:${port}`;
+    humanMcpAccessToken = await signAccessToken("human-editor", `${workerOrigin}/mcp`);
+    agentMcpAccessToken = await signAccessToken(
+      "progress-agent",
+      `${workerOrigin}/mcp`,
+      "project:progress:write project:actuals:write",
+    );
     workerProcess = spawn(
       "wrangler",
       [
@@ -152,6 +164,8 @@ describe("project command REST API", () => {
         "OIDC_AUDIENCE:earned-signal-api",
         "--var",
         `OIDC_JWKS_URL:${oidcIssuer}jwks`,
+        "--var",
+        `MCP_RESOURCE_URL:${workerOrigin}/mcp`,
       ],
       {
         cwd: new URL("..", import.meta.url),
@@ -494,6 +508,350 @@ describe("project command REST API", () => {
     await expect(response.json()).resolves.toEqual({
       error: { code: "AUTHENTICATION_REQUIRED", message: "Authentication is required" },
     });
+  });
+
+  it("advertises OAuth protected-resource metadata for unauthenticated MCP clients", async () => {
+    const resource = `${workerOrigin}/mcp`;
+    const metadataUrl = `${workerOrigin}/.well-known/oauth-protected-resource/mcp`;
+    const response = await fetch(resource, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "earned-signal-test", version: "1.0.0" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${metadataUrl}"`,
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    const metadata = await fetch(metadataUrl);
+    expect(metadata.status).toBe(200);
+    await expect(metadata.json()).resolves.toEqual({
+      resource,
+      authorization_servers: [oidcIssuer],
+      scopes_supported: ["project:progress:write", "project:actuals:write"],
+      bearer_methods_supported: ["header"],
+      resource_name: "EarnedSignal project commands",
+    });
+  });
+
+  it("rejects a valid API token whose audience is not the MCP resource", async () => {
+    const response = await fetch(`${workerOrigin}/mcp`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${humanAccessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "earned-signal-test", version: "1.0.0" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain(
+      "/.well-known/oauth-protected-resource/mcp",
+    );
+  });
+
+  it("rejects a cross-origin MCP request before protocol handling", async () => {
+    const response = await fetch(`${workerOrigin}/mcp`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${humanMcpAccessToken}`,
+        "content-type": "application/json",
+        origin: "https://attacker.example.test",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "earned-signal-test", version: "1.0.0" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects an MCP request body larger than 64 KiB", async () => {
+    const response = await fetch(`${workerOrigin}/mcp`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${humanMcpAccessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ padding: "x".repeat(70 * 1024) }),
+    });
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("initializes an authenticated MCP client and lists focused project tools", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${humanMcpAccessToken}` } },
+    });
+
+    try {
+      // SDK 1.29's concrete class exposes `sessionId: string | undefined`, while its
+      // Transport interface declares the same runtime contract as an optional property.
+      await mcp.connect(transport as Transport);
+      const tools = await mcp.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toEqual([
+        "update_project_task",
+        "add_project_task",
+        "delete_project_task",
+      ]);
+      expect(tools.tools.map((tool) => tool.annotations)).toEqual([
+        {
+          title: "Update project task",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Add project task",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Delete project task",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      ]);
+    } finally {
+      await mcp.close();
+    }
+  });
+
+  it("executes and idempotently replays an audited agent progress tool through workerd", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${agentMcpAccessToken}` } },
+    });
+    const task = demoProjectRecord.activities[2]!;
+    const request = {
+      name: "update_project_task",
+      arguments: {
+        tenantId: demoProjectRecord.tenant.id,
+        projectId: demoProjectRecord.project.id,
+        expectedRevision: "1",
+        idempotencyKey: "mcp-agent-progress-A3",
+        taskId: task.id,
+        changes: { progressBasisPoints: 7_500, actualMinutes: 4_200 },
+      },
+    };
+
+    try {
+      await mcp.connect(transport as Transport);
+      const result = await mcp.callTool(request);
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({
+        projectId: demoProjectRecord.project.id,
+        revision: "2",
+        replayed: false,
+      });
+
+      const replay = await mcp.callTool(request);
+      expect(replay.structuredContent).toEqual({
+        projectId: demoProjectRecord.project.id,
+        revision: "2",
+        replayed: true,
+      });
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.project.revision).toBe(2n);
+    expect(stored?.auditEvents.at(-1)).toMatchObject({
+      actorType: "AGENT",
+      actorId: agentPrincipalId,
+      commandType: "task.update",
+      projectRevision: 2n,
+    });
+  });
+
+  it("adds and deletes a task through authenticated human MCP tools", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${humanMcpAccessToken}` } },
+    });
+    const taskId = "30000000-0000-4000-8000-000000000099";
+    const commandContext = {
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+    };
+
+    try {
+      await mcp.connect(transport as Transport);
+      const added = await mcp.callTool({
+        name: "add_project_task",
+        arguments: {
+          ...commandContext,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-human-add-task",
+          task: {
+            id: taskId,
+            wbs: "1.10",
+            name: "Publish readiness review",
+            owner: "Delivery lead",
+            durationWorkingDays: 2,
+            measurementMethod: "ZERO_HUNDRED",
+            predecessorId: null,
+            budgetMinor: "80000",
+            progressBasisPoints: 0,
+            actualCostMinor: "0",
+            actualMinutes: 0,
+          },
+        },
+      });
+      expect(added.structuredContent).toMatchObject({ revision: "2", replayed: false });
+
+      const deleted = await mcp.callTool({
+        name: "delete_project_task",
+        arguments: {
+          ...commandContext,
+          expectedRevision: "2",
+          idempotencyKey: "mcp-human-delete-task",
+          taskId,
+        },
+      });
+      expect(deleted.structuredContent).toMatchObject({ revision: "3", replayed: false });
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.activities.some((activity) => activity.id === taskId)).toBe(false);
+    expect(stored?.auditEvents.slice(-2).map((event) => event.commandType)).toEqual([
+      "task.add",
+      "task.delete",
+    ]);
+  });
+
+  it("returns an approval error instead of applying an agent plan tool", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${agentMcpAccessToken}` } },
+    });
+
+    try {
+      await mcp.connect(transport as Transport);
+      const result = await mcp.callTool({
+        name: "update_project_task",
+        arguments: {
+          tenantId: demoProjectRecord.tenant.id,
+          projectId: demoProjectRecord.project.id,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-agent-plan-A3",
+          taskId: demoProjectRecord.activities[2]!.id,
+          changes: { durationWorkingDays: 10 },
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "AGENT_APPROVAL_REQUIRED",
+              message: "Agent plan changes require human approval",
+            },
+          }),
+        },
+      ]);
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.project.revision).toBe(1n);
+    expect(stored?.auditEvents).toHaveLength(1);
+  });
+
+  it("rejects an authenticated cross-tenant MCP tool without mutation", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${humanMcpAccessToken}` } },
+    });
+
+    try {
+      await mcp.connect(transport as Transport);
+      const result = await mcp.callTool({
+        name: "delete_project_task",
+        arguments: {
+          tenantId: "00000000-0000-4000-8000-000000000099",
+          projectId: demoProjectRecord.project.id,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-cross-tenant",
+          taskId: demoProjectRecord.activities[8]!.id,
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "PROJECT_ACCESS_DENIED",
+              message: "Project command is not permitted",
+            },
+          }),
+        },
+      ]);
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(stored?.project.revision).toBe(1n);
+    expect(stored?.auditEvents).toHaveLength(1);
   });
 
   it("rejects an authenticated cross-tenant project path before mutation", async () => {

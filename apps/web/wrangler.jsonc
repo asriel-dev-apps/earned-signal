@@ -11,7 +11,8 @@
   "vars": {
     "OIDC_ISSUER": "https://identity.example.invalid/",
     "OIDC_AUDIENCE": "earned-signal-api",
-    "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json"
+    "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json",
+    "MCP_RESOURCE_URL": "https://earned-signal.example.invalid/mcp"
   },
   "hyperdrive": [
     {

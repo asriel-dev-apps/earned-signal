@@ -15,8 +15,10 @@
     "@earned-signal/domain": "workspace:*",
     "@earned-signal/persistence": "workspace:*",
     "@hono/zod-openapi": "1.5.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "ag-grid-community": "36.0.0",
     "ag-grid-react": "36.0.0",
+    "agents": "0.17.4",
     "hono": "4.12.30",
     "jose": "6.2.3",
     "pg": "8.22.0",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.44.0",
+    "@cloudflare/workers-types": "5.20260714.1",
     "@testcontainers/postgresql": "12.0.4",
     "@types/node": "24.1.0",
     "@types/pg": "8.20.0",
