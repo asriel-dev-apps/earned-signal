@@ -13,15 +13,15 @@ function entityId(prefix: number, sequence: number): string {
 }
 
 const taskDefinitions = [
-  ["1.1", "Confirm launch requirements", "Maya Chen", 5, 5, 600_000n, null, "2026-07-13", "2026-07-17", 10_000, 2_760, 650_000n],
-  ["1.2", "Approve experience flows", "Leo Martin", 4, 4, 400_000n, 1, "2026-07-20", "2026-07-23", 10_000, 2_100, 450_000n],
-  ["2.1", "Build account API", "Noah Williams", 7, 6, 900_000n, 1, "2026-07-20", "2026-07-27", 6_500, 4_080, 800_000n],
-  ["2.2", "Build customer workspace", "Leo Martin", 10, 8, 950_000n, 2, "2026-07-24", "2026-08-04", 4_500, 3_660, 700_000n],
-  ["2.3", "Integrate UI and API", "Noah Williams", 6, 5, 650_000n, 4, "2026-08-05", "2026-08-11", 1_000, 720, 100_000n],
-  ["2.4", "Prepare customer data", "Maya Chen", 4, 4, 350_000n, 3, "2026-07-28", "2026-07-31", 2_000, 960, 120_000n],
-  ["3.1", "Run acceptance testing", "Maya Chen", 5, 5, 500_000n, 5, "2026-08-12", "2026-08-18", 0, 0, 0n],
-  ["3.2", "Train support team", "Leo Martin", 3, 3, 250_000n, 6, "2026-08-03", "2026-08-05", 0, 0, 0n],
-  ["3.3", "Launch customer portal", "Noah Williams", 1, 1, 100_000n, 7, "2026-08-19", "2026-08-19", 0, 0, 0n],
+  { code: "1.1", name: "Confirm launch requirements", owner: "Maya Chen", currentDuration: 5, baselineDuration: 5, budgetMinor: 600_000n, predecessor: null, baselineStart: "2026-07-13", baselineFinish: "2026-07-17", progressBasisPoints: 10_000, actualMinutes: 2_760, actualCostMinor: 650_000n },
+  { code: "1.2", name: "Approve experience flows", owner: "Leo Martin", currentDuration: 4, baselineDuration: 4, budgetMinor: 400_000n, predecessor: 1, baselineStart: "2026-07-20", baselineFinish: "2026-07-23", progressBasisPoints: 10_000, actualMinutes: 2_100, actualCostMinor: 450_000n },
+  { code: "2.1", name: "Build account API", owner: "Noah Williams", currentDuration: 7, baselineDuration: 6, budgetMinor: 900_000n, predecessor: 1, baselineStart: "2026-07-20", baselineFinish: "2026-07-27", progressBasisPoints: 6_500, actualMinutes: 4_080, actualCostMinor: 800_000n },
+  { code: "2.2", name: "Build customer workspace", owner: "Leo Martin", currentDuration: 10, baselineDuration: 8, budgetMinor: 950_000n, predecessor: 2, baselineStart: "2026-07-24", baselineFinish: "2026-08-04", progressBasisPoints: 4_500, actualMinutes: 3_660, actualCostMinor: 700_000n },
+  { code: "2.3", name: "Integrate UI and API", owner: "Noah Williams", currentDuration: 6, baselineDuration: 5, budgetMinor: 650_000n, predecessor: 4, baselineStart: "2026-08-05", baselineFinish: "2026-08-11", progressBasisPoints: 1_000, actualMinutes: 720, actualCostMinor: 100_000n },
+  { code: "2.4", name: "Prepare customer data", owner: "Maya Chen", currentDuration: 4, baselineDuration: 4, budgetMinor: 350_000n, predecessor: 3, baselineStart: "2026-07-28", baselineFinish: "2026-07-31", progressBasisPoints: 2_000, actualMinutes: 960, actualCostMinor: 120_000n },
+  { code: "3.1", name: "Run acceptance testing", owner: "Maya Chen", currentDuration: 5, baselineDuration: 5, budgetMinor: 500_000n, predecessor: 5, baselineStart: "2026-08-12", baselineFinish: "2026-08-18", progressBasisPoints: 0, actualMinutes: 0, actualCostMinor: 0n },
+  { code: "3.2", name: "Train support team", owner: "Leo Martin", currentDuration: 3, baselineDuration: 3, budgetMinor: 250_000n, predecessor: 6, baselineStart: "2026-08-03", baselineFinish: "2026-08-05", progressBasisPoints: 0, actualMinutes: 0, actualCostMinor: 0n },
+  { code: "3.3", name: "Launch customer portal", owner: "Noah Williams", currentDuration: 1, baselineDuration: 1, budgetMinor: 100_000n, predecessor: 7, baselineStart: "2026-08-19", baselineFinish: "2026-08-19", progressBasisPoints: 0, actualMinutes: 0, actualCostMinor: 0n },
 ] as const;
 
 const summaryDefinitions = [
@@ -44,7 +44,7 @@ const wbsNodes: readonly WbsNodeRecord[] = [
     name,
     sortOrder: index,
   })),
-  ...taskDefinitions.map(([code, name], index) => ({
+  ...taskDefinitions.map(({ code, name }, index) => ({
     id: entityId(2, index + 101),
     tenantId,
     projectId,
@@ -56,7 +56,7 @@ const wbsNodes: readonly WbsNodeRecord[] = [
 ].sort((left, right) => left.code.localeCompare(right.code));
 
 const activities: readonly ActivityRecord[] = taskDefinitions.map(
-  ([, name, owner, currentDuration, , budgetMinor], index) => ({
+  ({ name, owner, currentDuration, budgetMinor }, index) => ({
     id: entityId(3, index + 1),
     tenantId,
     projectId,
@@ -80,11 +80,11 @@ export const demoProjectRecord: PersistedProjectRecord = {
     timezone: "Asia/Tokyo",
     projectStart: "2026-07-13",
     statusDate: "2026-08-07",
-    revision: 0n,
+    revision: 1n,
   },
   wbsNodes,
   activities,
-  dependencies: taskDefinitions.flatMap(([, , , , , , predecessor], index) =>
+  dependencies: taskDefinitions.flatMap(({ predecessor }, index) =>
     predecessor === null
       ? []
       : [{
@@ -97,17 +97,17 @@ export const demoProjectRecord: PersistedProjectRecord = {
           lagWorkingDays: 0,
         }],
   ),
-  progressMeasurements: taskDefinitions.map(([, , , , , , , , , progress], index) => ({
+  progressMeasurements: taskDefinitions.map(({ progressBasisPoints }, index) => ({
     id: entityId(6, index + 1),
     tenantId,
     projectId,
     activityId: entityId(3, index + 1),
     measurementDate: "2026-08-07",
     method: "PHYSICAL_PERCENT",
-    progressBasisPoints: progress,
+    progressBasisPoints,
   })),
-  worklogs: taskDefinitions.flatMap(([, , owner, , , , , , , , minutes], index) =>
-    minutes === 0
+  worklogs: taskDefinitions.flatMap(({ owner, actualMinutes }, index) =>
+    actualMinutes === 0
       ? []
       : [{
           id: entityId(7, index + 1),
@@ -115,13 +115,13 @@ export const demoProjectRecord: PersistedProjectRecord = {
           projectId,
           activityId: entityId(3, index + 1),
           workDate: "2026-08-07",
-          actualMinutes: minutes,
+          actualMinutes,
           rateMinorPerHour: "0.000000",
           personRef: owner,
         }],
   ),
-  directActualCosts: taskDefinitions.flatMap(([, name, , , , , , , , , , amount], index) =>
-    amount === 0n
+  directActualCosts: taskDefinitions.flatMap(({ name, actualCostMinor }, index) =>
+    actualCostMinor === 0n
       ? []
       : [{
           id: entityId(8, index + 1),
@@ -129,10 +129,24 @@ export const demoProjectRecord: PersistedProjectRecord = {
           projectId,
           activityId: entityId(3, index + 1),
           costDate: "2026-08-07",
-          amountMinor: amount,
+          amountMinor: actualCostMinor,
           description: `${name} actual cost`,
         }],
   ),
+  auditEvents: [
+    {
+      sequence: 1n,
+      id: entityId(12, 1),
+      tenantId,
+      projectId,
+      projectRevision: 1n,
+      actorType: "HUMAN",
+      actorId: "demo-planner",
+      commandType: "baseline.approve",
+      payload: { baselineVersionId },
+      occurredAt: "2026-07-13T00:00:00.000Z",
+    },
+  ],
   baseline: {
     version: {
       id: baselineVersionId,
@@ -155,7 +169,7 @@ export const demoProjectRecord: PersistedProjectRecord = {
       sortOrder: node.sortOrder,
     })),
     activities: taskDefinitions.map(
-      ([code, name, , , baselineDuration, budgetMinor, , start, finish], index) => ({
+      ({ code, name, baselineDuration, budgetMinor, baselineStart, baselineFinish }, index) => ({
         id: entityId(10, index + 1),
         tenantId,
         projectId,
@@ -165,13 +179,13 @@ export const demoProjectRecord: PersistedProjectRecord = {
         wbsCode: code,
         name,
         durationWorkingDays: baselineDuration,
-        baselineStart: start,
-        baselineFinish: finish,
+        baselineStart,
+        baselineFinish,
         budgetMinor,
         measurementMethod: "PHYSICAL_PERCENT",
       }),
     ),
-    dependencies: taskDefinitions.flatMap(([, , , , , , predecessor], index) =>
+    dependencies: taskDefinitions.flatMap(({ predecessor }, index) =>
       predecessor === null
         ? []
         : [{

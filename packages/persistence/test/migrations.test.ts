@@ -178,10 +178,18 @@ describe("persistence migrations", () => {
 
     await client.query(
       `insert into audit_events
-         (tenant_id, project_id, project_revision, actor_type, actor_id, command_type, payload)
-       values ($1, $2, 1, 'HUMAN', 'planner@example.test', 'baseline.approve', '{}')`,
+         (tenant_id, project_id, project_revision, actor_type, actor_id, command_type, payload, occurred_at)
+       values ($1, $2, 1, 'HUMAN', 'planner@example.test', 'baseline.approve', '{}',
+               '2026-07-13 09:00:00+09')`,
       [tenantId, projectId],
     );
+    await client.query("set timezone = 'America/New_York'");
+    const auditInstant = await client.query<{ utc_instant: string }>(
+      `select to_char(occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as utc_instant
+       from audit_events where project_id = $1`,
+      [projectId],
+    );
+    expect(auditInstant.rows[0]?.utc_instant).toBe("2026-07-13T00:00:00.000Z");
     await expect(
       client.query(
         "update audit_events set payload = '{\"changed\":true}' where project_id = $1",

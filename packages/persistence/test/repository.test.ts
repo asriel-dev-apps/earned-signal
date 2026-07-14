@@ -50,6 +50,7 @@ describe("ProjectRepository", () => {
     });
     expect(loaded?.worklogs[0]?.actualMinutes).toBe(2_760);
     expect(loaded?.directActualCosts[0]?.amountMinor).toBe(650_000n);
+    expect(loaded?.auditEvents).toEqual(demoProjectRecord.auditEvents);
 
     await expect(
       repository.load("00000000-0000-4000-8000-ffffffffffff", demoProjectRecord.project.id),

@@ -81,6 +81,19 @@ export interface DirectActualCostRecord {
   readonly description: string;
 }
 
+export interface AuditEventRecord {
+  readonly sequence: bigint;
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly projectRevision: bigint;
+  readonly actorType: "HUMAN" | "AGENT" | "SYSTEM";
+  readonly actorId: string;
+  readonly commandType: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly occurredAt: string;
+}
+
 export interface BaselineVersionRecord {
   readonly id: string;
   readonly tenantId: string;
@@ -140,5 +153,6 @@ export interface PersistedProjectRecord {
   readonly progressMeasurements: readonly ProgressMeasurementRecord[];
   readonly worklogs: readonly WorklogRecord[];
   readonly directActualCosts: readonly DirectActualCostRecord[];
+  readonly auditEvents: readonly AuditEventRecord[];
   readonly baseline: BaselineRecord | null;
 }

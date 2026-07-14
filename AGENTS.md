@@ -20,4 +20,4 @@ Use the standard five-role triage vocabulary. See `docs/agents/triage-labels.md`
 
 ### Domain docs
 
-This repository uses a multi-context layout for Web, Application, and Domain code. See `docs/agents/domain.md` and `CONTEXT-MAP.md`.
+This repository uses a multi-context layout for Web, Application, Domain, and Persistence code. See `docs/agents/domain.md` and `CONTEXT-MAP.md`.

@@ -3,6 +3,7 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PersistedProjectRecord } from "./project-record.js";
 import {
   activities,
+  auditEvents,
   baselineActivities,
   baselineDependencies,
   baselineVersions,
@@ -78,13 +79,22 @@ export class ProjectRepository {
         await transaction
           .update(baselineVersions)
           .set({ approvedAt, approvedBy })
-          .where(eq(baselineVersions.id, record.baseline.version.id));
+          .where(
+            and(
+              eq(baselineVersions.tenantId, record.project.tenantId),
+              eq(baselineVersions.projectId, record.project.id),
+              eq(baselineVersions.id, record.baseline.version.id),
+            ),
+          );
+      }
+      if (record.auditEvents.length > 0) {
+        await transaction.insert(auditEvents).values([...record.auditEvents]);
       }
     });
   }
 
   async load(tenantId: string, projectId: string): Promise<PersistedProjectRecord | null> {
-    const [heading] = await this.database
+    const [projectHeader] = await this.database
       .select({
         tenantId: tenants.id,
         tenantName: tenants.name,
@@ -101,7 +111,7 @@ export class ProjectRepository {
       .where(and(eq(projects.tenantId, tenantId), eq(projects.id, projectId)))
       .limit(1);
 
-    if (heading === undefined) {
+    if (projectHeader === undefined) {
       return null;
     }
 
@@ -145,6 +155,11 @@ export class ProjectRepository {
         ),
       )
       .orderBy(asc(directActualCosts.activityId), asc(directActualCosts.costDate));
+    const auditRows = await this.database
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.tenantId, tenantId), eq(auditEvents.projectId, projectId)))
+      .orderBy(asc(auditEvents.sequence));
     const [baselineVersion] = await this.database
       .select()
       .from(baselineVersions)
@@ -164,16 +179,16 @@ export class ProjectRepository {
         : await this.loadBaseline(tenantId, projectId, baselineVersion);
 
     return {
-      tenant: { id: heading.tenantId, name: heading.tenantName },
+      tenant: { id: projectHeader.tenantId, name: projectHeader.tenantName },
       project: {
-        id: heading.projectId,
-        tenantId: heading.tenantId,
-        name: heading.name,
-        currency: heading.currency,
-        timezone: heading.timezone,
-        projectStart: heading.projectStart,
-        statusDate: heading.statusDate,
-        revision: heading.revision,
+        id: projectHeader.projectId,
+        tenantId: projectHeader.tenantId,
+        name: projectHeader.name,
+        currency: projectHeader.currency,
+        timezone: projectHeader.timezone,
+        projectStart: projectHeader.projectStart,
+        statusDate: projectHeader.statusDate,
+        revision: projectHeader.revision,
       },
       wbsNodes: wbsRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
@@ -189,6 +204,11 @@ export class ProjectRepository {
       directActualCosts: directCostRows.map((row) =>
         withoutGeneratedFields(row, ["recordedAt"]),
       ),
+      auditEvents: auditRows.map((row) => ({
+        ...row,
+        payload: row.payload as Readonly<Record<string, unknown>>,
+        occurredAt: new Date(row.occurredAt).toISOString(),
+      })),
       baseline,
     };
   }
