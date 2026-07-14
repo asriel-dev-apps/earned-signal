@@ -23,16 +23,18 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A React shell and Hono `/api/health` route built together by the Cloudflare Vite plugin.
 - An editable AG Grid Community workspace for leaf work packages, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
 - Add and delete commands plus typed cell updates through the shared application command boundary.
+- A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
+- A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - Node.js 24 LTS and pnpm for development and CI.
 
 ## Explicitly out of scope
 
-- Database persistence, authentication, tenants, billing, and audit storage.
-- PostgreSQL and Hyperdrive bindings.
+- Authentication, authorization, billing, and production audit command wiring.
+- Production PostgreSQL provisioning and Hyperdrive bindings.
 - Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
 - Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.
 - REST command API, MCP server, and server-side command transport.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 
-Future persistence will use PostgreSQL through Hyperdrive. Future remote MCP support will use a stateless `createMcpHandler` under `agents/mcp`.
+Production Worker persistence will connect to PostgreSQL through Hyperdrive. Future remote MCP support will use a stateless `createMcpHandler` under `agents/mcp`.
