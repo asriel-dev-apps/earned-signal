@@ -205,7 +205,7 @@ export class ProjectRepository {
         withoutGeneratedFields(row, ["recordedAt"]),
       ),
       auditEvents: auditRows.map((row) => ({
-        ...row,
+        ...withoutGeneratedFields(row, ["sequence"]),
         payload: row.payload as Readonly<Record<string, unknown>>,
         occurredAt: new Date(row.occurredAt).toISOString(),
       })),

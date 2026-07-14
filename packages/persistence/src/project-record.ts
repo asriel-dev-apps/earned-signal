@@ -82,7 +82,6 @@ export interface DirectActualCostRecord {
 }
 
 export interface AuditEventRecord {
-  readonly sequence: bigint;
   readonly id: string;
   readonly tenantId: string;
   readonly projectId: string;

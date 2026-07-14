@@ -135,7 +135,6 @@ export const demoProjectRecord: PersistedProjectRecord = {
   ),
   auditEvents: [
     {
-      sequence: 1n,
       id: entityId(12, 1),
       tenantId,
       projectId,

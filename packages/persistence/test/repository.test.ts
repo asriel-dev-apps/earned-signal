@@ -52,6 +52,15 @@ describe("ProjectRepository", () => {
     expect(loaded?.directActualCosts[0]?.amountMinor).toBe(650_000n);
     expect(loaded?.auditEvents).toEqual(demoProjectRecord.auditEvents);
 
+    const nextAudit = await client.query<{ sequence: string }>(
+      `insert into audit_events
+         (tenant_id, project_id, project_revision, actor_type, actor_id, command_type, payload)
+       values ($1, $2, 2, 'AGENT', 'test-agent', 'progress.record', '{}')
+       returning sequence`,
+      [demoProjectRecord.project.tenantId, demoProjectRecord.project.id],
+    );
+    expect(nextAudit.rows[0]?.sequence).toBe("2");
+
     await expect(
       repository.load("00000000-0000-4000-8000-ffffffffffff", demoProjectRecord.project.id),
     ).resolves.toBeNull();
