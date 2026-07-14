@@ -9,6 +9,7 @@ import {
   type ProjectCommandService,
   type ProjectTask,
 } from "@earned-signal/application";
+import { MAX_ACTIVITY_DURATION_WORKING_DAYS } from "@earned-signal/domain";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 
@@ -33,13 +34,16 @@ const UuidSchema = z.string().uuid();
 const RevisionSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
 const MinorUnitSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
 const ProgressBasisPointsSchema = z.number().int().min(0).max(10_000);
+const MeasurementMethodSchema = z.enum(["ZERO_HUNDRED", "PHYSICAL_PERCENT"]);
+const DurationSchema = z.number().int().min(1).max(MAX_ACTIVITY_DURATION_WORKING_DAYS);
 
 const TaskChangesSchema = z
   .object({
     wbs: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1).optional(),
     owner: z.string().optional(),
-    durationWorkingDays: z.number().int().positive().optional(),
+    durationWorkingDays: DurationSchema.optional(),
+    measurementMethod: MeasurementMethodSchema.optional(),
     predecessorId: UuidSchema.nullable().optional(),
     budgetMinor: MinorUnitSchema.optional(),
     progressBasisPoints: ProgressBasisPointsSchema.optional(),
@@ -53,7 +57,8 @@ const TaskSchema = z.object({
   wbs: z.string().trim().min(1),
   name: z.string().trim().min(1),
   owner: z.string(),
-  durationWorkingDays: z.number().int().positive(),
+  durationWorkingDays: DurationSchema,
+  measurementMethod: MeasurementMethodSchema,
   predecessorId: UuidSchema.nullable(),
   budgetMinor: MinorUnitSchema,
   progressBasisPoints: ProgressBasisPointsSchema,
@@ -167,6 +172,7 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
     name: task.name,
     owner: task.owner,
     durationWorkingDays: task.durationWorkingDays,
+    measurementMethod: task.measurementMethod,
     predecessorId: task.predecessorId,
     budget: asSafeMinorUnits(task.budgetMinor, "budgetMinor"),
     progressPercent: task.progressBasisPoints / 100,
@@ -190,6 +196,9 @@ function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCommand {
     ...(command.changes.durationWorkingDays === undefined
       ? {}
       : { durationWorkingDays: command.changes.durationWorkingDays }),
+    ...(command.changes.measurementMethod === undefined
+      ? {}
+      : { measurementMethod: command.changes.measurementMethod }),
     ...(command.changes.predecessorId === undefined
       ? {}
       : { predecessorId: command.changes.predecessorId }),

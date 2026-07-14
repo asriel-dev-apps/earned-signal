@@ -20,6 +20,7 @@ const initialProject: ProjectState = {
       name: "Build API",
       owner: "Maya Chen",
       durationWorkingDays: 5,
+      measurementMethod: "PHYSICAL_PERCENT",
       predecessorId: null,
       budget: 600_000,
       progressPercent: 20,

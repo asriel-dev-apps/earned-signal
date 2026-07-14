@@ -406,6 +406,7 @@ export function App() {
       name: "New work package",
       owner: "",
       durationWorkingDays: 1,
+      measurementMethod: "PHYSICAL_PERCENT",
       predecessorId: null,
       budget: 0,
       progressPercent: 0,

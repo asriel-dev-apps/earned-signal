@@ -89,6 +89,47 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     });
   });
 
+  it("preserves a task's 0/100 measurement method during an unrelated command", async () => {
+    const zeroHundredTask = demoProjectRecord.activities[8]!;
+    await client.query(
+      "update activities set measurement_method = 'ZERO_HUNDRED' where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, zeroHundredTask.id],
+    );
+    await client.query(
+      "update progress_measurements set method = 'ZERO_HUNDRED' where tenant_id = $1 and project_id = $2 and activity_id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, zeroHundredTask.id],
+    );
+    const service = createProjectCommandService(
+      new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
+    );
+
+    await service.execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 1n,
+      idempotencyKey: "preserve-zero-hundred",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: {
+        type: "task.update",
+        taskId: demoProjectRecord.activities[0]!.id,
+        changes: { owner: "New owner" },
+      },
+    });
+
+    const reloaded = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(
+      reloaded?.activities.find((activity) => activity.id === zeroHundredTask.id),
+    ).toMatchObject({ measurementMethod: "ZERO_HUNDRED" });
+    expect(
+      reloaded?.progressMeasurements.find(
+        (measurement) => measurement.activityId === zeroHundredTask.id,
+      ),
+    ).toMatchObject({ method: "ZERO_HUNDRED", progressBasisPoints: 0 });
+  });
+
   it("replays the original result without double-counting actual effort", async () => {
     const service = createProjectCommandService(
       new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
@@ -213,6 +254,7 @@ describe("PostgresProjectCommandUnitOfWork", () => {
           name: "Post-launch review",
           owner: "Maya Chen",
           durationWorkingDays: 2,
+          measurementMethod: "PHYSICAL_PERCENT",
           predecessorId,
           budget: 200_000,
           progressPercent: 0,
@@ -293,6 +335,34 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     expect(reloaded?.activities.some((activity) => activity.id === taskId)).toBe(true);
     expect(reloaded?.project.revision).toBe(2n);
     expect(reloaded?.auditEvents).toHaveLength(2);
+  });
+
+  it("rejects an actual-effort delta outside the PostgreSQL integer range", async () => {
+    const service = createProjectCommandService(
+      new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
+    );
+
+    await expect(
+      service.execute({
+        tenantId: demoProjectRecord.tenant.id,
+        projectId: demoProjectRecord.project.id,
+        expectedRevision: 1n,
+        idempotencyKey: "oversized-worklog-delta",
+        actor: { type: "HUMAN", id: "user-001" },
+        command: {
+          type: "task.update",
+          taskId: demoProjectRecord.activities[8]!.id,
+          changes: { actualMinutes: 2_147_483_648 },
+        },
+      }),
+    ).rejects.toThrow("Actual effort change must not exceed 2147483647 minutes");
+
+    const reloaded = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(reloaded?.project.revision).toBe(1n);
+    expect(reloaded?.auditEvents).toHaveLength(1);
   });
 
   it("serializes concurrent retries so only one command mutates the project", async () => {

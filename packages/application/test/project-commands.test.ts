@@ -18,6 +18,7 @@ const project: ProjectState = {
       name: "要件定義",
       owner: "佐藤",
       durationWorkingDays: 5,
+      measurementMethod: "ZERO_HUNDRED",
       predecessorId: null,
       budget: 600_000,
       progressPercent: 100,
@@ -30,6 +31,7 @@ const project: ProjectState = {
       name: "設計",
       owner: "田中",
       durationWorkingDays: 8,
+      measurementMethod: "PHYSICAL_PERCENT",
       predecessorId: "task-1",
       budget: 900_000,
       progressPercent: 40,
@@ -77,6 +79,7 @@ describe("applyProjectCommand", () => {
       name: "実装",
       owner: "高橋",
       durationWorkingDays: 10,
+      measurementMethod: "PHYSICAL_PERCENT",
       predecessorId: "task-2",
       budget: 1_200_000,
       progressPercent: 0,
@@ -111,6 +114,26 @@ describe("applyProjectCommand", () => {
         changes: { progressPercent: 120 },
       }),
     ).toThrow("Progress must be between 0 and 100");
+  });
+
+  it("rejects intermediate progress for the 0/100 measurement method", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-1",
+        changes: { progressPercent: 50 },
+      }),
+    ).toThrow("0/100 progress must be either 0 or 100");
+  });
+
+  it("rejects durations that would exhaust the scheduling loop", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { durationWorkingDays: 10_001 },
+      }),
+    ).toThrow("Duration must be a whole number from 1 to 10000");
   });
 
   it("rejects dependencies that create a schedule cycle", () => {

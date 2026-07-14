@@ -49,13 +49,22 @@ export function analyzeProject(
       if (baselineActivity === undefined) {
         throw new Error(`Task ${task.id} was not scheduled`);
       }
+      const measurement =
+        task.measurementMethod === "ZERO_HUNDRED"
+          ? {
+              measurementMethod: task.measurementMethod,
+              completed: task.progressPercent === 100,
+            }
+          : {
+              measurementMethod: task.measurementMethod,
+              physicalPercent: task.progressPercent,
+            };
       return {
         id: task.id,
-        measurementMethod: "PHYSICAL_PERCENT" as const,
         baselineBudget: baselineTask?.budget ?? 0,
         baselineStart: baselineActivity.earlyStart,
         baselineFinish: baselineActivity.earlyFinish,
-        physicalPercent: task.progressPercent,
+        ...measurement,
         measurementDate: project.statusDate,
         worklogs: [],
         actualCosts:

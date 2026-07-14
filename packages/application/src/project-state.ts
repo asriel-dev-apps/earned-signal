@@ -1,4 +1,7 @@
-import { calculateSchedule } from "@earned-signal/domain";
+import {
+  calculateSchedule,
+  MAX_ACTIVITY_DURATION_WORKING_DAYS,
+} from "@earned-signal/domain";
 
 export interface ProjectTask {
   readonly id: string;
@@ -6,6 +9,7 @@ export interface ProjectTask {
   readonly name: string;
   readonly owner: string;
   readonly durationWorkingDays: number;
+  readonly measurementMethod: "ZERO_HUNDRED" | "PHYSICAL_PERCENT";
   readonly predecessorId: string | null;
   readonly budget: number;
   readonly progressPercent: number;
@@ -63,8 +67,14 @@ function validateProject(project: ProjectState): void {
       throw new Error(`Task ID must be unique: ${task.id}`);
     }
     ids.add(task.id);
-    if (!Number.isInteger(task.durationWorkingDays) || task.durationWorkingDays < 1) {
-      throw new Error("Duration must be a positive whole number");
+    if (
+      !Number.isInteger(task.durationWorkingDays) ||
+      task.durationWorkingDays < 1 ||
+      task.durationWorkingDays > MAX_ACTIVITY_DURATION_WORKING_DAYS
+    ) {
+      throw new Error(
+        `Duration must be a whole number from 1 to ${MAX_ACTIVITY_DURATION_WORKING_DAYS}`,
+      );
     }
     validateSafeMinorUnits(task.budget, "Budget");
     validateSafeMinorUnits(task.actualCost, "Actual cost");
@@ -78,6 +88,13 @@ function validateProject(project: ProjectState): void {
       task.progressPercent > 100
     ) {
       throw new Error("Progress must be between 0 and 100");
+    }
+    if (
+      task.measurementMethod === "ZERO_HUNDRED" &&
+      task.progressPercent !== 0 &&
+      task.progressPercent !== 100
+    ) {
+      throw new Error("0/100 progress must be either 0 or 100");
     }
   }
 

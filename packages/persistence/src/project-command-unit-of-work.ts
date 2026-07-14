@@ -72,6 +72,8 @@ function asSafeNumber(value: bigint, label: string): number {
   return result;
 }
 
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
 export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWork {
   constructor(private readonly database: NodePgDatabase<typeof schema>) {}
 
@@ -159,6 +161,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           owner: activities.owner,
           durationWorkingDays: activities.durationWorkingDays,
           budgetMinor: activities.budgetMinor,
+          measurementMethod: activities.measurementMethod,
           sortOrder: activities.sortOrder,
         })
         .from(activities)
@@ -249,6 +252,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           name: activity.name,
           owner: activity.owner,
           durationWorkingDays: activity.durationWorkingDays,
+          measurementMethod: activity.measurementMethod,
           predecessorId: predecessorByActivity.get(activity.id) ?? null,
           budget: asSafeNumber(activity.budgetMinor, `Budget for ${activity.id}`),
           progressPercent: progressByActivity.get(activity.id) ?? 0,
@@ -335,7 +339,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             owner: task.owner,
             durationWorkingDays: task.durationWorkingDays,
             budgetMinor: BigInt(task.budget),
-            measurementMethod: "PHYSICAL_PERCENT",
+            measurementMethod: task.measurementMethod,
             sortOrder,
           });
         } else {
@@ -356,6 +360,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
               owner: task.owner,
               durationWorkingDays: task.durationWorkingDays,
               budgetMinor: BigInt(task.budget),
+              measurementMethod: task.measurementMethod,
               sortOrder,
             })
             .where(
@@ -385,7 +390,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             projectId: request.projectId,
             activityId: task.id,
             measurementDate: projectRow.statusDate,
-            method: "PHYSICAL_PERCENT",
+            method: task.measurementMethod,
             progressBasisPoints: Math.round(task.progressPercent * 100),
           })
           .onConflictDoUpdate({
@@ -396,7 +401,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
               progressMeasurements.measurementDate,
             ],
             set: {
-              method: "PHYSICAL_PERCENT",
+              method: task.measurementMethod,
               progressBasisPoints: Math.round(task.progressPercent * 100),
               recordedAt: sql`now()`,
             },
@@ -405,6 +410,11 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         const previous = currentById.get(task.id);
         const previousMinutes = previous?.actualMinutes ?? 0;
         const additionalMinutes = task.actualMinutes - previousMinutes;
+        if (additionalMinutes > POSTGRES_INTEGER_MAX) {
+          throw new ProjectCommandValidationError(
+            `Actual effort change must not exceed ${POSTGRES_INTEGER_MAX} minutes`,
+          );
+        }
         if (additionalMinutes > 0) {
           await transaction.insert(worklogs).values({
             tenantId: request.tenantId,

@@ -29,6 +29,9 @@ export interface ScheduleResult {
   readonly activities: readonly ScheduledActivity[];
 }
 
+// Bounds the iterative working-day calculation and covers more than 38 calendar years.
+export const MAX_ACTIVITY_DURATION_WORKING_DAYS = 10_000;
+
 export class ScheduleCycleError extends Error {
   readonly activityIds: readonly string[];
 
@@ -108,8 +111,14 @@ function earlierDate(left: Date, right: Date): Date {
 }
 
 function validateActivity(activity: ScheduleActivityInput): void {
-  if (!Number.isInteger(activity.durationWorkingDays) || activity.durationWorkingDays < 1) {
-    throw new Error(`Activity ${activity.id} must have a positive whole-day duration`);
+  if (
+    !Number.isInteger(activity.durationWorkingDays) ||
+    activity.durationWorkingDays < 1 ||
+    activity.durationWorkingDays > MAX_ACTIVITY_DURATION_WORKING_DAYS
+  ) {
+    throw new Error(
+      `Activity ${activity.id} duration must be a whole number from 1 to ${MAX_ACTIVITY_DURATION_WORKING_DAYS}`,
+    );
   }
   for (const dependency of activity.dependencies) {
     if (!Number.isInteger(dependency.lagWorkingDays) || dependency.lagWorkingDays < 0) {

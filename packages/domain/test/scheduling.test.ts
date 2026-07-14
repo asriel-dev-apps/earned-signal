@@ -103,4 +103,13 @@ describe("calculateSchedule", () => {
       }),
     ).toThrowError(new ScheduleCycleError(["A", "B"]));
   });
+
+  it("rejects an activity duration above the bounded scheduling range", () => {
+    expect(() =>
+      calculateSchedule({
+        projectStart: "2026-07-13",
+        activities: [{ id: "A", durationWorkingDays: 10_001, dependencies: [] }],
+      }),
+    ).toThrow("Activity A duration must be a whole number from 1 to 10000");
+  });
 });
