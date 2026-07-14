@@ -1,33 +1,31 @@
 import {
   ActualValueDecreaseError,
+  AgentPlanApprovalRequiredError,
   IdempotencyConflictError,
+  ProjectAccessDeniedError,
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
-  type AuditActor,
+  type AuthenticatedIdentity,
   type ProjectCommand,
+  type ProjectCommandAuthorizer,
   type ProjectCommandService,
   type ProjectTask,
 } from "@earned-signal/application";
 import { MAX_ACTIVITY_DURATION_WORKING_DAYS } from "@earned-signal/domain";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
+import { AuthenticationRequiredError } from "./oidc-auth.js";
 
 export interface ProjectCommandSession {
   readonly service: ProjectCommandService;
+  readonly authorizer: ProjectCommandAuthorizer;
   close(): Promise<void>;
 }
 
 export interface ApiDependencies {
-  resolveActor(request: Request): Promise<AuditActor>;
+  authenticate(request: Request, environment: Env): Promise<AuthenticatedIdentity>;
   openCommandSession(environment: Env): Promise<ProjectCommandSession>;
-}
-
-export class AuthenticationRequiredError extends Error {
-  constructor() {
-    super("Authentication is required");
-    this.name = "AuthenticationRequiredError";
-  }
 }
 
 const UuidSchema = z.string().uuid();
@@ -105,6 +103,7 @@ const ErrorResponseSchema = z
 const commandRoute = createRoute({
   method: "post",
   path: "/api/tenants/{tenantId}/projects/{projectId}/commands",
+  security: [{ OidcBearer: [] }],
   request: {
     params: z.object({
       tenantId: UuidSchema.openapi({ param: { name: "tenantId", in: "path" } }),
@@ -131,6 +130,10 @@ const commandRoute = createRoute({
     },
     401: {
       description: "Authentication required",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: "Authenticated principal is not permitted to run the command",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     404: {
@@ -234,6 +237,12 @@ export function createApiApp(dependencies: ApiDependencies) {
       }
     },
   });
+  app.openAPIRegistry.registerComponent("securitySchemes", "OidcBearer", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+    description: "OIDC access token issued for the EarnedSignal API audience",
+  });
 
   app.get("/api/health", (context) =>
     context.json({ service: "earned-signal", status: "ok" }),
@@ -251,20 +260,35 @@ export function createApiApp(dependencies: ApiDependencies) {
     }),
   );
 
+  app.use(
+    "/api/tenants/:tenantId/projects/:projectId/commands",
+    async (context, next) => {
+      context.header("Cache-Control", "no-store");
+      await next();
+    },
+  );
+
   app.openapi(commandRoute, async (context) => {
     const { tenantId, projectId } = context.req.valid("param");
     const headers = context.req.valid("header");
     const body = context.req.valid("json");
-    const actor = await dependencies.resolveActor(context.req.raw);
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
     const session = await dependencies.openCommandSession(context.env);
     try {
+      const command = toCommand(body.command);
+      const actor = await session.authorizer.authorize({
+        identity,
+        tenantId,
+        projectId,
+        command,
+      });
       const result = await session.service.execute({
         tenantId,
         projectId,
         expectedRevision: BigInt(body.expectedRevision),
         idempotencyKey: headers["Idempotency-Key"],
         actor,
-        command: toCommand(body.command),
+        command,
       });
       context.header("ETag", `"${result.revision}"`);
       context.header("Cache-Control", "no-store");
@@ -288,7 +312,20 @@ export function createApiApp(dependencies: ApiDependencies) {
 
   app.onError((error, context) => {
     if (error instanceof AuthenticationRequiredError) {
+      context.header("WWW-Authenticate", "Bearer");
       return context.json({ error: { code: "AUTHENTICATION_REQUIRED", message: error.message } }, 401);
+    }
+    if (error instanceof AgentPlanApprovalRequiredError) {
+      return context.json(
+        { error: { code: "AGENT_APPROVAL_REQUIRED", message: error.message } },
+        403,
+      );
+    }
+    if (error instanceof ProjectAccessDeniedError) {
+      return context.json(
+        { error: { code: "PROJECT_ACCESS_DENIED", message: error.message } },
+        403,
+      );
     }
     if (error instanceof ProjectNotFoundError) {
       return context.json({ error: { code: "PROJECT_NOT_FOUND", message: error.message } }, 404);

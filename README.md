@@ -9,9 +9,10 @@ This repository currently contains an early technical slice:
 - an editable AG Grid Community workspace that immediately recalculates schedule and EVM outputs;
 - a PostgreSQL system of record with immutable Baseline, audit, and idempotency records;
 - an atomic Project Command Service with optimistic concurrency and exact-once retry behavior;
+- OIDC bearer authentication with tenant/project membership, human roles, and agent scopes;
 - a React application and typed Hono/OpenAPI command API built as one Cloudflare Worker with Static Assets.
 
-The command contract is available at `/api/openapi.json`. The deployed command route intentionally returns 401 until the tenant-aware authentication adapter is installed; tests inject a trusted actor explicitly. The committed Hyperdrive ID is a non-deployable placeholder that will be replaced by environment-specific infrastructure configuration.
+The command contract is available at `/api/openapi.json`. Commands require a signed OIDC JWT for the configured issuer and audience. PostgreSQL maps its issuer/subject to an internal principal and explicit tenant/project membership; token tenant claims are not authorization. The committed OIDC URLs and Hyperdrive ID are non-deployable placeholders that must be replaced by environment-specific infrastructure configuration.
 
 See [docs/mvp-spec.md](docs/mvp-spec.md) for the bounded MVP specification.
 

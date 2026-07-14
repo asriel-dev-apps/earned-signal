@@ -36,12 +36,56 @@ describe("persistence migrations", () => {
       "command_receipts",
       "dependencies",
       "direct_actual_costs",
+      "principals",
       "progress_measurements",
+      "project_memberships",
       "projects",
+      "tenant_memberships",
       "tenants",
       "wbs_nodes",
       "worklogs",
     ]);
+  });
+
+  it("enforces principal scope and tenant/project membership boundaries", async () => {
+    const tenantA = "00000000-0000-4000-8000-000000000021";
+    const tenantB = "00000000-0000-4000-8000-000000000022";
+    const projectB = "10000000-0000-4000-8000-000000000022";
+    const principalId = "90000000-0000-4000-8000-000000000021";
+    await client.query(
+      "insert into tenants (id, name) values ($1, 'Access tenant A'), ($2, 'Access tenant B')",
+      [tenantA, tenantB],
+    );
+    await client.query(
+      `insert into projects (id, tenant_id, name, project_start, status_date)
+       values ($1, $2, 'Access project B', '2026-01-01', '2026-01-01')`,
+      [projectB, tenantB],
+    );
+
+    await expect(
+      client.query(
+        `insert into principals (issuer, subject, type, display_name, allowed_scopes)
+         values ('https://identity.example.test/', 'human-with-agent-scope', 'HUMAN',
+                 'Invalid human', array['project:progress:write'])`,
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+
+    await client.query(
+      `insert into principals (id, issuer, subject, type, display_name)
+       values ($1, 'https://identity.example.test/', 'bounded-human', 'HUMAN', 'Bounded human')`,
+      [principalId],
+    );
+    await client.query(
+      "insert into tenant_memberships (tenant_id, principal_id, role) values ($1, $2, 'MEMBER')",
+      [tenantA, principalId],
+    );
+    await expect(
+      client.query(
+        `insert into project_memberships (tenant_id, project_id, principal_id, role)
+         values ($1, $2, $3, 'EDITOR')`,
+        [tenantB, projectB, principalId],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
   });
 
   it("rejects tenant/project boundary violations and invalid effort", async () => {

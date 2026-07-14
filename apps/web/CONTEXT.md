@@ -6,4 +6,6 @@ Current UI data is an explicit non-persistent demo. Do not label local state as 
 
 Cloudflare Workers with Static Assets is the production target. Hono owns HTTP routing. The production runtime is workerd; Node.js is the development and CI toolchain.
 
-The typed REST command route is documented at `/api/openapi.json`. It resolves its AuditActor before opening PostgreSQL, then calls the shared Application Project Command Service. Until the tenant-aware authentication adapter is implemented, the deployed Worker rejects every command with 401; tests inject a trusted actor adapter explicitly. Command bodies are limited to 64 KiB and mutation responses are not cacheable.
+The typed REST command route is documented at `/api/openapi.json`. The Worker verifies an asymmetric OIDC bearer JWT against the configured issuer, audience, expiry, subject, and remote JWKS before opening PostgreSQL. PostgreSQL then resolves explicit tenant/project access and a stable internal AuditActor before the route calls the shared Application Project Command Service. Authentication failures return 401 with a Bearer challenge; authorization failures return 403. Command bodies are limited to 64 KiB and mutation responses are not cacheable.
+
+OIDC issuer, audience, and JWKS URL are non-secret Worker vars. Committed values are non-deployable placeholders; each deployed environment must supply its own external identity-provider configuration.

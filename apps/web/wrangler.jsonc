@@ -8,6 +8,11 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "vars": {
+    "OIDC_ISSUER": "https://identity.example.invalid/",
+    "OIDC_AUDIENCE": "earned-signal-api",
+    "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json"
+  },
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

@@ -27,11 +27,13 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
+- An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
+- Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.
 - Node.js 24 LTS and pnpm for development and CI.
 
 ## Explicitly out of scope
 
-- Authentication, authorization, billing, and production audit command wiring.
+- Billing, self-service signup/invitation UI, and production identity-provider tenant/client provisioning.
 - Production PostgreSQL provisioning and Hyperdrive bindings.
 - Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
 - Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.

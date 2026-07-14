@@ -23,5 +23,5 @@ The request fingerprint includes the actor, command, and expected revision. Reus
 - Web, REST, and MCP share one validation and transaction boundary.
 - A successful response proves the mutation, revision, audit event, and receipt committed together.
 - PostgreSQL is the source of truth; in-memory UI state remains a temporary adapter until wired to the API.
-- Production command routes remain closed until the authentication adapter supplies a trusted actor.
+- Production command routes require the OIDC and database authorization flow in [ADR 0002](0002-oidc-project-authorization.md) to supply a trusted actor.
 - Worker integration tests must exercise the actual workerd and Hyperdrive binding path, not only Hono's in-process request helper.

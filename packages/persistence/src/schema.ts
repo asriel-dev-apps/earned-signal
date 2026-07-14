@@ -12,6 +12,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -27,15 +28,64 @@ export const measurementMethod = pgEnum("measurement_method", [
 export const dependencyType = pgEnum("dependency_type", ["FS", "SS", "FF", "SF"]);
 
 export const auditActorType = pgEnum("audit_actor_type", ["HUMAN", "AGENT", "SYSTEM"]);
+export const principalType = pgEnum("principal_type", ["HUMAN", "AGENT"]);
+export const tenantRole = pgEnum("tenant_role", ["OWNER", "ADMIN", "MEMBER"]);
+export const projectRole = pgEnum("project_role", ["OWNER", "EDITOR", "VIEWER"]);
 
 const auditTimestamp = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "string", precision: 6 });
+
+export const principals = pgTable(
+  "principals",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    issuer: text().notNull(),
+    subject: text().notNull(),
+    type: principalType().notNull(),
+    displayName: text("display_name").notNull(),
+    allowedScopes: text("allowed_scopes").array().notNull().default(sql`array[]::text[]`),
+    disabledAt: auditTimestamp("disabled_at"),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("principals_issuer_subject_unique").on(table.issuer, table.subject),
+    check("principals_issuer_not_blank", sql`length(trim(${table.issuer})) > 0`),
+    check("principals_subject_not_blank", sql`length(trim(${table.subject})) > 0`),
+    check("principals_display_name_not_blank", sql`length(trim(${table.displayName})) > 0`),
+    check(
+      "principals_allowed_scopes_known",
+      sql`${table.allowedScopes} <@ array['project:progress:write', 'project:actuals:write']::text[]`,
+    ),
+    check(
+      "principals_human_scopes_empty",
+      sql`${table.type} <> 'HUMAN' or cardinality(${table.allowedScopes}) = 0`,
+    ),
+  ],
+);
 
 export const tenants = pgTable("tenants", {
   id: uuid().primaryKey().defaultRandom(),
   name: text().notNull(),
   createdAt: auditTimestamp("created_at").notNull().defaultNow(),
 });
+
+export const tenantMemberships = pgTable(
+  "tenant_memberships",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    principalId: uuid("principal_id")
+      .notNull()
+      .references(() => principals.id, { onDelete: "cascade" }),
+    role: tenantRole().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.principalId] }),
+    index("tenant_memberships_principal_idx").on(table.principalId),
+  ],
+);
 
 export const projects = pgTable(
   "projects",
@@ -60,6 +110,31 @@ export const projects = pgTable(
     check("projects_currency_uppercase", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("projects_revision_non_negative", sql`${table.revision} >= 0`),
     check("projects_status_after_start", sql`${table.statusDate} >= ${table.projectStart}`),
+  ],
+);
+
+export const projectMemberships = pgTable(
+  "project_memberships",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    principalId: uuid("principal_id").notNull(),
+    role: projectRole().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.principalId] }),
+    index("project_memberships_principal_idx").on(table.principalId),
+    foreignKey({
+      name: "project_memberships_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "project_memberships_tenant_membership_fk",
+      columns: [table.tenantId, table.principalId],
+      foreignColumns: [tenantMemberships.tenantId, tenantMemberships.principalId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -553,8 +628,11 @@ export const commandReceipts = pgTable(
 );
 
 export const schema = {
+  principals,
   tenants,
+  tenantMemberships,
   projects,
+  projectMemberships,
   wbsNodes,
   activities,
   dependencies,
