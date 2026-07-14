@@ -17,6 +17,10 @@ peerDependencyRules:
   ignoreMissing:
     - '@cloudflare/workers-types'
 
+overrides:
+  # drizzle-kit still reaches an obsolete esbuild through its deprecated loader.
+  '@esbuild-kit/core-utils>esbuild': 0.25.12
+
 minimumReleaseAgeExclude:
   - hono@4.12.30
   - '@hono/zod-openapi@1.5.0'
