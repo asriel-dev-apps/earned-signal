@@ -176,6 +176,7 @@ export interface BaselineActivityRecord {
   readonly sourceWbsNodeId: string;
   readonly wbsCode: string;
   readonly name: string;
+  readonly owner: string;
   readonly durationWorkingDays: number;
   readonly calendarId: string;
   readonly constraintType: ActivityRecord["constraintType"];
@@ -196,6 +197,50 @@ export interface BaselineCalendarRecord {
   readonly nonWorkingDates: readonly string[];
 }
 
+export interface BaselineSkillRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceSkillId: string;
+  readonly name: string;
+}
+
+export interface BaselineResourceRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceResourceId: string;
+  readonly name: string;
+  readonly calendarId: string;
+  readonly dailyCapacityMinutes: number;
+  readonly costRateMinorPerHour: bigint;
+}
+
+export interface BaselineResourceSkillRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceResourceId: string;
+  readonly sourceSkillId: string;
+}
+
+export interface BaselineActivitySkillRequirementRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceActivityId: string;
+  readonly sourceSkillId: string;
+}
+
+export interface BaselineAssignmentRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceActivityId: string;
+  readonly sourceResourceId: string;
+  readonly unitsPercent: number;
+}
+
 export interface BaselineDependencyRecord {
   readonly id: string;
   readonly tenantId: string;
@@ -210,8 +255,13 @@ export interface BaselineDependencyRecord {
 export interface BaselineRecord {
   readonly version: BaselineVersionRecord;
   readonly calendars: readonly BaselineCalendarRecord[];
+  readonly skills: readonly BaselineSkillRecord[];
+  readonly resources: readonly BaselineResourceRecord[];
+  readonly resourceSkills: readonly BaselineResourceSkillRecord[];
   readonly wbsNodes: readonly BaselineWbsNodeRecord[];
   readonly activities: readonly BaselineActivityRecord[];
+  readonly activitySkillRequirements: readonly BaselineActivitySkillRequirementRecord[];
+  readonly assignments: readonly BaselineAssignmentRecord[];
   readonly dependencies: readonly BaselineDependencyRecord[];
 }
 

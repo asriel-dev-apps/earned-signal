@@ -276,6 +276,22 @@ export const demoProjectRecord: PersistedProjectRecord = {
       workingWeekdays: [2, 3, 4, 5, 6],
       nonWorkingDates: ["2026-08-11"],
     }],
+    skills: [
+      { sourceSkillId: skillIds.delivery, name: "Delivery management" },
+      { sourceSkillId: skillIds.api, name: "API engineering" },
+      { sourceSkillId: skillIds.ux, name: "Experience design" },
+    ].map((skill) => ({ tenantId, projectId, baselineVersionId, ...skill })),
+    resources: [
+      { sourceResourceId: resourceIds.maya, name: "Maya Chen", calendarId: "standard", dailyCapacityMinutes: 480, costRateMinorPerHour: 6_000n },
+      { sourceResourceId: resourceIds.leo, name: "Leo Martin", calendarId: "support", dailyCapacityMinutes: 420, costRateMinorPerHour: 6_500n },
+      { sourceResourceId: resourceIds.noah, name: "Noah Williams", calendarId: "standard", dailyCapacityMinutes: 480, costRateMinorPerHour: 7_000n },
+    ].map((resource) => ({ tenantId, projectId, baselineVersionId, ...resource })),
+    resourceSkills: [
+      { sourceResourceId: resourceIds.maya, sourceSkillId: skillIds.delivery },
+      { sourceResourceId: resourceIds.leo, sourceSkillId: skillIds.delivery },
+      { sourceResourceId: resourceIds.leo, sourceSkillId: skillIds.ux },
+      { sourceResourceId: resourceIds.noah, sourceSkillId: skillIds.api },
+    ].map((link) => ({ tenantId, projectId, baselineVersionId, ...link })),
     wbsNodes: wbsNodes.map((node, index) => ({
       id: entityId(9, index + 1),
       tenantId,
@@ -297,6 +313,7 @@ export const demoProjectRecord: PersistedProjectRecord = {
         sourceWbsNodeId: entityId(2, index + 101),
         wbsCode: code,
         name,
+        owner: activities[index]!.owner,
         durationWorkingDays: baselineDuration,
         calendarId: "standard",
         constraintType: null,
@@ -307,6 +324,21 @@ export const demoProjectRecord: PersistedProjectRecord = {
         measurementMethod: "PHYSICAL_PERCENT",
       }),
     ),
+    activitySkillRequirements: activities.map((activity, index) => ({
+      tenantId,
+      projectId,
+      baselineVersionId,
+      sourceActivityId: activity.id,
+      sourceSkillId: requiredSkillByTask[index]!,
+    })),
+    assignments: taskDefinitions.map(({ owner }, index) => ({
+      tenantId,
+      projectId,
+      baselineVersionId,
+      sourceActivityId: entityId(3, index + 1),
+      sourceResourceId: resourceIdByOwner[owner]!,
+      unitsPercent: 100,
+    })),
     dependencies: taskDefinitions.flatMap(({ predecessor }, index) =>
       predecessor === null
         ? []

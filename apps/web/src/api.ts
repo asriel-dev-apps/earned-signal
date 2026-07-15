@@ -3,6 +3,7 @@ import {
   type ProjectCommandAuthorizer,
   type ProjectCommandService,
   type ProjectQueryAuthorizer,
+  type ProjectState,
 } from "@earned-signal/application";
 import type { EvmSnapshot } from "@earned-signal/domain";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -23,6 +24,14 @@ export interface ProjectSession {
   readonly performance: {
     calculate(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
     refresh(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
+  };
+  readonly workspace: {
+    load(tenantId: string, projectId: string): Promise<{
+      readonly revision: bigint;
+      readonly current: ProjectState;
+      readonly baseline: ProjectState | null;
+      readonly baselineVersion: { readonly id: string; readonly version: number; readonly label: string; readonly approvedAt: string } | null;
+    } | null>;
   };
   close(): Promise<void>;
 }
@@ -71,6 +80,78 @@ const EvmMetricsSchema = z.object({
   etc: z.number().nullable(),
   vac: z.number().nullable(),
   tcpi: z.number().nullable(),
+});
+
+const ProjectStateResponseSchema = z.object({
+  id: UuidSchema,
+  name: z.string(),
+  projectStart: z.iso.date(),
+  statusDate: z.iso.date(),
+  currency: z.literal("JPY"),
+  defaultCalendarId: z.string(),
+  calendars: z.array(z.object({ id: z.string(), name: z.string(), workingWeekdays: z.array(z.number().int()), nonWorkingDates: z.array(z.iso.date()) })),
+  wbsGroups: z.array(z.object({ id: UuidSchema, parentId: UuidSchema.nullable(), code: z.string(), name: z.string() })),
+  skills: z.array(z.object({ id: UuidSchema, name: z.string() })),
+  resources: z.array(z.object({ id: UuidSchema, name: z.string(), calendarId: z.string(), dailyCapacityMinutes: z.number().int(), costRateMinorPerHour: z.number().int(), skillIds: z.array(UuidSchema) })),
+  assignments: z.array(z.object({ taskId: UuidSchema, resourceId: UuidSchema, unitsPercent: z.number().int() })),
+  tasks: z.array(z.object({
+    id: UuidSchema,
+    wbs: z.string(),
+    wbsParentId: UuidSchema.nullable(),
+    name: z.string(),
+    owner: z.string(),
+    durationWorkingDays: z.number().int(),
+    measurementMethod: z.enum(["ZERO_HUNDRED", "PHYSICAL_PERCENT"]),
+    calendarId: z.string(),
+    dependencies: z.array(z.object({ predecessorId: UuidSchema, type: z.enum(["FS", "SS", "FF", "SF"]), lagWorkingDays: z.number().int() })),
+    constraint: z.object({ type: z.enum(["START_NO_EARLIER_THAN", "FINISH_NO_LATER_THAN", "MUST_START_ON", "MUST_FINISH_ON"]), date: z.iso.date() }).nullable(),
+    requiredSkillIds: z.array(UuidSchema),
+    budget: z.number().int(),
+    progressPercent: z.number(),
+    actualCost: z.number().int(),
+    actualMinutes: z.number().int(),
+  })),
+});
+
+const WorkspaceResponseSchema = z.object({
+  revision: RevisionSchema,
+  current: ProjectStateResponseSchema,
+  baseline: ProjectStateResponseSchema.nullable(),
+  baselineVersion: z.object({ id: UuidSchema, version: z.number().int(), label: z.string(), approvedAt: z.string().datetime() }).nullable(),
+}).openapi("ProjectWorkspaceResponse");
+
+function projectStateResponse(project: ProjectState): z.infer<typeof ProjectStateResponseSchema> {
+  return {
+    ...project,
+    calendars: project.calendars.map((calendar) => ({ ...calendar, workingWeekdays: [...calendar.workingWeekdays], nonWorkingDates: [...calendar.nonWorkingDates] })),
+    wbsGroups: project.wbsGroups.map((group) => ({ ...group })),
+    skills: project.skills.map((skill) => ({ ...skill })),
+    resources: project.resources.map((resource) => ({ ...resource, skillIds: [...resource.skillIds] })),
+    assignments: project.assignments.map((assignment) => ({ ...assignment })),
+    tasks: project.tasks.map((task) => ({
+      ...task,
+      dependencies: task.dependencies.map((dependency) => ({ ...dependency })),
+      constraint: task.constraint === null ? null : { ...task.constraint },
+      requiredSkillIds: [...task.requiredSkillIds],
+    })),
+  };
+}
+
+const workspaceRoute = createRoute({
+  method: "get",
+  path: "/api/tenants/{tenantId}/projects/{projectId}",
+  security: [{ OidcBearer: [] }],
+  request: { params: z.object({
+    tenantId: UuidSchema.openapi({ param: { name: "tenantId", in: "path" } }),
+    projectId: UuidSchema.openapi({ param: { name: "projectId", in: "path" } }),
+  }) },
+  responses: {
+    200: { description: "Persisted Current and approved Baseline workspace", content: { "application/json": { schema: WorkspaceResponseSchema } } },
+    401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } },
+    403: { description: "Authenticated principal cannot read the project", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "Project not found", content: { "application/json": { schema: ErrorResponseSchema } } },
+    500: { description: "Internal server error", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
 });
 
 const PerformanceResponseSchema = z
@@ -262,7 +343,11 @@ export function createApiApp(dependencies: ApiDependencies) {
         actor,
         command,
       });
-      await session.performance.refresh(tenantId, projectId);
+      try {
+        await session.performance.refresh(tenantId, projectId);
+      } catch (error) {
+        console.error("Project command committed, but the derived performance cache could not be refreshed", error);
+      }
       context.header("ETag", `"${result.revision}"`);
       context.header("Cache-Control", "no-store");
       return context.json(
@@ -289,6 +374,27 @@ export function createApiApp(dependencies: ApiDependencies) {
         performanceResponse(await session.performance.calculate(tenantId, projectId)),
         200,
       );
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(workspaceRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const workspace = await session.workspace.load(tenantId, projectId);
+      if (workspace === null) return context.json({ error: { code: "PROJECT_NOT_FOUND", message: "Project was not found" } }, 404);
+      context.header("Cache-Control", "no-store");
+      context.header("ETag", `"${workspace.revision}"`);
+      return context.json({
+        revision: workspace.revision.toString(),
+        current: projectStateResponse(workspace.current),
+        baseline: workspace.baseline === null ? null : projectStateResponse(workspace.baseline),
+        baselineVersion: workspace.baselineVersion === null ? null : { ...workspace.baselineVersion },
+      }, 200);
     } finally {
       await session.close();
     }

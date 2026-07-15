@@ -513,6 +513,89 @@ export const baselineCalendars = pgTable(
   ],
 );
 
+export const baselineSkills = pgTable(
+  "baseline_skills",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceSkillId: uuid("source_skill_id").notNull(),
+    name: text().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceSkillId],
+    }),
+    foreignKey({
+      name: "baseline_skills_version_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId],
+      foreignColumns: [baselineVersions.tenantId, baselineVersions.projectId, baselineVersions.id],
+    }).onDelete("restrict"),
+    check("baseline_skills_name_not_blank", sql`length(trim(${table.name})) > 0`),
+  ],
+);
+
+export const baselineResources = pgTable(
+  "baseline_resources",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceResourceId: uuid("source_resource_id").notNull(),
+    name: text().notNull(),
+    calendarId: text("calendar_id").notNull(),
+    dailyCapacityMinutes: integer("daily_capacity_minutes").notNull(),
+    costRateMinorPerHour: bigint("cost_rate_minor_per_hour", { mode: "bigint" }).notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceResourceId],
+    }),
+    foreignKey({
+      name: "baseline_resources_version_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId],
+      foreignColumns: [baselineVersions.tenantId, baselineVersions.projectId, baselineVersions.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "baseline_resources_calendar_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.calendarId],
+      foreignColumns: [baselineCalendars.tenantId, baselineCalendars.projectId, baselineCalendars.baselineVersionId, baselineCalendars.sourceCalendarId],
+    }).onDelete("restrict"),
+    check("baseline_resources_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check("baseline_resources_daily_capacity_range", sql`${table.dailyCapacityMinutes} between 1 and 1440`),
+    check("baseline_resources_cost_rate_non_negative", sql`${table.costRateMinorPerHour} >= 0`),
+  ],
+);
+
+export const baselineResourceSkills = pgTable(
+  "baseline_resource_skills",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceResourceId: uuid("source_resource_id").notNull(),
+    sourceSkillId: uuid("source_skill_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceResourceId, table.sourceSkillId],
+    }),
+    foreignKey({
+      name: "baseline_resource_skills_resource_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceResourceId],
+      foreignColumns: [baselineResources.tenantId, baselineResources.projectId, baselineResources.baselineVersionId, baselineResources.sourceResourceId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "baseline_resource_skills_skill_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceSkillId],
+      foreignColumns: [baselineSkills.tenantId, baselineSkills.projectId, baselineSkills.baselineVersionId, baselineSkills.sourceSkillId],
+    }).onDelete("restrict"),
+  ],
+);
+
 export const baselineWbsNodes = pgTable(
   "baseline_wbs_nodes",
   {
@@ -579,6 +662,7 @@ export const baselineActivities = pgTable(
     sourceWbsNodeId: uuid("source_wbs_node_id").notNull(),
     wbsCode: text("wbs_code").notNull(),
     name: text().notNull(),
+    owner: text().notNull().default(""),
     durationWorkingDays: integer("duration_working_days").notNull(),
     calendarId: text("calendar_id").notNull().default("standard"),
     constraintType: scheduleConstraintType("constraint_type"),
@@ -647,6 +731,63 @@ export const baselineActivities = pgTable(
       "baseline_activities_constraint_complete",
       sql`(${table.constraintType} is null) = (${table.constraintDate} is null)`,
     ),
+  ],
+);
+
+export const baselineActivitySkillRequirements = pgTable(
+  "baseline_activity_skill_requirements",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceActivityId: uuid("source_activity_id").notNull(),
+    sourceSkillId: uuid("source_skill_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceActivityId, table.sourceSkillId],
+    }),
+    foreignKey({
+      name: "baseline_activity_skill_requirements_activity_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceActivityId],
+      foreignColumns: [baselineActivities.tenantId, baselineActivities.projectId, baselineActivities.baselineVersionId, baselineActivities.sourceActivityId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "baseline_activity_skill_requirements_skill_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceSkillId],
+      foreignColumns: [baselineSkills.tenantId, baselineSkills.projectId, baselineSkills.baselineVersionId, baselineSkills.sourceSkillId],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const baselineAssignments = pgTable(
+  "baseline_assignments",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceActivityId: uuid("source_activity_id").notNull(),
+    sourceResourceId: uuid("source_resource_id").notNull(),
+    unitsPercent: integer("units_percent").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceActivityId, table.sourceResourceId],
+    }),
+    index("baseline_assignments_resource_idx").on(table.tenantId, table.projectId, table.baselineVersionId, table.sourceResourceId),
+    foreignKey({
+      name: "baseline_assignments_activity_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceActivityId],
+      foreignColumns: [baselineActivities.tenantId, baselineActivities.projectId, baselineActivities.baselineVersionId, baselineActivities.sourceActivityId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "baseline_assignments_resource_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId, table.sourceResourceId],
+      foreignColumns: [baselineResources.tenantId, baselineResources.projectId, baselineResources.baselineVersionId, baselineResources.sourceResourceId],
+    }).onDelete("restrict"),
+    check("baseline_assignments_units_range", sql`${table.unitsPercent} between 1 and 100`),
   ],
 );
 

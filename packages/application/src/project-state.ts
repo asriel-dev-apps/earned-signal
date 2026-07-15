@@ -144,6 +144,11 @@ export interface ReplaceTaskAssignmentsCommand {
   readonly assignments: readonly Omit<ProjectAssignment, "taskId">[];
 }
 
+export interface PublishBaselineCommand {
+  readonly type: "baseline.publish";
+  readonly label: string;
+}
+
 export type ProjectCommand =
   | UpdateTaskCommand
   | AddTaskCommand
@@ -151,7 +156,8 @@ export type ProjectCommand =
   | AddResourceCommand
   | UpdateResourceCommand
   | DeleteResourceCommand
-  | ReplaceTaskAssignmentsCommand;
+  | ReplaceTaskAssignmentsCommand
+  | PublishBaselineCommand;
 
 function validateFiniteNonNegative(value: number, message: string): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -276,7 +282,10 @@ export function applyProjectCommand(
   command: ProjectCommand,
 ): ProjectState {
   let next: ProjectState;
-  if (command.type === "resource.add") {
+  if (command.type === "baseline.publish") {
+    if (command.label.trim().length === 0) throw new Error("Baseline label must not be blank");
+    next = state;
+  } else if (command.type === "resource.add") {
     next = { ...state, resources: [...state.resources, command.resource] };
   } else if (command.type === "resource.update") {
     if (Object.keys(command.changes).length === 0) {

@@ -8,6 +8,7 @@ import {
   migratePersistenceDatabase,
   ProjectPerformanceRepository,
   ProjectRepository,
+  ProjectWorkspaceRepository,
 } from "../src/index.js";
 
 describe("ProjectRepository", () => {
@@ -15,6 +16,7 @@ describe("ProjectRepository", () => {
   let client: Client;
   let repository: ProjectRepository;
   let performanceRepository: ProjectPerformanceRepository;
+  let workspaceRepository: ProjectWorkspaceRepository;
   let stopContainer: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -26,6 +28,7 @@ describe("ProjectRepository", () => {
     const database = createPersistenceDatabase(client);
     repository = new ProjectRepository(database);
     performanceRepository = new ProjectPerformanceRepository(database);
+    workspaceRepository = new ProjectWorkspaceRepository(database);
   }, 60_000);
 
   afterAll(async () => {
@@ -148,6 +151,99 @@ describe("ProjectRepository", () => {
         demoProjectRecord.project.id,
       ),
     ).resolves.toEqual(snapshots);
+  });
+
+  it("loads Current, approved Baseline, and revision for the workspace", async () => {
+    const workspace = await workspaceRepository.load(
+      demoProjectRecord.project.tenantId,
+      demoProjectRecord.project.id,
+    );
+    expect(workspace).toMatchObject({
+      revision: 1n,
+      current: { id: demoProjectRecord.project.id, tasks: expect.any(Array) },
+      baseline: { id: demoProjectRecord.project.id, tasks: expect.any(Array) },
+      baselineVersion: { version: 1, label: "Approved launch plan" },
+    });
+    expect(workspace?.current.tasks[2]).toMatchObject({
+      progressPercent: 65,
+      actualMinutes: 4_080,
+      actualCost: 800_000,
+    });
+    expect(workspace?.baseline?.tasks[2]).toMatchObject({
+      durationWorkingDays: 6,
+      requiredSkillIds: [demoProjectRecord.skills[1]!.id],
+      progressPercent: 0,
+      actualMinutes: 0,
+      actualCost: 0,
+    });
+    expect(workspace?.baseline?.resources[2]).toMatchObject({
+      id: demoProjectRecord.resources[2]!.id,
+      name: "Noah Williams",
+      skillIds: [demoProjectRecord.skills[1]!.id],
+      costRateMinorPerHour: 7_000,
+    });
+    expect(workspace?.baseline?.assignments).toContainEqual({
+      taskId: demoProjectRecord.activities[2]!.id,
+      resourceId: demoProjectRecord.resources[2]!.id,
+      unitsPercent: 100,
+    });
+  });
+
+  it("keeps the approved Baseline resource plan frozen when Current changes", async () => {
+    const resource = demoProjectRecord.resources[2]!;
+    const task = demoProjectRecord.activities[2]!;
+    await client.query(
+      "update resources set name = 'Current replacement', cost_rate_minor_per_hour = 9999 where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, resource.id],
+    );
+    await client.query(
+      "update skills set name = 'Current renamed skill' where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, demoProjectRecord.skills[1]!.id],
+    );
+    await client.query(
+      "delete from resource_skills where tenant_id = $1 and project_id = $2 and resource_id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, resource.id],
+    );
+    await client.query(
+      "delete from activity_skill_requirements where tenant_id = $1 and project_id = $2 and activity_id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, task.id],
+    );
+    await client.query(
+      "update activities set owner = 'Current owner' where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, task.id],
+    );
+    await client.query(
+      "delete from assignments where tenant_id = $1 and project_id = $2 and activity_id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, task.id],
+    );
+
+    const workspace = await workspaceRepository.load(
+      demoProjectRecord.project.tenantId,
+      demoProjectRecord.project.id,
+    );
+
+    expect(workspace?.current.resources[2]).toMatchObject({
+      name: "Current replacement",
+      skillIds: [],
+      costRateMinorPerHour: 9_999,
+    });
+    expect(workspace?.current.skills[1]).toMatchObject({ name: "Current renamed skill" });
+    expect(workspace?.current.tasks[2]?.requiredSkillIds).toEqual([]);
+    expect(workspace?.current.tasks[2]?.owner).toBe("Current owner");
+    expect(workspace?.current.assignments).not.toContainEqual(expect.objectContaining({ taskId: task.id }));
+    expect(workspace?.baseline?.resources[2]).toMatchObject({
+      name: "Noah Williams",
+      skillIds: [demoProjectRecord.skills[1]!.id],
+      costRateMinorPerHour: 7_000,
+    });
+    expect(workspace?.baseline?.skills[1]).toMatchObject({ name: "API engineering" });
+    expect(workspace?.baseline?.tasks[2]?.requiredSkillIds).toEqual([demoProjectRecord.skills[1]!.id]);
+    expect(workspace?.baseline?.tasks[2]?.owner).toBe("Noah Williams");
+    expect(workspace?.baseline?.assignments).toContainEqual({
+      taskId: task.id,
+      resourceId: resource.id,
+      unitsPercent: 100,
+    });
   });
 
   it("enforces project and baseline boundaries on stored performance", async () => {

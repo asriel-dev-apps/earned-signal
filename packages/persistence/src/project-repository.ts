@@ -7,8 +7,13 @@ import {
   assignments,
   auditEvents,
   baselineActivities,
+  baselineActivitySkillRequirements,
+  baselineAssignments,
   baselineCalendars,
   baselineDependencies,
+  baselineResources,
+  baselineResourceSkills,
+  baselineSkills,
   baselineVersions,
   baselineWbsNodes,
   dependencies,
@@ -110,6 +115,15 @@ export class ProjectRepository {
             })),
           );
         }
+        if (record.baseline.skills.length > 0) {
+          await transaction.insert(baselineSkills).values([...record.baseline.skills]);
+        }
+        if (record.baseline.resources.length > 0) {
+          await transaction.insert(baselineResources).values([...record.baseline.resources]);
+        }
+        if (record.baseline.resourceSkills.length > 0) {
+          await transaction.insert(baselineResourceSkills).values([...record.baseline.resourceSkills]);
+        }
         if (record.baseline.wbsNodes.length > 0) {
           await transaction.insert(baselineWbsNodes).values([...record.baseline.wbsNodes]);
         }
@@ -117,6 +131,14 @@ export class ProjectRepository {
           await transaction
             .insert(baselineActivities)
             .values([...record.baseline.activities]);
+        }
+        if (record.baseline.activitySkillRequirements.length > 0) {
+          await transaction
+            .insert(baselineActivitySkillRequirements)
+            .values([...record.baseline.activitySkillRequirements]);
+        }
+        if (record.baseline.assignments.length > 0) {
+          await transaction.insert(baselineAssignments).values([...record.baseline.assignments]);
         }
         if (record.baseline.dependencies.length > 0) {
           await transaction
@@ -343,6 +365,39 @@ export class ProjectRepository {
         ),
       )
       .orderBy(asc(baselineWbsNodes.code));
+    const skillRows = await this.database
+      .select()
+      .from(baselineSkills)
+      .where(
+        and(
+          eq(baselineSkills.tenantId, tenantId),
+          eq(baselineSkills.projectId, projectId),
+          eq(baselineSkills.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineSkills.sourceSkillId));
+    const resourceRows = await this.database
+      .select()
+      .from(baselineResources)
+      .where(
+        and(
+          eq(baselineResources.tenantId, tenantId),
+          eq(baselineResources.projectId, projectId),
+          eq(baselineResources.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineResources.sourceResourceId));
+    const resourceSkillRows = await this.database
+      .select()
+      .from(baselineResourceSkills)
+      .where(
+        and(
+          eq(baselineResourceSkills.tenantId, tenantId),
+          eq(baselineResourceSkills.projectId, projectId),
+          eq(baselineResourceSkills.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineResourceSkills.sourceResourceId), asc(baselineResourceSkills.sourceSkillId));
     const activityRows = await this.database
       .select()
       .from(baselineActivities)
@@ -365,6 +420,28 @@ export class ProjectRepository {
         ),
       )
       .orderBy(asc(baselineDependencies.successorSourceActivityId));
+    const activitySkillRows = await this.database
+      .select()
+      .from(baselineActivitySkillRequirements)
+      .where(
+        and(
+          eq(baselineActivitySkillRequirements.tenantId, tenantId),
+          eq(baselineActivitySkillRequirements.projectId, projectId),
+          eq(baselineActivitySkillRequirements.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineActivitySkillRequirements.sourceActivityId), asc(baselineActivitySkillRequirements.sourceSkillId));
+    const assignmentRows = await this.database
+      .select()
+      .from(baselineAssignments)
+      .where(
+        and(
+          eq(baselineAssignments.tenantId, tenantId),
+          eq(baselineAssignments.projectId, projectId),
+          eq(baselineAssignments.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineAssignments.sourceActivityId), asc(baselineAssignments.sourceResourceId));
     const { approvedAt, approvedBy } = versionRow;
     if (approvedAt === null || approvedBy === null) {
       throw new Error(`Baseline ${versionRow.id} is not approved`);
@@ -377,8 +454,13 @@ export class ProjectRepository {
         approvedBy,
       },
       calendars: calendarRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
+      skills: skillRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
+      resources: resourceRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
+      resourceSkills: resourceSkillRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       wbsNodes: wbsRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       activities: activityRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
+      activitySkillRequirements: activitySkillRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
+      assignments: assignmentRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       dependencies: dependencyRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
     };
   }

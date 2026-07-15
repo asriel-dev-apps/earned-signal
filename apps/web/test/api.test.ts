@@ -12,6 +12,7 @@ import {
   ProjectAccessRepository,
   ProjectPerformanceRepository,
   ProjectRepository,
+  ProjectWorkspaceRepository,
 } from "@earned-signal/persistence";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
@@ -22,7 +23,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { createServer } from "node:net";
 import { Client } from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApiApp } from "../src/api.js";
 
 describe("project command REST API", () => {
@@ -31,6 +32,7 @@ describe("project command REST API", () => {
   let accessRepository: ProjectAccessRepository;
   let repository: ProjectRepository;
   let performanceRepository: ProjectPerformanceRepository;
+  let workspaceRepository: ProjectWorkspaceRepository;
   let stopContainer: (() => Promise<void>) | undefined;
   let workerProcess: ChildProcess | undefined;
   let workerOrigin: string;
@@ -99,6 +101,7 @@ describe("project command REST API", () => {
     const database = createPersistenceDatabase(client);
     repository = new ProjectRepository(database);
     performanceRepository = new ProjectPerformanceRepository(database);
+    workspaceRepository = new ProjectWorkspaceRepository(database);
     accessRepository = new ProjectAccessRepository(database);
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,
@@ -242,12 +245,15 @@ describe("project command REST API", () => {
     await stopContainer?.();
   });
 
-  function createTestApp(grant: ProjectAccessGrant | null = {
-    principalId: "user-001",
-    principalType: "HUMAN",
-    projectRole: "EDITOR",
-    allowedScopes: [],
-  }) {
+  function createTestApp(
+    grant: ProjectAccessGrant | null = {
+      principalId: "user-001",
+      principalType: "HUMAN",
+      projectRole: "EDITOR",
+      allowedScopes: [],
+    },
+    performance: Pick<ProjectPerformanceRepository, "calculate" | "refresh"> = performanceRepository,
+  ) {
     return createApiApp({
       authenticate: async () => ({
         issuer: "https://identity.example.test/",
@@ -260,7 +266,8 @@ describe("project command REST API", () => {
         ),
         authorizer: createProjectCommandAuthorizer({ resolve: async () => grant }),
         queryAuthorizer: createProjectQueryAuthorizer({ resolve: async () => grant }),
-        performance: performanceRepository,
+        performance,
+        workspace: workspaceRepository,
         close: async () => undefined,
       }),
     });
@@ -314,7 +321,82 @@ describe("project command REST API", () => {
     expect(specification.paths).toHaveProperty(
       "/api/tenants/{tenantId}/projects/{projectId}/performance",
     );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}",
+    );
     expect(specification.components?.securitySchemes).toHaveProperty("OidcBearer");
+  });
+
+  it("reports command success when only the derived performance refresh fails", async () => {
+    const refreshError = new Error("derived cache unavailable");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const app = createTestApp(undefined, {
+      calculate: (tenantId, projectId) => performanceRepository.calculate(tenantId, projectId),
+      refresh: async () => { throw refreshError; },
+    });
+    const task = demoProjectRecord.activities[0]!;
+
+    const response = await app.request(
+      `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/commands`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "refresh-failure" },
+        body: JSON.stringify({
+          expectedRevision: "1",
+          command: { type: "task.update", taskId: task.id, changes: { progressBasisPoints: 2_500 } },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ revision: "2" });
+    expect((await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id))?.project.revision).toBe(2n);
+    expect(log).toHaveBeenCalledWith(
+      "Project command committed, but the derived performance cache could not be refreshed",
+      refreshError,
+    );
+    log.mockRestore();
+  });
+
+  it("returns the persisted Current, approved Baseline, and revision through workerd", async () => {
+    const response = await fetch(
+      `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}`,
+      { headers: { authorization: `Bearer ${humanAccessToken}` } },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("etag")).toBe('"1"');
+    await expect(response.json()).resolves.toMatchObject({
+      revision: "1",
+      current: { id: demoProjectRecord.project.id },
+      baseline: { id: demoProjectRecord.project.id },
+      baselineVersion: { version: 1 },
+    });
+  });
+
+  it("publishes and reloads an immutable Baseline version through the REST contract", async () => {
+    const projectUrl = `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}`;
+    const publish = await fetch(`${projectUrl}/commands`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${humanAccessToken}`,
+        "content-type": "application/json",
+        "idempotency-key": "publish-baseline-v2-rest",
+      },
+      body: JSON.stringify({
+        expectedRevision: "1",
+        command: { type: "baseline.publish", label: "Recovery plan" },
+      }),
+    });
+    expect(publish.status).toBe(200);
+    const loaded = await fetch(projectUrl, {
+      headers: { authorization: `Bearer ${humanAccessToken}` },
+    });
+    await expect(loaded.json()).resolves.toMatchObject({
+      revision: "2",
+      baselineVersion: { version: 2, label: "Recovery plan" },
+      baseline: { tasks: expect.any(Array) },
+    });
   });
 
   it("returns authenticated weekly EVM history and ranked WBS variances through workerd", async () => {

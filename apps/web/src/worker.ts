@@ -8,6 +8,7 @@ import {
   PostgresProjectAccessGrantResolver,
   PostgresProjectCommandUnitOfWork,
   ProjectPerformanceRepository,
+  ProjectWorkspaceRepository,
 } from "@earned-signal/persistence";
 import { Client } from "pg";
 import { createApiApp, type ProjectSession } from "./api.js";
@@ -31,6 +32,7 @@ export async function openHyperdriveProjectSession(
     authorizer: createProjectCommandAuthorizer(grantResolver),
     queryAuthorizer: createProjectQueryAuthorizer(grantResolver),
     performance: new ProjectPerformanceRepository(database),
+    workspace: new ProjectWorkspaceRepository(database),
     // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.
     close: async () => undefined,
   };

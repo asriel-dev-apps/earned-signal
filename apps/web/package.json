@@ -29,11 +29,13 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.44.0",
     "@testcontainers/postgresql": "12.0.4",
+    "@testing-library/react": "16.3.2",
     "@types/node": "24.1.0",
     "@types/pg": "8.20.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "happy-dom": "20.8.9",
     "typescript": "6.0.3",
     "vite": "8.1.4",
     "vitest": "4.1.10",

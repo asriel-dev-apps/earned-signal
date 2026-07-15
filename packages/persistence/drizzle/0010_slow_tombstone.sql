@@ -1,0 +1,1 @@
+ALTER TABLE "baseline_activities" ADD COLUMN "owner" text DEFAULT '' NOT NULL;

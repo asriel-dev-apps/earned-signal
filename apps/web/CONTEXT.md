@@ -2,7 +2,9 @@
 
 The Web context presents typed project-control operations. AG Grid Community is the editable surface; it is not the persistence model. React, REST, and MCP must call the Application context rather than applying domain mutations independently.
 
-Current UI data is an explicit non-persistent demo. Do not label local state as saved or synchronized. Baseline is read-only, while Current WBS parent, code, dependencies, calendar, constraint, required Skills, Assignments, plan, progress, and actual inputs may be edited and recalculated. The Team workload view is Current-only until approved Baseline snapshots include the Resource plan; it presents Resource utilization, daily load, planned labor cost, over-allocation, and both assigned and unassigned Skill gaps from the same Application capacity projection used by command validation.
+The production workspace loads tenant-scoped Current, approved Baseline, revision, and performance history through authenticated no-store queries. It applies local validation immediately, then sends the same typed command used by REST/MCP. Saving, saved revision, load/save failure, and optimistic conflicts are explicit; a conflict reloads authoritative state instead of pretending the local edit succeeded. When no runtime client is injected, the bundled dataset is visibly labelled as an unconnected preview and publishing is disabled.
+
+Baseline is read-only, while Current WBS parent, code, dependencies, calendar, constraint, required Skills, Assignments, plan, progress, and actual inputs may be edited and recalculated. Human editors can publish Current as the next immutable Baseline version. The snapshot includes WBS, activities, calendars, Skills, Resources, rates, Skill links, requirements, and Assignments, so Project Control and Team workload can compare Current with the frozen plan.
 
 Cloudflare Workers with Static Assets is the production target. Hono owns HTTP routing. The production runtime is workerd; Node.js is the development and CI toolchain.
 
@@ -19,3 +21,4 @@ OIDC issuer, REST audience, JWKS URL, and MCP resource URL are non-secret Worker
 - **Team workload**: the UI projection of Resource capacity, demand, utilization, overload, planned labor cost, and Skill coverage.
 - **Assignment cell**: a compact comma-separated editor using `resource-id percentage%` entries; saving replaces the task's complete Assignment set.
 - **Performance workspace**: the status-date history view for PV, EV, AC, forecast indices, and largest leaf-WBS variances.
+- **Runtime client**: a host-injected tenant/project selection and in-memory access-token callback used by the browser API client; the repository never commits or persists a browser token.

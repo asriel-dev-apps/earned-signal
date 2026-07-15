@@ -25,11 +25,12 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - An editable AG Grid Community workspace for hierarchical leaf work packages, typed dependencies, calendars, and constraints, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
 - Add and delete commands plus typed cell updates through the shared application command boundary.
 - Project Skills, Resources, calendar-based daily capacity, hourly planned rates, required Skills, and percentage Assignments, with overload and Skill-gap analysis.
-- An editable task Assignment surface and Current-only Team workload view with utilization, daily demand, over-allocation, Skill gaps, and planned labor cost. Baseline Resource snapshots are completed with persisted Baseline publishing.
+- An editable task Assignment surface and Current/Baseline Team workload view with utilization, daily demand, over-allocation, Skill gaps, and planned labor cost. Baseline publishing freezes Resource, Skill, rate, requirement, and Assignment snapshots.
 - A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, schedule calendars and constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
+- An authenticated no-store Project workspace query and browser client for persisted Current/Baseline loading, explicit save state, revision conflicts, actual entry, and immutable Baseline publishing; unconnected preview data is never represented as saved.
 - An authenticated no-store Performance API and workspace with PV/EV/AC trend lines, SPI/CPI/EAC/TCPI indicators, and largest WBS variances.
 - An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
 - Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.

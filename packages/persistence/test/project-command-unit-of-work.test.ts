@@ -136,6 +136,52 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     expect(unchangedResource.rows[0]?.updated_at.toISOString()).toBe("2000-01-01T00:00:00.000Z");
   });
 
+  it("publishes Current as the next immutable Baseline version", async () => {
+    const service = createProjectCommandService(
+      new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
+    );
+    await service.execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 1n,
+      idempotencyKey: "publish-baseline-v2",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: { type: "baseline.publish", label: "Recovery plan" },
+    });
+    const reloaded = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(reloaded?.baseline?.version).toMatchObject({
+      version: 2,
+      label: "Recovery plan",
+      approvedBy: "user-001",
+    });
+    expect(reloaded?.baseline?.activities[2]).toMatchObject({
+      sourceActivityId: demoProjectRecord.activities[2]!.id,
+      durationWorkingDays: 7,
+    });
+    expect(reloaded?.baseline?.skills).toEqual(
+      demoProjectRecord.skills.map(({ id: sourceSkillId, name }) =>
+        expect.objectContaining({ sourceSkillId, name }),
+      ),
+    );
+    expect(reloaded?.baseline?.resources).toEqual(
+      demoProjectRecord.resources.map(({ id: sourceResourceId, name }) =>
+        expect.objectContaining({ sourceResourceId, name }),
+      ),
+    );
+    expect(reloaded?.baseline?.resourceSkills).toHaveLength(demoProjectRecord.resourceSkills.length);
+    expect(reloaded?.baseline?.activitySkillRequirements).toHaveLength(
+      demoProjectRecord.activitySkillRequirements.length,
+    );
+    expect(reloaded?.baseline?.assignments).toHaveLength(demoProjectRecord.assignments.length);
+    expect(reloaded?.auditEvents.at(-1)).toMatchObject({
+      commandType: "baseline.publish",
+      projectRevision: 2n,
+    });
+  });
+
   it("preserves a task's 0/100 measurement method during an unrelated command", async () => {
     const zeroHundredTask = demoProjectRecord.activities[8]!;
     await client.query(

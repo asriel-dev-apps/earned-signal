@@ -13,7 +13,7 @@ import {
   type SelectionChangedEvent,
 } from "ag-grid-community";
 import { AgGridProvider, AgGridReact } from "ag-grid-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyProjectCommand,
   type ProjectCommand,
@@ -22,6 +22,7 @@ import {
 } from "@earned-signal/application";
 import { baselineProject, initialProject } from "./demo-project";
 import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
+import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 
 type ProjectMode = "current" | "baseline";
 type WorkspaceView = "wbs" | "performance" | "team";
@@ -585,21 +586,57 @@ function TeamWorkload({
   );
 }
 
-export function App() {
+export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [currentProject, setCurrentProject] = useState<ProjectState>(initialProject);
+  const [approvedBaseline, setApprovedBaseline] = useState<ProjectState | null>(baselineProject);
+  const [revision, setRevision] = useState<string | null>(null);
+  const [baselineVersion, setBaselineVersion] = useState<{ readonly version: number; readonly label: string } | null>({ version: 1, label: "Approved launch plan" });
+  const [showBaselineDialog, setShowBaselineDialog] = useState(false);
+  const [baselineLabel, setBaselineLabel] = useState("Status date plan");
+  const [persistedPerformance, setPersistedPerformance] = useState<ProjectAnalysis["performanceHistory"] | null>(null);
+  const [saveState, setSaveState] = useState<"preview" | "loading" | "saved" | "saving" | "error">(client === undefined ? "preview" : "loading");
+  const [hasLoaded, setHasLoaded] = useState(client === undefined);
+  const saving = useRef(false);
   const [mode, setMode] = useState<ProjectMode>("current");
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wbs");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [notice, setNotice] = useState<string | null>(null);
-  const displayedProject = mode === "baseline" ? baselineProject : currentProject;
-  const currentAnalysis = useMemo(
-    () => analyzeProject(currentProject, baselineProject),
-    [currentProject],
-  );
+  const referenceBaseline = approvedBaseline ?? currentProject;
+  const displayedProject = mode === "baseline" ? referenceBaseline : currentProject;
+  const currentAnalysis = useMemo(() => {
+    const calculated = analyzeProject(currentProject, referenceBaseline);
+    return persistedPerformance === null ? calculated : { ...calculated, performanceHistory: persistedPerformance };
+  }, [currentProject, persistedPerformance, referenceBaseline]);
   const analysis = useMemo(
-    () => mode === "current" ? currentAnalysis : analyzeProject(baselineProject, baselineProject),
-    [currentAnalysis, mode],
+    () => mode === "current" ? currentAnalysis : analyzeProject(referenceBaseline, referenceBaseline),
+    [currentAnalysis, mode, referenceBaseline],
   );
+
+  const reloadWorkspace = useCallback(async () => {
+    if (client === undefined) return;
+    const [workspace, history] = await Promise.all([client.load(), client.performance()]);
+    setCurrentProject(workspace.current);
+    setApprovedBaseline(workspace.baseline);
+    setRevision(workspace.revision);
+    setBaselineVersion(workspace.baselineVersion);
+    setPersistedPerformance(history);
+    setSelectedTaskId(workspace.current.tasks[0]?.id ?? null);
+    setHasLoaded(true);
+  }, [client]);
+
+  useEffect(() => {
+    if (client === undefined) return;
+    let active = true;
+    setSaveState("loading");
+    reloadWorkspace()
+      .then(() => { if (active) setSaveState("saved"); })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setSaveState("error");
+        setNotice(error instanceof Error ? error.message : "The project could not be loaded");
+      });
+    return () => { active = false; };
+  }, [client, reloadWorkspace]);
   const rows = useMemo<readonly TaskRow[]>(
     () =>
       displayedProject.tasks.map((task) => {
@@ -621,18 +658,49 @@ export function App() {
   );
 
   const executeCommand = useCallback((command: ProjectCommand): boolean => {
+    if (saving.current) return false;
     try {
       const candidate = applyProjectCommand(currentProject, command);
-      analyzeProject(candidate, baselineProject);
+      analyzeProject(candidate, referenceBaseline);
       setCurrentProject(candidate);
       setNotice(null);
+      if (client !== undefined && revision !== null) {
+        saving.current = true;
+        setSaveState("saving");
+        client.execute(command, revision)
+          .then(async (result) => {
+            setRevision(result.revision);
+            setSaveState("saved");
+            try {
+              await reloadWorkspace();
+            } catch {
+              setNotice(`Your edit was saved at revision ${result.revision}, but the workspace could not be refreshed. Reload to retrieve the latest derived values.`);
+            }
+          })
+          .catch(async (error: unknown) => {
+            if (error instanceof ProjectApiError && error.code === "PROJECT_VERSION_CONFLICT") {
+              try {
+                await reloadWorkspace();
+                setNotice(`This project changed elsewhere and was reloaded at revision ${error.actualRevision ?? "latest"}. Your edit was not saved.`);
+              } catch {
+                setCurrentProject(currentProject);
+                setNotice(`This project changed elsewhere, so your edit was not saved. The latest revision could not be loaded; retry loading before editing again.`);
+              }
+            } else {
+              setCurrentProject(currentProject);
+              setNotice(error instanceof Error ? error.message : "The edit could not be saved");
+            }
+            setSaveState("error");
+          })
+          .finally(() => { saving.current = false; });
+      }
       return true;
     } catch (error) {
       setCurrentProject((project) => ({ ...project }));
       setNotice(error instanceof Error ? error.message : "The edit could not be applied");
       return false;
     }
-  }, [currentProject]);
+  }, [client, currentProject, referenceBaseline, reloadWorkspace, revision]);
 
   const onCellValueChanged = useCallback(
     (event: CellValueChangedEvent<TaskRow>) => {
@@ -670,7 +738,7 @@ export function App() {
     () => displayedProject.calendars.map((calendar) => calendar.id),
     [displayedProject.calendars],
   );
-  const editable = mode === "current";
+  const editable = mode === "current" && saveState !== "saving" && saveState !== "loading";
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
       { field: "wbs", headerName: "WBS", pinned: "left", width: 82, editable, cellClass: "editable-cell" },
@@ -865,7 +933,6 @@ export function App() {
               aria-label="Team workload"
               onClick={() => {
                 setWorkspaceView("team");
-                setMode("current");
               }}
             >
               <Icon name="users" />
@@ -885,7 +952,7 @@ export function App() {
               <span className="project-avatar">CP</span>
               <div>
                 <strong>{displayedProject.name}</strong>
-                <small>Demo project · JPY</small>
+                <small>{saveState === "preview" ? "Preview project" : `Baseline ${baselineVersion === null ? "not published" : `v${baselineVersion.version}`}`} · JPY</small>
               </div>
               <span className="chevron">⌄</span>
             </div>
@@ -893,7 +960,12 @@ export function App() {
               <span>STATUS DATE</span>
               <strong>{formatDate(displayedProject.statusDate)}, 2026</strong>
             </div>
-            <div className="saved-state"><span /> Demo session · not persisted</div>
+            <div className={`saved-state saved-state--${saveState}`}><span />{
+              saveState === "preview" ? "Preview data · not connected" :
+              saveState === "loading" ? "Loading project…" :
+              saveState === "saving" ? "Saving changes…" :
+              saveState === "saved" ? `Saved · revision ${revision ?? "—"}` : "Save needs attention"
+            }</div>
             <button className="avatar-button" aria-label="Account">TM</button>
           </header>
 
@@ -903,6 +975,8 @@ export function App() {
                 <p className="breadcrumb">PROJECTS / CUSTOMER PORTAL LAUNCH</p>
                 <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : "Team workload"}</h1>
               </div>
+              <div className="heading-actions">
+              <button className="publish-button" onClick={() => setShowBaselineDialog(true)} disabled={client === undefined || saveState === "saving" || saveState === "loading"}>Publish baseline</button>
               <div className={`mode-switch ${workspaceView === "performance" ? "mode-switch--hidden" : ""}`} aria-label="Plan view">
                 <button
                   className={mode === "current" ? "active" : ""}
@@ -913,23 +987,53 @@ export function App() {
                 <button
                   className={mode === "baseline" ? "active" : ""}
                   onClick={() => setMode("baseline")}
-                  disabled={workspaceView === "team"}
-                  title={workspaceView === "team" ? "Team workload currently shows the Current plan" : undefined}
+                  disabled={approvedBaseline === null}
+                  title={approvedBaseline === null ? "Publish a baseline before comparing plans" : undefined}
                 >
                   Baseline
                 </button>
               </div>
+              </div>
             </div>
+
+            {showBaselineDialog ? (
+              <div className="dialog-backdrop" role="presentation">
+                <form className="baseline-dialog" role="dialog" aria-modal="true" aria-labelledby="baseline-dialog-title" onSubmit={(event) => {
+                  event.preventDefault();
+                  if (executeCommand({ type: "baseline.publish", label: baselineLabel })) setShowBaselineDialog(false);
+                }}>
+                  <span className="section-kicker">FREEZE CURRENT PLAN</span>
+                  <h2 id="baseline-dialog-title">Publish Baseline v{(baselineVersion?.version ?? 0) + 1}</h2>
+                  <p>This creates an immutable comparison point from the current WBS, dates, budgets, calendars, and dependencies.</p>
+                  <label>Version label<input autoFocus value={baselineLabel} onChange={(event) => setBaselineLabel(event.target.value)} maxLength={200} required /></label>
+                  <div className="dialog-actions"><button type="button" onClick={() => setShowBaselineDialog(false)}>Cancel</button><button className="primary-button" type="submit">Publish immutable baseline</button></div>
+                </form>
+              </div>
+            ) : null}
 
             {notice === null ? null : (
               <div className="notice" role="alert">
-                <strong>Edit rejected</strong>
+                <strong>{saveState === "error" ? "Workspace needs attention" : "Edit rejected"}</strong>
                 <span>{notice}</span>
                 <button onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
               </div>
             )}
 
-            {workspaceView === "performance" ? (
+            {client !== undefined && !hasLoaded ? (
+              <section className="load-gate" aria-live="polite">
+                <span className="section-kicker">PERSISTED PROJECT</span>
+                <h2>{saveState === "loading" ? "Loading Current and Baseline…" : "The workspace could not be loaded"}</h2>
+                <p>{saveState === "loading" ? "Reading the authorized project, approved Baseline, and performance history." : "Check the session and connection, then retry. Preview data is never shown as saved project data."}</p>
+                {saveState === "error" ? <button className="primary-button" onClick={() => {
+                  setSaveState("loading");
+                  setNotice(null);
+                  reloadWorkspace().then(() => setSaveState("saved")).catch((error: unknown) => {
+                    setSaveState("error");
+                    setNotice(error instanceof Error ? error.message : "The project could not be loaded");
+                  });
+                }}>Retry loading</button> : null}
+              </section>
+            ) : workspaceView === "performance" ? (
               <PerformanceWorkspace project={currentProject} analysis={currentAnalysis} />
             ) : workspaceView === "team" ? (
               <TeamWorkload project={displayedProject} analysis={analysis} />
@@ -971,10 +1075,10 @@ export function App() {
                   </div>
                   <div className="toolbar-actions">
                     {mode === "baseline" ? <span className="readonly-pill">Read only</span> : null}
-                    <button onClick={deleteTask} disabled={mode !== "current" || selectedTaskId === null}>
+                    <button onClick={deleteTask} disabled={!editable || selectedTaskId === null}>
                       Delete
                     </button>
-                    <button className="primary-button" onClick={addTask} disabled={mode !== "current"}>
+                    <button className="primary-button" onClick={addTask} disabled={!editable}>
                       <span>＋</span> Add work package
                     </button>
                   </div>

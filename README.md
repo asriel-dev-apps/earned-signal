@@ -6,7 +6,7 @@ This repository currently contains an early technical slice:
 
 - deterministic scheduling calculations for finish-to-start dependencies;
 - earned value calculations for 0/100 and physical-percent measurement;
-- an editable AG Grid Community workspace that immediately recalculates schedule and EVM outputs;
+- an editable AG Grid Community workspace that loads persisted Current/Baseline data, saves revisioned commands, and immediately recalculates schedule and EVM outputs;
 - a PostgreSQL system of record with immutable Baseline, audit, and idempotency records;
 - an atomic Project Command Service with optimistic concurrency and exact-once retry behavior;
 - OIDC bearer authentication with tenant/project membership, human roles, and agent scopes;

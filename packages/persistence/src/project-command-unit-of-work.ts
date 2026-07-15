@@ -10,13 +10,24 @@ import {
   type ProjectCommandUnitOfWork,
   type ProjectState,
 } from "@earned-signal/application";
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { calculateSchedule } from "@earned-signal/domain";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   activities,
   activitySkillRequirements,
   assignments,
   auditEvents,
+  baselineActivities,
+  baselineActivitySkillRequirements,
+  baselineAssignments,
+  baselineCalendars,
+  baselineDependencies,
+  baselineResources,
+  baselineResourceSkills,
+  baselineSkills,
+  baselineVersions,
+  baselineWbsNodes,
   commandReceipts,
   dependencies,
   directActualCosts,
@@ -546,6 +557,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             measurementMethod: task.measurementMethod,
             sortOrder,
           });
+          wbsNodeByActivity.set(task.id, wbsNodeId);
         } else {
           await transaction
             .update(wbsNodes)
@@ -673,6 +685,135 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             unitsPercent: assignment.unitsPercent,
           })),
         );
+      }
+
+      if (request.command.type === "baseline.publish") {
+        const [latestBaseline] = await transaction
+          .select({ version: baselineVersions.version })
+          .from(baselineVersions)
+          .where(and(eq(baselineVersions.tenantId, request.tenantId), eq(baselineVersions.projectId, request.projectId)))
+          .orderBy(desc(baselineVersions.version))
+          .limit(1);
+        const baselineVersionId = crypto.randomUUID();
+        const version = (latestBaseline?.version ?? 0) + 1;
+        await transaction.insert(baselineVersions).values({
+          id: baselineVersionId,
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          version,
+          label: request.command.label,
+          defaultCalendarId: next.defaultCalendarId,
+          approvedAt: null,
+          approvedBy: null,
+        });
+        await transaction.insert(baselineCalendars).values(next.calendars.map((calendar) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceCalendarId: calendar.id,
+          name: calendar.name,
+          workingWeekdays: [...calendar.workingWeekdays],
+          nonWorkingDates: [...calendar.nonWorkingDates],
+        })));
+        if (next.skills.length > 0) await transaction.insert(baselineSkills).values(next.skills.map((skill) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceSkillId: skill.id,
+          name: skill.name,
+        })));
+        if (next.resources.length > 0) await transaction.insert(baselineResources).values(next.resources.map((resource) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceResourceId: resource.id,
+          name: resource.name,
+          calendarId: resource.calendarId,
+          dailyCapacityMinutes: resource.dailyCapacityMinutes,
+          costRateMinorPerHour: BigInt(resource.costRateMinorPerHour),
+        })));
+        const baselineResourceSkillRows = next.resources.flatMap((resource) => resource.skillIds.map((skillId) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceResourceId: resource.id,
+          sourceSkillId: skillId,
+        })));
+        if (baselineResourceSkillRows.length > 0) await transaction.insert(baselineResourceSkills).values(baselineResourceSkillRows);
+        const groupRows = next.wbsGroups.map((group, index) => ({
+          id: crypto.randomUUID(),
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceWbsNodeId: group.id,
+          parentSourceWbsNodeId: group.parentId,
+          code: group.code,
+          name: group.name,
+          sortOrder: index,
+        }));
+        const taskRows = next.tasks.map((task, index) => {
+          const sourceWbsNodeId = wbsNodeByActivity.get(task.id);
+          if (sourceWbsNodeId === undefined) throw new Error(`Task ${task.id} has no persisted WBS node`);
+          return {
+            id: crypto.randomUUID(),
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            baselineVersionId,
+            sourceWbsNodeId,
+            parentSourceWbsNodeId: task.wbsParentId,
+            code: task.wbs,
+            name: task.name,
+            sortOrder: next.wbsGroups.length + index,
+          };
+        });
+        if (groupRows.length + taskRows.length > 0) await transaction.insert(baselineWbsNodes).values([...groupRows, ...taskRows]);
+        const schedule = calculateSchedule({
+          projectStart: next.projectStart,
+          defaultCalendarId: next.defaultCalendarId,
+          calendars: next.calendars,
+          activities: next.tasks.map((task) => ({ id: task.id, durationWorkingDays: task.durationWorkingDays, calendarId: task.calendarId, dependencies: task.dependencies, ...(task.constraint === null ? {} : { constraint: task.constraint }) })),
+        });
+        const scheduleById = new Map(schedule.activities.map((activity) => [activity.id, activity]));
+        await transaction.insert(baselineActivities).values(next.tasks.map((task) => {
+          const scheduled = scheduleById.get(task.id);
+          const sourceWbsNodeId = wbsNodeByActivity.get(task.id);
+          if (scheduled === undefined || sourceWbsNodeId === undefined) throw new Error(`Task ${task.id} could not be baselined`);
+          return {
+            id: crypto.randomUUID(), tenantId: request.tenantId, projectId: request.projectId, baselineVersionId,
+            sourceActivityId: task.id, sourceWbsNodeId, wbsCode: task.wbs, name: task.name, owner: task.owner,
+            durationWorkingDays: task.durationWorkingDays, calendarId: task.calendarId,
+            constraintType: task.constraint?.type ?? null, constraintDate: task.constraint?.date ?? null,
+            baselineStart: scheduled.earlyStart, baselineFinish: scheduled.earlyFinish,
+            budgetMinor: BigInt(task.budget), measurementMethod: task.measurementMethod,
+          };
+        }));
+        const baselineActivitySkillRows = next.tasks.flatMap((task) => task.requiredSkillIds.map((skillId) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceActivityId: task.id,
+          sourceSkillId: skillId,
+        })));
+        if (baselineActivitySkillRows.length > 0) await transaction.insert(baselineActivitySkillRequirements).values(baselineActivitySkillRows);
+        if (next.assignments.length > 0) await transaction.insert(baselineAssignments).values(next.assignments.map((assignment) => ({
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          baselineVersionId,
+          sourceActivityId: assignment.taskId,
+          sourceResourceId: assignment.resourceId,
+          unitsPercent: assignment.unitsPercent,
+        })));
+        const baselineDependencyRows = next.tasks.flatMap((task) => task.dependencies.map((dependency) => ({
+          id: crypto.randomUUID(), tenantId: request.tenantId, projectId: request.projectId, baselineVersionId,
+          predecessorSourceActivityId: dependency.predecessorId, successorSourceActivityId: task.id,
+          type: dependency.type, lagWorkingDays: dependency.lagWorkingDays,
+        })));
+        if (baselineDependencyRows.length > 0) await transaction.insert(baselineDependencies).values(baselineDependencyRows);
+        await transaction.update(baselineVersions).set({ approvedAt: sql`now()`, approvedBy: request.actor.id }).where(and(
+          eq(baselineVersions.tenantId, request.tenantId),
+          eq(baselineVersions.projectId, request.projectId),
+          eq(baselineVersions.id, baselineVersionId),
+        ));
       }
 
       const resultRevision = actualRevision + 1n;

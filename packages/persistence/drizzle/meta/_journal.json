@@ -64,6 +64,20 @@
       "when": 1784085792399,
       "tag": "0008_green_serpent_society",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784091365207,
+      "tag": "0009_keen_pretty_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784095014323,
+      "tag": "0010_slow_tombstone",
+      "breakpoints": true
     }
   ]
 }

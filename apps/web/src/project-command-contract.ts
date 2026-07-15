@@ -85,6 +85,7 @@ export const AssignmentSchema = z.object({
 });
 
 export const ApiCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("baseline.publish"), label: z.string().trim().min(1).max(200) }),
   z.object({
     type: z.literal("task.update"),
     taskId: UuidSchema,
@@ -136,6 +137,7 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
 }
 
 export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCommand {
+  if (command.type === "baseline.publish") return command;
   if (command.type === "task.add") {
     return { type: command.type, task: toTask(command.task) };
   }
@@ -228,4 +230,50 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
       : { actualMinutes: command.changes.actualMinutes }),
   } satisfies Partial<Omit<ProjectTask, "id">>;
   return { type: command.type, taskId: command.taskId, changes };
+}
+
+function fromTask(task: ProjectTask): z.infer<typeof TaskSchema> {
+  return {
+    ...task,
+    dependencies: task.dependencies.map((dependency) => ({ ...dependency })),
+    constraint: task.constraint === null ? null : { ...task.constraint },
+    requiredSkillIds: [...task.requiredSkillIds],
+    budgetMinor: String(task.budget),
+    progressBasisPoints: Math.round(task.progressPercent * 100),
+    actualCostMinor: String(task.actualCost),
+  };
+}
+
+export function fromCommand(command: ProjectCommand): z.infer<typeof ApiCommandSchema> {
+  if (command.type === "baseline.publish") return command;
+  if (command.type === "task.add") return { type: command.type, task: fromTask(command.task) };
+  if (command.type === "task.delete" || command.type === "resource.delete") return command;
+  if (command.type === "assignment.replace") return { ...command, assignments: command.assignments.map((assignment) => ({ ...assignment })) };
+  if (command.type === "resource.add") return { type: command.type, resource: { ...command.resource, skillIds: [...command.resource.skillIds], costRateMinorPerHour: String(command.resource.costRateMinorPerHour) } };
+  if (command.type === "resource.update") {
+    const { costRateMinorPerHour, skillIds, ...changes } = command.changes;
+    return {
+      type: command.type,
+      resourceId: command.resourceId,
+      changes: {
+        ...changes,
+        ...(skillIds === undefined ? {} : { skillIds: [...skillIds] }),
+        ...(costRateMinorPerHour === undefined ? {} : { costRateMinorPerHour: String(costRateMinorPerHour) }),
+      },
+    };
+  }
+  const { budget, progressPercent, actualCost, dependencies, constraint, requiredSkillIds, ...changes } = command.changes;
+  return {
+    type: command.type,
+    taskId: command.taskId,
+    changes: {
+      ...changes,
+      ...(dependencies === undefined ? {} : { dependencies: dependencies.map((dependency) => ({ ...dependency })) }),
+      ...(constraint === undefined ? {} : { constraint: constraint === null ? null : { ...constraint } }),
+      ...(requiredSkillIds === undefined ? {} : { requiredSkillIds: [...requiredSkillIds] }),
+      ...(budget === undefined ? {} : { budgetMinor: String(budget) }),
+      ...(progressPercent === undefined ? {} : { progressBasisPoints: Math.round(progressPercent * 100) }),
+      ...(actualCost === undefined ? {} : { actualCostMinor: String(actualCost) }),
+    },
+  };
 }

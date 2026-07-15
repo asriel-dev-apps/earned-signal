@@ -32,8 +32,13 @@ describe("persistence migrations", () => {
       "assignments",
       "audit_events",
       "baseline_activities",
+      "baseline_activity_skill_requirements",
+      "baseline_assignments",
       "baseline_calendars",
       "baseline_dependencies",
+      "baseline_resource_skills",
+      "baseline_resources",
+      "baseline_skills",
       "baseline_versions",
       "baseline_wbs_nodes",
       "command_receipts",
@@ -236,6 +241,8 @@ describe("persistence migrations", () => {
     const versionId = "40000000-0000-4000-8000-000000000011";
     const sourceWbsNodeId = "20000000-0000-4000-8000-000000000011";
     const sourceActivityId = "30000000-0000-4000-8000-000000000011";
+    const sourceSkillId = "d0000000-0000-4000-8000-000000000011";
+    const sourceResourceId = "e0000000-0000-4000-8000-000000000011";
 
     await client.query("insert into tenants (id, name) values ($1, 'Baseline tenant')", [
       tenantId,
@@ -282,6 +289,37 @@ describe("persistence migrations", () => {
       [tenantId, projectId, versionId, sourceActivityId, sourceWbsNodeId],
     );
     await client.query(
+      `insert into baseline_skills
+         (tenant_id, project_id, baseline_version_id, source_skill_id, name)
+       values ($1, $2, $3, $4, 'Engineering')`,
+      [tenantId, projectId, versionId, sourceSkillId],
+    );
+    await client.query(
+      `insert into baseline_resources
+         (tenant_id, project_id, baseline_version_id, source_resource_id, name, calendar_id,
+          daily_capacity_minutes, cost_rate_minor_per_hour)
+       values ($1, $2, $3, $4, 'Engineer', 'standard', 480, 7000)`,
+      [tenantId, projectId, versionId, sourceResourceId],
+    );
+    await client.query(
+      `insert into baseline_assignments
+         (tenant_id, project_id, baseline_version_id, source_activity_id, source_resource_id, units_percent)
+       values ($1, $2, $3, $4, $5, 100)`,
+      [tenantId, projectId, versionId, sourceActivityId, sourceResourceId],
+    );
+    await client.query(
+      `insert into baseline_resource_skills
+         (tenant_id, project_id, baseline_version_id, source_resource_id, source_skill_id)
+       values ($1, $2, $3, $4, $5)`,
+      [tenantId, projectId, versionId, sourceResourceId, sourceSkillId],
+    );
+    await client.query(
+      `insert into baseline_activity_skill_requirements
+         (tenant_id, project_id, baseline_version_id, source_activity_id, source_skill_id)
+       values ($1, $2, $3, $4, $5)`,
+      [tenantId, projectId, versionId, sourceActivityId, sourceSkillId],
+    );
+    await client.query(
       "update baseline_versions set approved_at = now(), approved_by = 'planner@example.test' where id = $1",
       [versionId],
     );
@@ -306,6 +344,38 @@ describe("persistence migrations", () => {
       client.query(
         "update baseline_calendars set name = 'Changed' where baseline_version_id = $1",
         [versionId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        "update baseline_resources set name = 'Changed' where baseline_version_id = $1",
+        [versionId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        "delete from baseline_assignments where baseline_version_id = $1",
+        [versionId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        "delete from baseline_resource_skills where baseline_version_id = $1",
+        [versionId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        "delete from baseline_activity_skill_requirements where baseline_version_id = $1",
+        [versionId],
+      ),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        `insert into baseline_skills
+           (tenant_id, project_id, baseline_version_id, source_skill_id, name)
+         values ($1, $2, $3, 'd0000000-0000-4000-8000-000000000012', 'Late skill')`,
+        [tenantId, projectId, versionId],
       ),
     ).rejects.toMatchObject({ code: "55000" });
 
