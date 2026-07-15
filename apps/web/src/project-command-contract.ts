@@ -13,6 +13,7 @@ const ProgressBasisPointsSchema = z.number().int().min(0).max(10_000);
 const MeasurementMethodSchema = z.enum(["ZERO_HUNDRED", "PHYSICAL_PERCENT"]);
 const DurationSchema = z.number().int().min(1).max(MAX_ACTIVITY_DURATION_WORKING_DAYS);
 const CalendarIdSchema = z.string().trim().min(1).max(100);
+const SkillIdsSchema = z.array(UuidSchema).max(50);
 const DependencySchema = z.object({
   predecessorId: UuidSchema,
   type: z.enum(["FS", "SS", "FF", "SF"]),
@@ -39,6 +40,7 @@ export const TaskChangesSchema = z
     calendarId: CalendarIdSchema.optional(),
     dependencies: z.array(DependencySchema).max(100).optional(),
     constraint: ConstraintSchema.nullable().optional(),
+    requiredSkillIds: SkillIdsSchema.optional(),
     budgetMinor: MinorUnitSchema.optional(),
     progressBasisPoints: ProgressBasisPointsSchema.optional(),
     actualCostMinor: MinorUnitSchema.optional(),
@@ -57,10 +59,29 @@ export const TaskSchema = z.object({
   calendarId: CalendarIdSchema,
   dependencies: z.array(DependencySchema).max(100),
   constraint: ConstraintSchema.nullable(),
+  requiredSkillIds: SkillIdsSchema,
   budgetMinor: MinorUnitSchema,
   progressBasisPoints: ProgressBasisPointsSchema,
   actualCostMinor: MinorUnitSchema,
   actualMinutes: z.number().int().nonnegative(),
+});
+
+export const ResourceSchema = z.object({
+  id: UuidSchema,
+  name: z.string().trim().min(1).max(200),
+  calendarId: CalendarIdSchema,
+  dailyCapacityMinutes: z.number().int().min(1).max(1_440),
+  costRateMinorPerHour: MinorUnitSchema,
+  skillIds: SkillIdsSchema,
+});
+
+export const ResourceChangesSchema = ResourceSchema.omit({ id: true })
+  .partial()
+  .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
+
+export const AssignmentSchema = z.object({
+  resourceId: UuidSchema,
+  unitsPercent: z.number().int().min(1).max(100),
 });
 
 export const ApiCommandSchema = z.discriminatedUnion("type", [
@@ -71,6 +92,18 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("task.add"), task: TaskSchema }),
   z.object({ type: z.literal("task.delete"), taskId: UuidSchema }),
+  z.object({ type: z.literal("resource.add"), resource: ResourceSchema }),
+  z.object({
+    type: z.literal("resource.update"),
+    resourceId: UuidSchema,
+    changes: ResourceChangesSchema,
+  }),
+  z.object({ type: z.literal("resource.delete"), resourceId: UuidSchema }),
+  z.object({
+    type: z.literal("assignment.replace"),
+    taskId: UuidSchema,
+    assignments: z.array(AssignmentSchema).max(100),
+  }),
 ]);
 
 function asSafeMinorUnits(value: string, field: string): number {
@@ -94,6 +127,7 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
     calendarId: task.calendarId,
     dependencies: task.dependencies,
     constraint: task.constraint,
+    requiredSkillIds: task.requiredSkillIds,
     budget: asSafeMinorUnits(task.budgetMinor, "budgetMinor"),
     progressPercent: task.progressBasisPoints / 100,
     actualCost: asSafeMinorUnits(task.actualCostMinor, "actualCostMinor"),
@@ -106,6 +140,47 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
     return { type: command.type, task: toTask(command.task) };
   }
   if (command.type === "task.delete") {
+    return command;
+  }
+  if (command.type === "resource.add") {
+    return {
+      type: command.type,
+      resource: {
+        ...command.resource,
+        costRateMinorPerHour: asSafeMinorUnits(
+          command.resource.costRateMinorPerHour,
+          "costRateMinorPerHour",
+        ),
+      },
+    };
+  }
+  if (command.type === "resource.update") {
+    return {
+      type: command.type,
+      resourceId: command.resourceId,
+      changes: {
+        ...(command.changes.name === undefined ? {} : { name: command.changes.name }),
+        ...(command.changes.calendarId === undefined
+          ? {}
+          : { calendarId: command.changes.calendarId }),
+        ...(command.changes.dailyCapacityMinutes === undefined
+          ? {}
+          : { dailyCapacityMinutes: command.changes.dailyCapacityMinutes }),
+        ...(command.changes.skillIds === undefined
+          ? {}
+          : { skillIds: command.changes.skillIds }),
+        ...(command.changes.costRateMinorPerHour === undefined
+          ? {}
+          : {
+              costRateMinorPerHour: asSafeMinorUnits(
+                command.changes.costRateMinorPerHour,
+                "costRateMinorPerHour",
+              ),
+            }),
+      },
+    };
+  }
+  if (command.type === "resource.delete" || command.type === "assignment.replace") {
     return command;
   }
 
@@ -131,6 +206,9 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
     ...(command.changes.constraint === undefined
       ? {}
       : { constraint: command.changes.constraint }),
+    ...(command.changes.requiredSkillIds === undefined
+      ? {}
+      : { requiredSkillIds: command.changes.requiredSkillIds }),
     ...(command.changes.budgetMinor === undefined
       ? {}
       : { budget: asSafeMinorUnits(command.changes.budgetMinor, "budgetMinor") }),

@@ -3,6 +3,8 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PersistedProjectRecord } from "./project-record.js";
 import {
   activities,
+  activitySkillRequirements,
+  assignments,
   auditEvents,
   baselineActivities,
   baselineCalendars,
@@ -14,7 +16,10 @@ import {
   progressMeasurements,
   projectCalendars,
   projects,
+  resources,
+  resourceSkills,
   schema,
+  skills,
   tenants,
   wbsNodes,
   worklogs,
@@ -48,12 +53,29 @@ export class ProjectRepository {
           })),
         );
       }
+      if (record.skills.length > 0) {
+        await transaction.insert(skills).values([...record.skills]);
+      }
+      if (record.resources.length > 0) {
+        await transaction.insert(resources).values([...record.resources]);
+      }
+      if (record.resourceSkills.length > 0) {
+        await transaction.insert(resourceSkills).values([...record.resourceSkills]);
+      }
 
       if (record.wbsNodes.length > 0) {
         await transaction.insert(wbsNodes).values([...record.wbsNodes]);
       }
       if (record.activities.length > 0) {
         await transaction.insert(activities).values([...record.activities]);
+      }
+      if (record.activitySkillRequirements.length > 0) {
+        await transaction
+          .insert(activitySkillRequirements)
+          .values([...record.activitySkillRequirements]);
+      }
+      if (record.assignments.length > 0) {
+        await transaction.insert(assignments).values([...record.assignments]);
       }
       if (record.dependencies.length > 0) {
         await transaction.insert(dependencies).values([...record.dependencies]);
@@ -147,11 +169,44 @@ export class ProjectRepository {
       .from(projectCalendars)
       .where(and(eq(projectCalendars.tenantId, tenantId), eq(projectCalendars.projectId, projectId)))
       .orderBy(asc(projectCalendars.id));
+    const skillRows = await this.database
+      .select()
+      .from(skills)
+      .where(and(eq(skills.tenantId, tenantId), eq(skills.projectId, projectId)))
+      .orderBy(asc(skills.id));
+    const resourceRows = await this.database
+      .select()
+      .from(resources)
+      .where(and(eq(resources.tenantId, tenantId), eq(resources.projectId, projectId)))
+      .orderBy(asc(resources.id));
+    const resourceSkillRows = await this.database
+      .select()
+      .from(resourceSkills)
+      .where(and(eq(resourceSkills.tenantId, tenantId), eq(resourceSkills.projectId, projectId)))
+      .orderBy(asc(resourceSkills.resourceId), asc(resourceSkills.skillId));
     const activityRows = await this.database
       .select()
       .from(activities)
       .where(and(eq(activities.tenantId, tenantId), eq(activities.projectId, projectId)))
       .orderBy(asc(activities.sortOrder));
+    const activitySkillRows = await this.database
+      .select()
+      .from(activitySkillRequirements)
+      .where(
+        and(
+          eq(activitySkillRequirements.tenantId, tenantId),
+          eq(activitySkillRequirements.projectId, projectId),
+        ),
+      )
+      .orderBy(
+        asc(activitySkillRequirements.activityId),
+        asc(activitySkillRequirements.skillId),
+      );
+    const assignmentRows = await this.database
+      .select()
+      .from(assignments)
+      .where(and(eq(assignments.tenantId, tenantId), eq(assignments.projectId, projectId)))
+      .orderBy(asc(assignments.activityId), asc(assignments.resourceId));
     const dependencyRows = await this.database
       .select()
       .from(dependencies)
@@ -221,10 +276,23 @@ export class ProjectRepository {
       calendars: calendarRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
       ),
+      skills: skillRows.map((row) => withoutGeneratedFields(row, ["createdAt", "updatedAt"])),
+      resources: resourceRows.map((row) =>
+        withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
+      resourceSkills: resourceSkillRows.map((row) =>
+        withoutGeneratedFields(row, ["createdAt"]),
+      ),
       wbsNodes: wbsRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
       ),
       activities: activityRows.map((row) =>
+        withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
+      activitySkillRequirements: activitySkillRows.map((row) =>
+        withoutGeneratedFields(row, ["createdAt"]),
+      ),
+      assignments: assignmentRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
       ),
       dependencies: dependencyRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),

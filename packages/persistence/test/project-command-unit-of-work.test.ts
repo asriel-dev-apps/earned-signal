@@ -89,6 +89,53 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     });
   });
 
+  it("atomically replaces assignments and records the plan change", async () => {
+    const unchangedResourceId = demoProjectRecord.resources[2]!.id;
+    await client.query(
+      "update resources set updated_at = '2000-01-01T00:00:00Z' where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, unchangedResourceId],
+    );
+    const service = createProjectCommandService(
+      new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
+    );
+    const taskId = demoProjectRecord.activities[0]!.id;
+    const assignments = [
+      { resourceId: demoProjectRecord.resources[0]!.id, unitsPercent: 50 },
+      { resourceId: demoProjectRecord.resources[1]!.id, unitsPercent: 25 },
+    ];
+
+    await service.execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 1n,
+      idempotencyKey: "replace-activity-assignments",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: { type: "assignment.replace", taskId, assignments },
+    });
+
+    const reloaded = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(
+      reloaded?.assignments
+        .filter((assignment) => assignment.activityId === taskId)
+        .map(({ resourceId, unitsPercent }) => ({ resourceId, unitsPercent })),
+    ).toEqual(assignments);
+    expect(reloaded?.project.revision).toBe(2n);
+    expect(reloaded?.auditEvents.at(-1)).toMatchObject({
+      actorType: "HUMAN",
+      actorId: "user-001",
+      commandType: "assignment.replace",
+      projectRevision: 2n,
+    });
+    const unchangedResource = await client.query<{ updated_at: Date }>(
+      "select updated_at from resources where tenant_id = $1 and project_id = $2 and id = $3",
+      [demoProjectRecord.tenant.id, demoProjectRecord.project.id, unchangedResourceId],
+    );
+    expect(unchangedResource.rows[0]?.updated_at.toISOString()).toBe("2000-01-01T00:00:00.000Z");
+  });
+
   it("preserves a task's 0/100 measurement method during an unrelated command", async () => {
     const zeroHundredTask = demoProjectRecord.activities[8]!;
     await client.query(
@@ -264,6 +311,7 @@ describe("PostgresProjectCommandUnitOfWork", () => {
             { predecessorId: secondPredecessorId, type: "FF", lagWorkingDays: 2 },
           ],
           constraint: { type: "FINISH_NO_LATER_THAN", date: "2026-09-30" },
+          requiredSkillIds: [demoProjectRecord.skills[0]!.id],
           budget: 200_000,
           progressPercent: 0,
           actualCost: 0,

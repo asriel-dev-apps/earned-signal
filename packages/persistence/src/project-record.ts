@@ -27,6 +27,45 @@ export interface ProjectCalendarRecord {
   readonly nonWorkingDates: readonly string[];
 }
 
+export interface SkillRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+}
+
+export interface ResourceRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly calendarId: string;
+  readonly dailyCapacityMinutes: number;
+  readonly costRateMinorPerHour: bigint;
+}
+
+export interface ResourceSkillRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly resourceId: string;
+  readonly skillId: string;
+}
+
+export interface ActivitySkillRequirementRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly activityId: string;
+  readonly skillId: string;
+}
+
+export interface AssignmentRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly activityId: string;
+  readonly resourceId: string;
+  readonly unitsPercent: number;
+}
+
 export interface WbsNodeRecord {
   readonly id: string;
   readonly tenantId: string;
@@ -180,8 +219,13 @@ export interface PersistedProjectRecord {
   readonly tenant: TenantRecord;
   readonly project: ProjectRecord;
   readonly calendars: readonly ProjectCalendarRecord[];
+  readonly skills: readonly SkillRecord[];
+  readonly resources: readonly ResourceRecord[];
+  readonly resourceSkills: readonly ResourceSkillRecord[];
   readonly wbsNodes: readonly WbsNodeRecord[];
   readonly activities: readonly ActivityRecord[];
+  readonly activitySkillRequirements: readonly ActivitySkillRequirementRecord[];
+  readonly assignments: readonly AssignmentRecord[];
   readonly dependencies: readonly DependencyRecord[];
   readonly progressMeasurements: readonly ProgressMeasurementRecord[];
   readonly worklogs: readonly WorklogRecord[];

@@ -50,6 +50,13 @@
       "when": 1784073510979,
       "tag": "0006_violet_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784074904639,
+      "tag": "0007_chief_swarm",
+      "breakpoints": true
     }
   ]
 }

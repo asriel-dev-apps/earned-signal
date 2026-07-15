@@ -23,6 +23,9 @@ const initialProject: ProjectState = {
     },
   ],
   wbsGroups: [],
+  skills: [],
+  resources: [],
+  assignments: [],
   tasks: [
     {
       id: "30000000-0000-4000-8000-000000000001",
@@ -35,6 +38,7 @@ const initialProject: ProjectState = {
       calendarId: "calendar-standard",
       dependencies: [],
       constraint: null,
+      requiredSkillIds: [],
       budget: 600_000,
       progressPercent: 20,
       actualCost: 100_000,

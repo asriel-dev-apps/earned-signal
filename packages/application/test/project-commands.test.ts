@@ -21,6 +21,9 @@ const project: ProjectState = {
     },
   ],
   wbsGroups: [{ id: "group-1", parentId: null, code: "1", name: "Delivery" }],
+  skills: [],
+  resources: [],
+  assignments: [],
   tasks: [
     {
       id: "task-1",
@@ -33,6 +36,7 @@ const project: ProjectState = {
       calendarId: "calendar-standard",
       dependencies: [],
       constraint: null,
+      requiredSkillIds: [],
       budget: 600_000,
       progressPercent: 100,
       actualCost: 580_000,
@@ -49,6 +53,7 @@ const project: ProjectState = {
       calendarId: "calendar-standard",
       dependencies: [{ predecessorId: "task-1", type: "FS", lagWorkingDays: 0 }],
       constraint: null,
+      requiredSkillIds: [],
       budget: 900_000,
       progressPercent: 40,
       actualCost: 420_000,
@@ -100,6 +105,7 @@ describe("applyProjectCommand", () => {
       calendarId: "calendar-standard",
       dependencies: [{ predecessorId: "task-2", type: "FS", lagWorkingDays: 0 }],
       constraint: null,
+      requiredSkillIds: [],
       budget: 1_200_000,
       progressPercent: 0,
       actualCost: 0,

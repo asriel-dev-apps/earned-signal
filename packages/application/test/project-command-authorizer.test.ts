@@ -125,6 +125,34 @@ describe("ProjectCommandAuthorizer", () => {
     ).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
   });
 
+  it("requires human approval for an agent assignment change", async () => {
+    const authorizer = createProjectCommandAuthorizer({
+      resolve: async () => ({
+        principalId: "90000000-0000-4000-8000-000000000002",
+        principalType: "AGENT",
+        projectRole: "EDITOR",
+        allowedScopes: ["project:plan:write"],
+      }),
+    });
+
+    await expect(
+      authorizer.authorize({
+        identity: {
+          issuer: "https://identity.example.test/",
+          subject: "planning-agent",
+          scopes: ["project:plan:write"],
+        },
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        projectId: "10000000-0000-4000-8000-000000000001",
+        command: {
+          type: "assignment.replace",
+          taskId: "task-1",
+          assignments: [{ resourceId: "resource-1", unitsPercent: 100 }],
+        },
+      }),
+    ).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
+  });
+
   it("denies an agent when the token omits a scope allowed by its stored grant", async () => {
     const resolver: ProjectAccessGrantResolver = {
       resolve: async () => ({

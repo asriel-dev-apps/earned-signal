@@ -14,6 +14,8 @@ import { and, asc, eq, lte, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   activities,
+  activitySkillRequirements,
+  assignments,
   auditEvents,
   commandReceipts,
   dependencies,
@@ -21,7 +23,10 @@ import {
   progressMeasurements,
   projectCalendars,
   projects,
+  resources,
+  resourceSkills,
   schema,
+  skills,
   wbsNodes,
   worklogs,
 } from "./schema.js";
@@ -198,6 +203,42 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           ),
         )
         .orderBy(asc(projectCalendars.id));
+      const skillRows = await transaction
+        .select()
+        .from(skills)
+        .where(and(eq(skills.tenantId, request.tenantId), eq(skills.projectId, request.projectId)))
+        .orderBy(asc(skills.id));
+      const resourceRows = await transaction
+        .select()
+        .from(resources)
+        .where(
+          and(eq(resources.tenantId, request.tenantId), eq(resources.projectId, request.projectId)),
+        )
+        .orderBy(asc(resources.id));
+      const resourceSkillRows = await transaction
+        .select()
+        .from(resourceSkills)
+        .where(
+          and(
+            eq(resourceSkills.tenantId, request.tenantId),
+            eq(resourceSkills.projectId, request.projectId),
+          ),
+        );
+      const activitySkillRows = await transaction
+        .select()
+        .from(activitySkillRequirements)
+        .where(
+          and(
+            eq(activitySkillRequirements.tenantId, request.tenantId),
+            eq(activitySkillRequirements.projectId, request.projectId),
+          ),
+        );
+      const assignmentRows = await transaction
+        .select()
+        .from(assignments)
+        .where(
+          and(eq(assignments.tenantId, request.tenantId), eq(assignments.projectId, request.projectId)),
+        );
       const dependencyRows = await transaction
         .select()
         .from(dependencies)
@@ -245,6 +286,18 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         });
         dependenciesByActivity.set(dependency.successorActivityId, entries);
       }
+      const skillIdsByResource = new Map<string, string[]>();
+      for (const resourceSkill of resourceSkillRows) {
+        const entries = skillIdsByResource.get(resourceSkill.resourceId) ?? [];
+        entries.push(resourceSkill.skillId);
+        skillIdsByResource.set(resourceSkill.resourceId, entries);
+      }
+      const skillIdsByActivity = new Map<string, string[]>();
+      for (const requirement of activitySkillRows) {
+        const entries = skillIdsByActivity.get(requirement.activityId) ?? [];
+        entries.push(requirement.skillId);
+        skillIdsByActivity.set(requirement.activityId, entries);
+      }
       const progressByActivity = new Map<string, number>();
       for (const measurement of measurementRows) {
         progressByActivity.set(measurement.activityId, measurement.progressBasisPoints / 100);
@@ -285,6 +338,23 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             code: node.code,
             name: node.name,
           })),
+        skills: skillRows.map((skill) => ({ id: skill.id, name: skill.name })),
+        resources: resourceRows.map((resource) => ({
+          id: resource.id,
+          name: resource.name,
+          calendarId: resource.calendarId,
+          dailyCapacityMinutes: resource.dailyCapacityMinutes,
+          costRateMinorPerHour: asSafeNumber(
+            resource.costRateMinorPerHour,
+            `Cost rate for ${resource.id}`,
+          ),
+          skillIds: skillIdsByResource.get(resource.id) ?? [],
+        })),
+        assignments: assignmentRows.map((assignment) => ({
+          taskId: assignment.activityId,
+          resourceId: assignment.resourceId,
+          unitsPercent: assignment.unitsPercent,
+        })),
         tasks: activityRows.map((activity) => ({
           id: activity.id,
           wbs: activity.wbs,
@@ -299,6 +369,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             activity.constraintType === null || activity.constraintDate === null
               ? null
               : { type: activity.constraintType, date: activity.constraintDate },
+          requiredSkillIds: skillIdsByActivity.get(activity.id) ?? [],
           budget: asSafeNumber(activity.budgetMinor, `Budget for ${activity.id}`),
           progressPercent: progressByActivity.get(activity.id) ?? 0,
           actualCost: asSafeNumber(costByActivity.get(activity.id) ?? 0n, `Actual cost for ${activity.id}`),
@@ -330,6 +401,27 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       }
 
       await transaction
+        .delete(assignments)
+        .where(
+          and(eq(assignments.tenantId, request.tenantId), eq(assignments.projectId, request.projectId)),
+        );
+      await transaction
+        .delete(activitySkillRequirements)
+        .where(
+          and(
+            eq(activitySkillRequirements.tenantId, request.tenantId),
+            eq(activitySkillRequirements.projectId, request.projectId),
+          ),
+        );
+      await transaction
+        .delete(resourceSkills)
+        .where(
+          and(
+            eq(resourceSkills.tenantId, request.tenantId),
+            eq(resourceSkills.projectId, request.projectId),
+          ),
+        );
+      await transaction
         .delete(dependencies)
         .where(
           and(
@@ -337,6 +429,70 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             eq(dependencies.projectId, request.projectId),
           ),
         );
+
+      const nextResourceById = new Map(next.resources.map((resource) => [resource.id, resource]));
+      const currentResourceById = new Map(current.resources.map((resource) => [resource.id, resource]));
+      for (const resource of resourceRows) {
+        if (!nextResourceById.has(resource.id)) {
+          await transaction
+            .delete(resources)
+            .where(
+              and(
+                eq(resources.tenantId, request.tenantId),
+                eq(resources.projectId, request.projectId),
+                eq(resources.id, resource.id),
+              ),
+            );
+        }
+      }
+      const currentResourceIds = new Set(resourceRows.map((resource) => resource.id));
+      for (const resource of next.resources) {
+        const values = {
+          name: resource.name,
+          calendarId: resource.calendarId,
+          dailyCapacityMinutes: resource.dailyCapacityMinutes,
+          costRateMinorPerHour: BigInt(resource.costRateMinorPerHour),
+        };
+        if (currentResourceIds.has(resource.id)) {
+          const previous = currentResourceById.get(resource.id);
+          const changed =
+            previous?.name !== resource.name ||
+            previous.calendarId !== resource.calendarId ||
+            previous.dailyCapacityMinutes !== resource.dailyCapacityMinutes ||
+            previous.costRateMinorPerHour !== resource.costRateMinorPerHour ||
+            previous.skillIds.length !== resource.skillIds.length ||
+            previous.skillIds.some((skillId, index) => skillId !== resource.skillIds[index]);
+          if (changed) {
+            await transaction
+              .update(resources)
+              .set({ ...values, updatedAt: sql`now()` })
+              .where(
+                and(
+                  eq(resources.tenantId, request.tenantId),
+                  eq(resources.projectId, request.projectId),
+                  eq(resources.id, resource.id),
+                ),
+              );
+          }
+        } else {
+          await transaction.insert(resources).values({
+            id: resource.id,
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            ...values,
+          });
+        }
+        if (resource.skillIds.length > 0) {
+          await transaction.insert(resourceSkills).values(
+            resource.skillIds.map((skillId) => ({
+              tenantId: request.tenantId,
+              projectId: request.projectId,
+              resourceId: resource.id,
+              skillId,
+            })),
+          );
+        }
+      }
 
       for (const activity of activityRows) {
         if (!nextById.has(activity.id)) {
@@ -428,6 +584,17 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             );
         }
 
+        if (task.requiredSkillIds.length > 0) {
+          await transaction.insert(activitySkillRequirements).values(
+            task.requiredSkillIds.map((skillId) => ({
+              tenantId: request.tenantId,
+              projectId: request.projectId,
+              activityId: task.id,
+              skillId,
+            })),
+          );
+        }
+
         for (const dependency of task.dependencies) {
           await transaction.insert(dependencies).values({
             tenantId: request.tenantId,
@@ -494,6 +661,18 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             description: `${request.command.type} via ${request.actor.type.toLowerCase()}`,
           });
         }
+      }
+
+      if (next.assignments.length > 0) {
+        await transaction.insert(assignments).values(
+          next.assignments.map((assignment) => ({
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            activityId: assignment.taskId,
+            resourceId: assignment.resourceId,
+            unitsPercent: assignment.unitsPercent,
+          })),
+        );
       }
 
       const resultRevision = actualRevision + 1n;

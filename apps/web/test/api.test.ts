@@ -343,6 +343,46 @@ describe("project command REST API", () => {
     });
   });
 
+  it("replaces task assignments through the authenticated REST contract", async () => {
+    const taskId = demoProjectRecord.activities[0]!.id;
+    const assignments = [
+      { resourceId: demoProjectRecord.resources[0]!.id, unitsPercent: 50 },
+      { resourceId: demoProjectRecord.resources[1]!.id, unitsPercent: 25 },
+    ];
+    const response = await fetch(
+      `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/commands`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "worker-replace-assignments",
+          authorization: `Bearer ${humanAccessToken}`,
+        },
+        body: JSON.stringify({
+          expectedRevision: "1",
+          command: { type: "assignment.replace", taskId, assignments },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(
+      stored?.assignments
+        .filter((assignment) => assignment.activityId === taskId)
+        .map(({ resourceId, unitsPercent }) => ({ resourceId, unitsPercent })),
+    ).toEqual(assignments);
+    expect(stored?.auditEvents.at(-1)).toMatchObject({
+      actorType: "HUMAN",
+      actorId: humanPrincipalId,
+      commandType: "assignment.replace",
+      projectRevision: 2n,
+    });
+  });
+
   it("executes a scoped agent progress command and audits the service principal", async () => {
     const task = demoProjectRecord.activities[2]!;
     const response = await fetch(
@@ -686,6 +726,10 @@ describe("project command REST API", () => {
         "update_project_task",
         "add_project_task",
         "delete_project_task",
+        "add_project_resource",
+        "update_project_resource",
+        "delete_project_resource",
+        "replace_task_assignments",
       ]);
       expect(tools.tools.map((tool) => tool.annotations)).toEqual([
         {
@@ -704,6 +748,34 @@ describe("project command REST API", () => {
         },
         {
           title: "Delete project task",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Add project resource",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Update project resource",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Delete project resource",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Replace task assignments",
           readOnlyHint: false,
           destructiveHint: true,
           idempotentHint: true,
@@ -796,6 +868,7 @@ describe("project command REST API", () => {
             calendarId: demoProjectRecord.project.defaultCalendarId,
             dependencies: [],
             constraint: null,
+            requiredSkillIds: [],
             budgetMinor: "80000",
             progressBasisPoints: 0,
             actualCostMinor: "0",
@@ -828,6 +901,50 @@ describe("project command REST API", () => {
       "task.add",
       "task.delete",
     ]);
+  });
+
+  it("replaces and audits task assignments through the human MCP tool", async () => {
+    const mcp = new McpClient({ name: "earned-signal-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(`${workerOrigin}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${humanMcpAccessToken}` } },
+    });
+    const taskId = demoProjectRecord.activities[0]!.id;
+    const assignments = [
+      { resourceId: demoProjectRecord.resources[0]!.id, unitsPercent: 50 },
+      { resourceId: demoProjectRecord.resources[1]!.id, unitsPercent: 25 },
+    ];
+
+    try {
+      await mcp.connect(transport as Transport);
+      const result = await mcp.callTool({
+        name: "replace_task_assignments",
+        arguments: {
+          tenantId: demoProjectRecord.tenant.id,
+          projectId: demoProjectRecord.project.id,
+          expectedRevision: "1",
+          idempotencyKey: "mcp-human-replace-assignments",
+          taskId,
+          assignments,
+        },
+      });
+      expect(result.structuredContent).toMatchObject({ revision: "2", replayed: false });
+    } finally {
+      await mcp.close();
+    }
+
+    const stored = await repository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+    );
+    expect(
+      stored?.assignments
+        .filter((assignment) => assignment.activityId === taskId)
+        .map(({ resourceId, unitsPercent }) => ({ resourceId, unitsPercent })),
+    ).toEqual(assignments);
+    expect(stored?.auditEvents.at(-1)).toMatchObject({
+      actorType: "HUMAN",
+      commandType: "assignment.replace",
+    });
   });
 
   it("returns an approval error instead of applying an agent plan tool", async () => {
@@ -966,6 +1083,7 @@ describe("project command REST API", () => {
             calendarId: demoProjectRecord.project.defaultCalendarId,
             dependencies: [],
             constraint: null,
+            requiredSkillIds: [],
             budgetMinor: "9007199254740992",
             progressBasisPoints: 0,
             actualCostMinor: "0",

@@ -23,13 +23,15 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A React shell and Hono `/api/health` route built together by the Cloudflare Vite plugin.
 - An editable AG Grid Community workspace for hierarchical leaf work packages, typed dependencies, calendars, and constraints, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
 - Add and delete commands plus typed cell updates through the shared application command boundary.
+- Project Skills, Resources, calendar-based daily capacity, hourly planned rates, required Skills, and percentage Assignments, with overload and Skill-gap analysis.
+- An editable task Assignment surface and Current-only Team workload view with utilization, daily demand, over-allocation, Skill gaps, and planned labor cost. Baseline Resource snapshots are completed with persisted Baseline publishing.
 - A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, schedule calendars and constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
 - An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
 - Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.
-- A stateless Streamable HTTP MCP endpoint with OAuth protected-resource metadata, a resource-specific token audience, focused task tools, and the same authorization, validation, idempotency, transaction, and audit boundary as REST.
+- A stateless Streamable HTTP MCP endpoint with OAuth protected-resource metadata, a resource-specific token audience, focused task, Resource, and Assignment tools, and the same authorization, validation, idempotency, transaction, and audit boundary as REST.
 - Node.js 24 LTS and pnpm for development and CI.
 
 ## Explicitly out of scope
@@ -37,7 +39,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - Billing, self-service signup/invitation UI, and production identity-provider tenant/client provisioning.
 - Production PostgreSQL provisioning and Hyperdrive bindings.
 - Enterprise-only WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features. Hierarchy is edited through typed Community-grid columns.
-- Resource leveling and capacity optimization. Activity calendars and holidays are supported without automatic leveling.
+- Automatic resource leveling and capacity optimization. Capacity and over-allocation are analyzed without automatically changing the schedule.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 

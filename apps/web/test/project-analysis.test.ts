@@ -19,6 +19,9 @@ function zeroHundredProject(progressPercent: 0 | 100): ProjectState {
       },
     ],
     wbsGroups: [],
+    skills: [],
+    resources: [],
+    assignments: [],
     tasks: [
       {
         id: "task-1",
@@ -31,6 +34,7 @@ function zeroHundredProject(progressPercent: 0 | 100): ProjectState {
         calendarId: "standard",
         dependencies: [],
         constraint: null,
+        requiredSkillIds: [],
         budget: 100_000,
         progressPercent,
         actualCost: 0,

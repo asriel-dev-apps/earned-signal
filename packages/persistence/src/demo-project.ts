@@ -73,6 +73,36 @@ const activities: readonly ActivityRecord[] = taskDefinitions.map(
   }),
 );
 
+const skillIds = {
+  delivery: entityId(13, 1),
+  api: entityId(13, 2),
+  ux: entityId(13, 3),
+} as const;
+
+const resourceIds = {
+  maya: entityId(14, 1),
+  leo: entityId(14, 2),
+  noah: entityId(14, 3),
+} as const;
+
+const resourceIdByOwner: Readonly<Record<string, string>> = {
+  "Maya Chen": resourceIds.maya,
+  "Leo Martin": resourceIds.leo,
+  "Noah Williams": resourceIds.noah,
+};
+
+const requiredSkillByTask = [
+  skillIds.delivery,
+  skillIds.ux,
+  skillIds.api,
+  skillIds.ux,
+  skillIds.api,
+  skillIds.delivery,
+  skillIds.delivery,
+  skillIds.delivery,
+  skillIds.delivery,
+] as const;
+
 export const demoProjectRecord: PersistedProjectRecord = {
   tenant: { id: tenantId, name: "EarnedSignal demo" },
   project: {
@@ -101,8 +131,61 @@ export const demoProjectRecord: PersistedProjectRecord = {
     workingWeekdays: [2, 3, 4, 5, 6],
     nonWorkingDates: ["2026-08-11"],
   }],
+  skills: [
+    { id: skillIds.delivery, tenantId, projectId, name: "Delivery management" },
+    { id: skillIds.api, tenantId, projectId, name: "API engineering" },
+    { id: skillIds.ux, tenantId, projectId, name: "Experience design" },
+  ],
+  resources: [
+    {
+      id: resourceIds.maya,
+      tenantId,
+      projectId,
+      name: "Maya Chen",
+      calendarId: "standard",
+      dailyCapacityMinutes: 480,
+      costRateMinorPerHour: 6_000n,
+    },
+    {
+      id: resourceIds.leo,
+      tenantId,
+      projectId,
+      name: "Leo Martin",
+      calendarId: "support",
+      dailyCapacityMinutes: 420,
+      costRateMinorPerHour: 6_500n,
+    },
+    {
+      id: resourceIds.noah,
+      tenantId,
+      projectId,
+      name: "Noah Williams",
+      calendarId: "standard",
+      dailyCapacityMinutes: 480,
+      costRateMinorPerHour: 7_000n,
+    },
+  ],
+  resourceSkills: [
+    { tenantId, projectId, resourceId: resourceIds.maya, skillId: skillIds.delivery },
+    { tenantId, projectId, resourceId: resourceIds.leo, skillId: skillIds.delivery },
+    { tenantId, projectId, resourceId: resourceIds.leo, skillId: skillIds.ux },
+    { tenantId, projectId, resourceId: resourceIds.noah, skillId: skillIds.api },
+  ],
   wbsNodes,
   activities,
+  activitySkillRequirements: activities.map((activity, index) => ({
+    tenantId,
+    projectId,
+    activityId: activity.id,
+    skillId: requiredSkillByTask[index]!,
+  })),
+  assignments: taskDefinitions.map(({ owner }, index) => ({
+    tenantId,
+    projectId,
+    activityId: entityId(3, index + 1),
+    resourceId: resourceIdByOwner[owner]!,
+    unitsPercent: 100,
+  })),
   dependencies: taskDefinitions.flatMap(({ predecessor }, index) =>
     predecessor === null
       ? []

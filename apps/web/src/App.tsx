@@ -24,11 +24,14 @@ import { baselineProject, initialProject } from "./demo-project";
 import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 
 type ProjectMode = "current" | "baseline";
+type WorkspaceView = "wbs" | "team";
 
 interface TaskRow extends ProjectTask {
   readonly actualHours: number;
   readonly dependenciesText: string;
   readonly constraintText: string;
+  readonly assignmentsText: string;
+  readonly requiredSkillsText: string;
   readonly earlyStart: string;
   readonly earlyFinish: string;
   readonly totalFloatWorkingDays: number;
@@ -247,6 +250,16 @@ function TaskDetail({
             <dt>Constraint</dt>
             <dd>{row.constraintText || "None"}</dd>
           </div>
+          <div className="detail-grid--wide">
+            <dt>Assignments</dt>
+            <dd>{row.assignmentsText || "None"}</dd>
+          </div>
+          <div className="detail-grid--wide">
+            <dt>Required skills</dt>
+            <dd>{task.requiredSkillIds
+              .map((skillId) => project.skills.find((skill) => skill.id === skillId)?.name ?? skillId)
+              .join(", ") || "None"}</dd>
+          </div>
         </dl>
         </>
       )}
@@ -278,6 +291,26 @@ function formatConstraint(task: ProjectTask): string {
     ([, type]) => type === task.constraint?.type,
   )?.[0];
   return `${code ?? task.constraint.type} ${task.constraint.date}`;
+}
+
+function formatAssignments(taskId: string, project: ProjectState): string {
+  return project.assignments
+    .filter((assignment) => assignment.taskId === taskId)
+    .map((assignment) => `${assignment.resourceId} ${String(assignment.unitsPercent)}%`)
+    .join(", ");
+}
+
+function parseAssignments(value: unknown, project: ProjectState) {
+  const text = String(value ?? "").trim();
+  if (text.length === 0) return [];
+  const resourceIds = new Set(project.resources.map((resource) => resource.id));
+  return text.split(",").map((entry) => {
+    const match = /^(\S+)\s+(\d{1,3})%$/.exec(entry.trim());
+    if (match === null) throw new Error("Assignments use ‘Resource 100%’, separated by commas");
+    const resourceId = match[1] ?? "";
+    if (!resourceIds.has(resourceId)) throw new Error(`Unknown resource: ${resourceId}`);
+    return { resourceId, unitsPercent: Number(match[2]) };
+  });
 }
 
 function parseDependencies(value: unknown, project: ProjectState) {
@@ -328,6 +361,16 @@ function changesForField(
   if (field === "constraintText") {
     return { constraint: parseConstraint(value) };
   }
+  if (field === "requiredSkillsText") {
+    const ids = String(value ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (ids.some((id) => !project.skills.some((skill) => skill.id === id))) {
+      throw new Error("Required skills must reference configured skill IDs");
+    }
+    return { requiredSkillIds: ids };
+  }
   const numericValue = Number(value);
   if (field === "durationWorkingDays") {
     return { durationWorkingDays: numericValue };
@@ -344,9 +387,103 @@ function changesForField(
   return {};
 }
 
+function TeamWorkload({
+  project,
+  analysis,
+}: {
+  readonly project: ProjectState;
+  readonly analysis: ProjectAnalysis;
+}) {
+  return (
+    <section className="team-workload" aria-label="Team workload">
+      <div className="team-summary">
+        <div>
+          <span>TEAM MEMBERS</span>
+          <strong>{project.resources.length}</strong>
+        </div>
+        <div>
+          <span>OVER-ALLOCATED</span>
+          <strong className={analysis.capacity.overallocatedResourceIds.length > 0 ? "risk-text" : ""}>
+            {analysis.capacity.overallocatedResourceIds.length}
+          </strong>
+        </div>
+        <div>
+          <span>PLANNED LABOR</span>
+          <strong>{formatCurrency(analysis.capacity.resources.reduce(
+            (total, resource) => total + resource.plannedLaborCostMinor,
+            0,
+          ))}</strong>
+        </div>
+        <div>
+          <span>SKILL GAPS</span>
+          <strong className={analysis.capacity.skillGapActivityIds.length > 0 ? "risk-text" : ""}>
+            {analysis.capacity.skillGapActivityIds.length}
+          </strong>
+        </div>
+      </div>
+      <div className="resource-list">
+        {analysis.capacity.resources.map((capacity) => {
+          const resource = project.resources.find((candidate) => candidate.id === capacity.resourceId);
+          if (resource === undefined) return null;
+          const assignedTasks = project.assignments
+            .filter((assignment) => assignment.resourceId === resource.id)
+            .map((assignment) => project.tasks.find((task) => task.id === assignment.taskId)?.name)
+            .filter((name): name is string => name !== undefined);
+          const skillNames = resource.skillIds
+            .map((skillId) => project.skills.find((skill) => skill.id === skillId)?.name)
+            .filter((name): name is string => name !== undefined);
+          const busiestDays = capacity.days
+            .filter((day) => day.demandMinutes > 0)
+            .sort((left, right) => right.demandMinutes - left.demandMinutes)
+            .slice(0, 5);
+          return (
+            <article className="resource-card" key={resource.id}>
+              <header>
+                <div>
+                  <span className="resource-id">{resource.id}</span>
+                  <h2>{resource.name}</h2>
+                  <p>{skillNames.join(" · ") || "No skills recorded"}</p>
+                </div>
+                <div className={capacity.overallocatedMinutes > 0 ? "load-pill load-pill--risk" : "load-pill"}>
+                  {capacity.utilizationPercent.toFixed(0)}% utilized
+                </div>
+              </header>
+              <div className="resource-meta">
+                <span>{resource.dailyCapacityMinutes / 60} h/day</span>
+                <span>{formatCurrency(resource.costRateMinorPerHour)}/h</span>
+                <span>{assignedTasks.length} assignments</span>
+                {capacity.skillGapActivityIds.length > 0 ? (
+                  <span className="risk-text">{capacity.skillGapActivityIds.length} skill gaps</span>
+                ) : null}
+              </div>
+              <div className="load-days">
+                {busiestDays.map((day) => {
+                  const ratio = day.capacityMinutes === 0 ? 0 : day.demandMinutes / day.capacityMinutes;
+                  return (
+                    <div className="load-day" key={day.date}>
+                      <span>{formatDate(day.date)}</span>
+                      <div><i
+                        className={day.overallocatedMinutes > 0 ? "load-bar load-bar--risk" : "load-bar"}
+                        style={{ width: `${Math.min(100, ratio * 100)}%` }}
+                      /></div>
+                      <strong>{(day.demandMinutes / 60).toFixed(1)} h</strong>
+                    </div>
+                  );
+                })}
+              </div>
+              <footer>{assignedTasks.join(" · ") || "No work packages assigned"}</footer>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function App() {
   const [currentProject, setCurrentProject] = useState<ProjectState>(initialProject);
   const [mode, setMode] = useState<ProjectMode>("current");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wbs");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [notice, setNotice] = useState<string | null>(null);
   const displayedProject = mode === "baseline" ? baselineProject : currentProject;
@@ -366,10 +503,12 @@ export function App() {
           actualHours: task.actualMinutes / 60,
           dependenciesText: formatDependencies(task),
           constraintText: formatConstraint(task),
+          assignmentsText: formatAssignments(task.id, displayedProject),
+          requiredSkillsText: task.requiredSkillIds.join(", "),
           ...scheduled,
         };
       }),
-    [analysis, displayedProject.tasks],
+    [analysis, displayedProject],
   );
 
   const executeCommand = useCallback((command: ProjectCommand): boolean => {
@@ -392,6 +531,14 @@ export function App() {
         return;
       }
       try {
+        if (event.colDef.field === "assignmentsText") {
+          executeCommand({
+            type: "assignment.replace",
+            taskId: event.data.id,
+            assignments: parseAssignments(event.newValue, currentProject),
+          });
+          return;
+        }
         const changes = changesForField(event.colDef.field, event.newValue, currentProject);
         executeCommand({
           type: "task.update",
@@ -442,6 +589,22 @@ export function App() {
         valueFormatter: ({ value }) => `↳ ${String(value ?? "")}`,
       },
       { field: "owner", headerName: "Owner", width: 132, editable, cellClass: "editable-cell" },
+      {
+        field: "assignmentsText",
+        headerName: "Assignments",
+        width: 170,
+        editable,
+        cellClass: "editable-cell assignment-cell",
+        valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
+      },
+      {
+        field: "requiredSkillsText",
+        headerName: "Required skills",
+        width: 145,
+        editable,
+        cellClass: "editable-cell",
+        valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
+      },
       {
         field: "durationWorkingDays",
         headerName: "Days",
@@ -545,6 +708,7 @@ export function App() {
       calendarId: currentProject.defaultCalendarId,
       dependencies: [],
       constraint: null,
+      requiredSkillIds: [],
       budget: 0,
       progressPercent: 0,
       actualCost: 0,
@@ -570,10 +734,21 @@ export function App() {
         <aside className="sidebar">
           <div className="brand-mark">ES</div>
           <nav aria-label="Primary">
-            <button className="nav-button nav-button--active" aria-label="Work breakdown">
+            <button
+              className={`nav-button ${workspaceView === "wbs" ? "nav-button--active" : ""}`}
+              aria-label="Work breakdown"
+              onClick={() => setWorkspaceView("wbs")}
+            >
               <Icon name="grid" />
             </button>
-            <button className="nav-button" aria-label="Performance">
+            <button
+              className={`nav-button ${workspaceView === "team" ? "nav-button--active" : ""}`}
+              aria-label="Team workload"
+              onClick={() => {
+                setWorkspaceView("team");
+                setMode("current");
+              }}
+            >
               <Icon name="pulse" />
             </button>
             <button className="nav-button" aria-label="Scenarios">
@@ -607,7 +782,7 @@ export function App() {
             <div className="page-heading">
               <div>
                 <p className="breadcrumb">PROJECTS / CUSTOMER PORTAL LAUNCH</p>
-                <h1>Project control</h1>
+                <h1>{workspaceView === "wbs" ? "Project control" : "Team workload"}</h1>
               </div>
               <div className="mode-switch" aria-label="Plan view">
                 <button
@@ -619,6 +794,8 @@ export function App() {
                 <button
                   className={mode === "baseline" ? "active" : ""}
                   onClick={() => setMode("baseline")}
+                  disabled={workspaceView === "team"}
+                  title={workspaceView === "team" ? "Team workload currently shows the Current plan" : undefined}
                 >
                   Baseline
                 </button>
@@ -633,6 +810,10 @@ export function App() {
               </div>
             )}
 
+            {workspaceView === "team" ? (
+              <TeamWorkload project={displayedProject} analysis={analysis} />
+            ) : (
+            <>
             <section className="metric-grid" aria-label="Key project metrics">
               <MetricCard
                 label="FORECAST FINISH"
@@ -711,6 +892,8 @@ export function App() {
                 <TaskDetail task={selectedTask} row={selectedRow} project={displayedProject} />
               </aside>
             </div>
+            </>
+            )}
           </div>
         </main>
       </div>

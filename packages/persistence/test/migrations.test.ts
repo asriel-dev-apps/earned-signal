@@ -28,6 +28,8 @@ describe("persistence migrations", () => {
 
     expect(result.rows.map((row) => row.table_name)).toEqual([
       "activities",
+      "activity_skill_requirements",
+      "assignments",
       "audit_events",
       "baseline_activities",
       "baseline_calendars",
@@ -42,6 +44,9 @@ describe("persistence migrations", () => {
       "project_calendars",
       "project_memberships",
       "projects",
+      "resource_skills",
+      "resources",
+      "skills",
       "tenant_memberships",
       "tenants",
       "wbs_nodes",
@@ -105,6 +110,8 @@ describe("persistence migrations", () => {
     const projectB = "10000000-0000-4000-8000-000000000002";
     const wbsA = "20000000-0000-4000-8000-000000000001";
     const activityA = "30000000-0000-4000-8000-000000000001";
+    const resourceA = "60000000-0000-4000-8000-000000000001";
+    const resourceB = "60000000-0000-4000-8000-000000000002";
 
     await client.query(
       "insert into tenants (id, name) values ($1, 'Tenant A'), ($2, 'Tenant B')",
@@ -135,6 +142,13 @@ describe("persistence migrations", () => {
        values ($1, $2, $3, $4, 'Activity A', 1, 100, 'PHYSICAL_PERCENT')`,
       [activityA, tenantA, projectA, wbsA],
     );
+    await client.query(
+      `insert into resources
+         (id, tenant_id, project_id, name, calendar_id, daily_capacity_minutes, cost_rate_minor_per_hour)
+       values ($1, $2, $3, 'Resource A', 'standard', 480, 6000),
+              ($4, $5, $6, 'Resource B', 'standard', 480, 6000)`,
+      [resourceA, tenantA, projectA, resourceB, tenantB, projectB],
+    );
 
     await expect(
       client.query(
@@ -151,6 +165,23 @@ describe("persistence migrations", () => {
            (tenant_id, project_id, activity_id, work_date, actual_minutes, rate_minor_per_hour, person_ref)
          values ($1, $2, $3, '2026-01-01', -1, '1000.000000', 'person-a')`,
         [tenantA, projectA, activityA],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+
+    await expect(
+      client.query(
+        `insert into assignments
+           (tenant_id, project_id, activity_id, resource_id, units_percent)
+         values ($1, $2, $3, $4, 100)`,
+        [tenantA, projectA, activityA, resourceB],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      client.query(
+        `insert into assignments
+           (tenant_id, project_id, activity_id, resource_id, units_percent)
+         values ($1, $2, $3, $4, 101)`,
+        [tenantA, projectA, activityA, resourceA],
       ),
     ).rejects.toMatchObject({ code: "23514" });
 

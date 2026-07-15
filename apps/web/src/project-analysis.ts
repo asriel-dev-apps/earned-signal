@@ -1,8 +1,12 @@
-import type { ProjectState } from "@earned-signal/application";
+import {
+  calculateProjectCapacity,
+  type ProjectState,
+} from "@earned-signal/application";
 import {
   calculateEvm,
   calculateSchedule,
   type EvmResult,
+  type CapacityResult,
   type ScheduledActivity,
 } from "@earned-signal/domain";
 
@@ -11,6 +15,7 @@ export interface ProjectAnalysis {
   readonly projectFinish: string;
   readonly baselineFinish: string;
   readonly evm: EvmResult;
+  readonly capacity: CapacityResult;
 }
 
 function schedule(project: ProjectState) {
@@ -75,11 +80,13 @@ export function analyzeProject(
       };
     }),
   });
+  const capacity = calculateProjectCapacity(project, currentSchedule);
 
   return {
     scheduleById: currentById,
     projectFinish: currentSchedule.projectFinish,
     baselineFinish: baselineSchedule.projectFinish,
     evm,
+    capacity,
   };
 }

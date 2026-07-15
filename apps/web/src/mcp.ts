@@ -3,7 +3,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpHandler } from "agents/mcp";
 import { z } from "zod";
 import {
+  AssignmentSchema,
   RevisionSchema,
+  ResourceChangesSchema,
+  ResourceSchema,
   TaskChangesSchema,
   TaskSchema,
   UuidSchema,
@@ -188,6 +191,112 @@ function createServer(
         identity,
         { tenantId, projectId, expectedRevision, idempotencyKey },
         () => toCommand({ type: "task.delete", taskId }),
+      ),
+  );
+  server.registerTool(
+    "add_project_resource",
+    {
+      description: "Add a resource with its capacity, rate, calendar, and skills.",
+      annotations: {
+        title: "Add project resource",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ...ProjectCommandContextShape,
+        resource: ResourceSchema.describe("Complete resource to add"),
+      },
+      outputSchema: ProjectCommandOutputShape,
+    },
+    async ({ tenantId, projectId, expectedRevision, idempotencyKey, resource }) =>
+      executeCommand(
+        dependencies,
+        environment,
+        identity,
+        { tenantId, projectId, expectedRevision, idempotencyKey },
+        () => toCommand({ type: "resource.add", resource }),
+      ),
+  );
+  server.registerTool(
+    "update_project_resource",
+    {
+      description: "Update a resource's capacity, rate, calendar, name, or skills.",
+      annotations: {
+        title: "Update project resource",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ...ProjectCommandContextShape,
+        resourceId: UuidSchema.describe("Resource to update"),
+        changes: ResourceChangesSchema.describe("Only the resource fields that should change"),
+      },
+      outputSchema: ProjectCommandOutputShape,
+    },
+    async ({ tenantId, projectId, expectedRevision, idempotencyKey, resourceId, changes }) =>
+      executeCommand(
+        dependencies,
+        environment,
+        identity,
+        { tenantId, projectId, expectedRevision, idempotencyKey },
+        () => toCommand({ type: "resource.update", resourceId, changes }),
+      ),
+  );
+  server.registerTool(
+    "delete_project_resource",
+    {
+      description: "Delete an unassigned resource from a project.",
+      annotations: {
+        title: "Delete project resource",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ...ProjectCommandContextShape,
+        resourceId: UuidSchema.describe("Resource to delete"),
+      },
+      outputSchema: ProjectCommandOutputShape,
+    },
+    async ({ tenantId, projectId, expectedRevision, idempotencyKey, resourceId }) =>
+      executeCommand(
+        dependencies,
+        environment,
+        identity,
+        { tenantId, projectId, expectedRevision, idempotencyKey },
+        () => toCommand({ type: "resource.delete", resourceId }),
+      ),
+  );
+  server.registerTool(
+    "replace_task_assignments",
+    {
+      description: "Replace every resource assignment for one project task atomically.",
+      annotations: {
+        title: "Replace task assignments",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ...ProjectCommandContextShape,
+        taskId: UuidSchema.describe("Task whose assignments should be replaced"),
+        assignments: z.array(AssignmentSchema).max(100),
+      },
+      outputSchema: ProjectCommandOutputShape,
+    },
+    async ({ tenantId, projectId, expectedRevision, idempotencyKey, taskId, assignments }) =>
+      executeCommand(
+        dependencies,
+        environment,
+        identity,
+        { tenantId, projectId, expectedRevision, idempotencyKey },
+        () => toCommand({ type: "assignment.replace", taskId, assignments }),
       ),
   );
   return server;

@@ -148,6 +148,85 @@ export const projectCalendars = pgTable(
   ],
 );
 
+export const skills = pgTable(
+  "skills",
+  {
+    id: uuid().defaultRandom().notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "skills_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("skills_name_not_blank", sql`length(trim(${table.name})) > 0`),
+  ],
+);
+
+export const resources = pgTable(
+  "resources",
+  {
+    id: uuid().defaultRandom().notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    calendarId: text("calendar_id").notNull(),
+    dailyCapacityMinutes: integer("daily_capacity_minutes").notNull(),
+    costRateMinorPerHour: bigint("cost_rate_minor_per_hour", { mode: "bigint" }).notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "resources_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "resources_calendar_fk",
+      columns: [table.tenantId, table.projectId, table.calendarId],
+      foreignColumns: [projectCalendars.tenantId, projectCalendars.projectId, projectCalendars.id],
+    }).onDelete("restrict"),
+    check("resources_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check(
+      "resources_daily_capacity_range",
+      sql`${table.dailyCapacityMinutes} between 1 and 1440`,
+    ),
+    check("resources_cost_rate_non_negative", sql`${table.costRateMinorPerHour} >= 0`),
+  ],
+);
+
+export const resourceSkills = pgTable(
+  "resource_skills",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    resourceId: uuid("resource_id").notNull(),
+    skillId: uuid("skill_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.resourceId, table.skillId] }),
+    foreignKey({
+      name: "resource_skills_resource_fk",
+      columns: [table.tenantId, table.projectId, table.resourceId],
+      foreignColumns: [resources.tenantId, resources.projectId, resources.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "resource_skills_skill_fk",
+      columns: [table.tenantId, table.projectId, table.skillId],
+      foreignColumns: [skills.tenantId, skills.projectId, skills.id],
+    }).onDelete("restrict"),
+  ],
+);
+
 export const projectMemberships = pgTable(
   "project_memberships",
   {
@@ -259,6 +338,58 @@ export const activities = pgTable(
       "activities_constraint_complete",
       sql`(${table.constraintType} is null) = (${table.constraintDate} is null)`,
     ),
+  ],
+);
+
+export const activitySkillRequirements = pgTable(
+  "activity_skill_requirements",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    activityId: uuid("activity_id").notNull(),
+    skillId: uuid("skill_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.activityId, table.skillId] }),
+    foreignKey({
+      name: "activity_skill_requirements_activity_fk",
+      columns: [table.tenantId, table.projectId, table.activityId],
+      foreignColumns: [activities.tenantId, activities.projectId, activities.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "activity_skill_requirements_skill_fk",
+      columns: [table.tenantId, table.projectId, table.skillId],
+      foreignColumns: [skills.tenantId, skills.projectId, skills.id],
+    }).onDelete("restrict"),
+  ],
+);
+
+export const assignments = pgTable(
+  "assignments",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    activityId: uuid("activity_id").notNull(),
+    resourceId: uuid("resource_id").notNull(),
+    unitsPercent: integer("units_percent").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.activityId, table.resourceId] }),
+    index("assignments_resource_idx").on(table.tenantId, table.projectId, table.resourceId),
+    foreignKey({
+      name: "assignments_activity_fk",
+      columns: [table.tenantId, table.projectId, table.activityId],
+      foreignColumns: [activities.tenantId, activities.projectId, activities.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "assignments_resource_fk",
+      columns: [table.tenantId, table.projectId, table.resourceId],
+      foreignColumns: [resources.tenantId, resources.projectId, resources.id],
+    }).onDelete("restrict"),
+    check("assignments_units_range", sql`${table.unitsPercent} between 1 and 100`),
   ],
 );
 
@@ -742,9 +873,14 @@ export const schema = {
   tenantMemberships,
   projects,
   projectCalendars,
+  skills,
+  resources,
+  resourceSkills,
   projectMemberships,
   wbsNodes,
   activities,
+  activitySkillRequirements,
+  assignments,
   dependencies,
   baselineVersions,
   baselineCalendars,
