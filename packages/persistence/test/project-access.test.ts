@@ -135,11 +135,19 @@ describe("PostgreSQL project access", () => {
     await client.query("insert into tenants (id, name) values ($1, 'Second tenant')", [
       secondTenantId,
     ]);
+    await client.query("begin");
     await client.query(
       `insert into projects (id, tenant_id, name, project_start, status_date)
        values ($1, $2, 'Second project', '2026-07-13', '2026-07-13')`,
       [secondProjectId, secondTenantId],
     );
+    await client.query(
+      `insert into project_calendars
+         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
+       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
+      [secondTenantId, secondProjectId],
+    );
+    await client.query("commit");
 
     await accessRepository.provision({
       principal,

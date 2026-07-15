@@ -12,15 +12,33 @@ const MinorUnitSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
 const ProgressBasisPointsSchema = z.number().int().min(0).max(10_000);
 const MeasurementMethodSchema = z.enum(["ZERO_HUNDRED", "PHYSICAL_PERCENT"]);
 const DurationSchema = z.number().int().min(1).max(MAX_ACTIVITY_DURATION_WORKING_DAYS);
+const CalendarIdSchema = z.string().trim().min(1).max(100);
+const DependencySchema = z.object({
+  predecessorId: UuidSchema,
+  type: z.enum(["FS", "SS", "FF", "SF"]),
+  lagWorkingDays: z.number().int().min(0).max(MAX_ACTIVITY_DURATION_WORKING_DAYS),
+});
+const ConstraintSchema = z.object({
+  type: z.enum([
+    "START_NO_EARLIER_THAN",
+    "FINISH_NO_LATER_THAN",
+    "MUST_START_ON",
+    "MUST_FINISH_ON",
+  ]),
+  date: z.iso.date(),
+});
 
 export const TaskChangesSchema = z
   .object({
     wbs: z.string().trim().min(1).optional(),
+    wbsParentId: UuidSchema.nullable().optional(),
     name: z.string().trim().min(1).optional(),
     owner: z.string().optional(),
     durationWorkingDays: DurationSchema.optional(),
     measurementMethod: MeasurementMethodSchema.optional(),
-    predecessorId: UuidSchema.nullable().optional(),
+    calendarId: CalendarIdSchema.optional(),
+    dependencies: z.array(DependencySchema).max(100).optional(),
+    constraint: ConstraintSchema.nullable().optional(),
     budgetMinor: MinorUnitSchema.optional(),
     progressBasisPoints: ProgressBasisPointsSchema.optional(),
     actualCostMinor: MinorUnitSchema.optional(),
@@ -31,11 +49,14 @@ export const TaskChangesSchema = z
 export const TaskSchema = z.object({
   id: UuidSchema,
   wbs: z.string().trim().min(1),
+  wbsParentId: UuidSchema.nullable(),
   name: z.string().trim().min(1),
   owner: z.string(),
   durationWorkingDays: DurationSchema,
   measurementMethod: MeasurementMethodSchema,
-  predecessorId: UuidSchema.nullable(),
+  calendarId: CalendarIdSchema,
+  dependencies: z.array(DependencySchema).max(100),
+  constraint: ConstraintSchema.nullable(),
   budgetMinor: MinorUnitSchema,
   progressBasisPoints: ProgressBasisPointsSchema,
   actualCostMinor: MinorUnitSchema,
@@ -65,11 +86,14 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
   return {
     id: task.id,
     wbs: task.wbs,
+    wbsParentId: task.wbsParentId,
     name: task.name,
     owner: task.owner,
     durationWorkingDays: task.durationWorkingDays,
     measurementMethod: task.measurementMethod,
-    predecessorId: task.predecessorId,
+    calendarId: task.calendarId,
+    dependencies: task.dependencies,
+    constraint: task.constraint,
     budget: asSafeMinorUnits(task.budgetMinor, "budgetMinor"),
     progressPercent: task.progressBasisPoints / 100,
     actualCost: asSafeMinorUnits(task.actualCostMinor, "actualCostMinor"),
@@ -87,6 +111,9 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
 
   const changes = {
     ...(command.changes.wbs === undefined ? {} : { wbs: command.changes.wbs }),
+    ...(command.changes.wbsParentId === undefined
+      ? {}
+      : { wbsParentId: command.changes.wbsParentId }),
     ...(command.changes.name === undefined ? {} : { name: command.changes.name }),
     ...(command.changes.owner === undefined ? {} : { owner: command.changes.owner }),
     ...(command.changes.durationWorkingDays === undefined
@@ -95,9 +122,15 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
     ...(command.changes.measurementMethod === undefined
       ? {}
       : { measurementMethod: command.changes.measurementMethod }),
-    ...(command.changes.predecessorId === undefined
+    ...(command.changes.calendarId === undefined
       ? {}
-      : { predecessorId: command.changes.predecessorId }),
+      : { calendarId: command.changes.calendarId }),
+    ...(command.changes.dependencies === undefined
+      ? {}
+      : { dependencies: command.changes.dependencies }),
+    ...(command.changes.constraint === undefined
+      ? {}
+      : { constraint: command.changes.constraint }),
     ...(command.changes.budgetMinor === undefined
       ? {}
       : { budget: asSafeMinorUnits(command.changes.budgetMinor, "budgetMinor") }),

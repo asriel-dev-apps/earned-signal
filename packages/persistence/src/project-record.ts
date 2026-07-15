@@ -14,7 +14,17 @@ export interface ProjectRecord {
   readonly timezone: string;
   readonly projectStart: string;
   readonly statusDate: string;
+  readonly defaultCalendarId: string;
   readonly revision: bigint;
+}
+
+export interface ProjectCalendarRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly id: string;
+  readonly name: string;
+  readonly workingWeekdays: readonly number[];
+  readonly nonWorkingDates: readonly string[];
 }
 
 export interface WbsNodeRecord {
@@ -35,6 +45,14 @@ export interface ActivityRecord {
   readonly name: string;
   readonly owner: string;
   readonly durationWorkingDays: number;
+  readonly calendarId: string;
+  readonly constraintType:
+    | "START_NO_EARLIER_THAN"
+    | "FINISH_NO_LATER_THAN"
+    | "MUST_START_ON"
+    | "MUST_FINISH_ON"
+    | null;
+  readonly constraintDate: string | null;
   readonly budgetMinor: bigint;
   readonly measurementMethod: MeasurementMethod;
   readonly sortOrder: number;
@@ -99,6 +117,7 @@ export interface BaselineVersionRecord {
   readonly projectId: string;
   readonly version: number;
   readonly label: string;
+  readonly defaultCalendarId: string;
   readonly approvedAt: string;
   readonly approvedBy: string;
 }
@@ -119,10 +138,23 @@ export interface BaselineActivityRecord {
   readonly wbsCode: string;
   readonly name: string;
   readonly durationWorkingDays: number;
+  readonly calendarId: string;
+  readonly constraintType: ActivityRecord["constraintType"];
+  readonly constraintDate: string | null;
   readonly baselineStart: string;
   readonly baselineFinish: string;
   readonly budgetMinor: bigint;
   readonly measurementMethod: MeasurementMethod;
+}
+
+export interface BaselineCalendarRecord {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly baselineVersionId: string;
+  readonly sourceCalendarId: string;
+  readonly name: string;
+  readonly workingWeekdays: readonly number[];
+  readonly nonWorkingDates: readonly string[];
 }
 
 export interface BaselineDependencyRecord {
@@ -138,6 +170,7 @@ export interface BaselineDependencyRecord {
 
 export interface BaselineRecord {
   readonly version: BaselineVersionRecord;
+  readonly calendars: readonly BaselineCalendarRecord[];
   readonly wbsNodes: readonly BaselineWbsNodeRecord[];
   readonly activities: readonly BaselineActivityRecord[];
   readonly dependencies: readonly BaselineDependencyRecord[];
@@ -146,6 +179,7 @@ export interface BaselineRecord {
 export interface PersistedProjectRecord {
   readonly tenant: TenantRecord;
   readonly project: ProjectRecord;
+  readonly calendars: readonly ProjectCalendarRecord[];
   readonly wbsNodes: readonly WbsNodeRecord[];
   readonly activities: readonly ActivityRecord[];
   readonly dependencies: readonly DependencyRecord[];

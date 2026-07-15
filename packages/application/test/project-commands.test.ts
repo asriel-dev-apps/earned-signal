@@ -11,15 +11,28 @@ const project: ProjectState = {
   projectStart: "2026-07-13",
   statusDate: "2026-07-24",
   currency: "JPY",
+  defaultCalendarId: "calendar-standard",
+  calendars: [
+    {
+      id: "calendar-standard",
+      name: "Standard",
+      workingWeekdays: [1, 2, 3, 4, 5],
+      nonWorkingDates: [],
+    },
+  ],
+  wbsGroups: [{ id: "group-1", parentId: null, code: "1", name: "Delivery" }],
   tasks: [
     {
       id: "task-1",
       wbs: "1.1",
+      wbsParentId: "group-1",
       name: "要件定義",
       owner: "佐藤",
       durationWorkingDays: 5,
       measurementMethod: "ZERO_HUNDRED",
-      predecessorId: null,
+      calendarId: "calendar-standard",
+      dependencies: [],
+      constraint: null,
       budget: 600_000,
       progressPercent: 100,
       actualCost: 580_000,
@@ -28,11 +41,14 @@ const project: ProjectState = {
     {
       id: "task-2",
       wbs: "1.2",
+      wbsParentId: "group-1",
       name: "設計",
       owner: "田中",
       durationWorkingDays: 8,
       measurementMethod: "PHYSICAL_PERCENT",
-      predecessorId: "task-1",
+      calendarId: "calendar-standard",
+      dependencies: [{ predecessorId: "task-1", type: "FS", lagWorkingDays: 0 }],
+      constraint: null,
       budget: 900_000,
       progressPercent: 40,
       actualCost: 420_000,
@@ -76,11 +92,14 @@ describe("applyProjectCommand", () => {
     const addedTask = {
       id: "task-3",
       wbs: "1.3",
+      wbsParentId: "group-1",
       name: "実装",
       owner: "高橋",
       durationWorkingDays: 10,
       measurementMethod: "PHYSICAL_PERCENT",
-      predecessorId: "task-2",
+      calendarId: "calendar-standard",
+      dependencies: [{ predecessorId: "task-2", type: "FS", lagWorkingDays: 0 }],
+      constraint: null,
       budget: 1_200_000,
       progressPercent: 0,
       actualCost: 0,
@@ -141,9 +160,31 @@ describe("applyProjectCommand", () => {
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-1",
-        changes: { predecessorId: "task-2" },
+        changes: {
+          dependencies: [{ predecessorId: "task-2", type: "SS", lagWorkingDays: 0 }],
+        },
       }),
     ).toThrow("dependency cycle");
+  });
+
+  it("rejects a task calendar that is not configured for the project", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { calendarId: "calendar-missing" },
+      }),
+    ).toThrow("Unknown calendar");
+  });
+
+  it("rejects a WBS parent that is not part of the project hierarchy", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { wbsParentId: "group-missing" },
+      }),
+    ).toThrow("Unknown WBS parent");
   });
 
   it("stores actual effort as whole minutes", () => {

@@ -5,12 +5,14 @@ import {
   activities,
   auditEvents,
   baselineActivities,
+  baselineCalendars,
   baselineDependencies,
   baselineVersions,
   baselineWbsNodes,
   dependencies,
   directActualCosts,
   progressMeasurements,
+  projectCalendars,
   projects,
   schema,
   tenants,
@@ -36,6 +38,16 @@ export class ProjectRepository {
     await this.database.transaction(async (transaction) => {
       await transaction.insert(tenants).values(record.tenant);
       await transaction.insert(projects).values(record.project);
+
+      if (record.calendars.length > 0) {
+        await transaction.insert(projectCalendars).values(
+          record.calendars.map((calendar) => ({
+            ...calendar,
+            workingWeekdays: [...calendar.workingWeekdays],
+            nonWorkingDates: [...calendar.nonWorkingDates],
+          })),
+        );
+      }
 
       if (record.wbsNodes.length > 0) {
         await transaction.insert(wbsNodes).values([...record.wbsNodes]);
@@ -63,6 +75,15 @@ export class ProjectRepository {
         await transaction
           .insert(baselineVersions)
           .values({ ...draftVersion, approvedAt: null, approvedBy: null });
+        if (record.baseline.calendars.length > 0) {
+          await transaction.insert(baselineCalendars).values(
+            record.baseline.calendars.map((calendar) => ({
+              ...calendar,
+              workingWeekdays: [...calendar.workingWeekdays],
+              nonWorkingDates: [...calendar.nonWorkingDates],
+            })),
+          );
+        }
         if (record.baseline.wbsNodes.length > 0) {
           await transaction.insert(baselineWbsNodes).values([...record.baseline.wbsNodes]);
         }
@@ -104,6 +125,7 @@ export class ProjectRepository {
         timezone: projects.timezone,
         projectStart: projects.projectStart,
         statusDate: projects.statusDate,
+        defaultCalendarId: projects.defaultCalendarId,
         revision: projects.revision,
       })
       .from(projects)
@@ -120,6 +142,11 @@ export class ProjectRepository {
       .from(wbsNodes)
       .where(and(eq(wbsNodes.tenantId, tenantId), eq(wbsNodes.projectId, projectId)))
       .orderBy(asc(wbsNodes.code));
+    const calendarRows = await this.database
+      .select()
+      .from(projectCalendars)
+      .where(and(eq(projectCalendars.tenantId, tenantId), eq(projectCalendars.projectId, projectId)))
+      .orderBy(asc(projectCalendars.id));
     const activityRows = await this.database
       .select()
       .from(activities)
@@ -188,8 +215,12 @@ export class ProjectRepository {
         timezone: projectHeader.timezone,
         projectStart: projectHeader.projectStart,
         statusDate: projectHeader.statusDate,
+        defaultCalendarId: projectHeader.defaultCalendarId,
         revision: projectHeader.revision,
       },
+      calendars: calendarRows.map((row) =>
+        withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
       wbsNodes: wbsRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
       ),
@@ -218,6 +249,17 @@ export class ProjectRepository {
     projectId: string,
     versionRow: typeof baselineVersions.$inferSelect,
   ) {
+    const calendarRows = await this.database
+      .select()
+      .from(baselineCalendars)
+      .where(
+        and(
+          eq(baselineCalendars.tenantId, tenantId),
+          eq(baselineCalendars.projectId, projectId),
+          eq(baselineCalendars.baselineVersionId, versionRow.id),
+        ),
+      )
+      .orderBy(asc(baselineCalendars.sourceCalendarId));
     const wbsRows = await this.database
       .select()
       .from(baselineWbsNodes)
@@ -262,6 +304,7 @@ export class ProjectRepository {
         approvedAt: new Date(approvedAt).toISOString(),
         approvedBy,
       },
+      calendars: calendarRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       wbsNodes: wbsRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       activities: activityRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),
       dependencies: dependencyRows.map((row) => withoutGeneratedFields(row, ["createdAt"])),

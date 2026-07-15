@@ -1,16 +1,40 @@
-export interface FinishToStartDependency {
+export type DependencyType = "FS" | "SS" | "FF" | "SF";
+
+export interface ScheduleDependency {
   readonly predecessorId: string;
+  readonly type?: DependencyType;
   readonly lagWorkingDays: number;
+}
+
+export type ScheduleConstraintType =
+  | "START_NO_EARLIER_THAN"
+  | "FINISH_NO_LATER_THAN"
+  | "MUST_START_ON"
+  | "MUST_FINISH_ON";
+
+export interface ScheduleConstraintInput {
+  readonly type: ScheduleConstraintType;
+  readonly date: string;
 }
 
 export interface ScheduleActivityInput {
   readonly id: string;
   readonly durationWorkingDays: number;
-  readonly dependencies: readonly FinishToStartDependency[];
+  readonly calendarId?: string;
+  readonly constraint?: ScheduleConstraintInput;
+  readonly dependencies: readonly ScheduleDependency[];
+}
+
+export interface ScheduleCalendarInput {
+  readonly id: string;
+  readonly workingWeekdays: readonly number[];
+  readonly nonWorkingDates: readonly string[];
 }
 
 export interface ScheduleInput {
   readonly projectStart: string;
+  readonly defaultCalendarId?: string;
+  readonly calendars?: readonly ScheduleCalendarInput[];
   readonly activities: readonly ScheduleActivityInput[];
 }
 
@@ -22,6 +46,7 @@ export interface ScheduledActivity {
   readonly lateFinish: string;
   readonly totalFloatWorkingDays: number;
   readonly critical: boolean;
+  readonly constraintViolation?: ScheduleConstraintInput;
 }
 
 export interface ScheduleResult {
@@ -47,6 +72,12 @@ interface DateRange {
   readonly finish: Date;
 }
 
+interface ScheduleCalendar {
+  readonly id: string;
+  readonly workingWeekdays: ReadonlySet<number>;
+  readonly nonWorkingDates: ReadonlySet<string>;
+}
+
 const DAY_IN_MILLISECONDS = 86_400_000;
 
 function parseDate(value: string): Date {
@@ -61,45 +92,96 @@ function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function isWorkingDay(date: Date): boolean {
-  const day = date.getUTCDay();
-  return day !== 0 && day !== 6;
+function isWorkingDay(date: Date, calendar: ScheduleCalendar): boolean {
+  const javascriptDay = date.getUTCDay();
+  const isoWeekday = javascriptDay === 0 ? 7 : javascriptDay;
+  return (
+    calendar.workingWeekdays.has(isoWeekday) &&
+    !calendar.nonWorkingDates.has(formatDate(date))
+  );
 }
 
 function shiftCalendarDay(date: Date, amount: number): Date {
   return new Date(date.getTime() + amount * DAY_IN_MILLISECONDS);
 }
 
-function moveToWorkingDay(date: Date, direction: 1 | -1): Date {
+function moveToWorkingDay(
+  date: Date,
+  direction: 1 | -1,
+  calendar: ScheduleCalendar,
+): Date {
   let result = date;
-  while (!isWorkingDay(result)) {
+  while (!isWorkingDay(result, calendar)) {
     result = shiftCalendarDay(result, direction);
   }
   return result;
 }
 
-function addWorkingDays(date: Date, amount: number): Date {
+function addWorkingDays(date: Date, amount: number, calendar: ScheduleCalendar): Date {
   let result = date;
   const direction: 1 | -1 = amount < 0 ? -1 : 1;
   let remaining = Math.abs(amount);
 
   while (remaining > 0) {
     result = shiftCalendarDay(result, direction);
-    if (isWorkingDay(result)) {
+    if (isWorkingDay(result, calendar)) {
       remaining -= 1;
     }
   }
   return result;
 }
 
-function workingDayDistance(from: Date, to: Date): number {
+function workingDayDistance(from: Date, to: Date, calendar: ScheduleCalendar): number {
+  if (from.getTime() > to.getTime()) {
+    return -workingDayDistance(to, from, calendar);
+  }
   let cursor = from;
   let distance = 0;
   while (cursor.getTime() < to.getTime()) {
-    cursor = addWorkingDays(cursor, 1);
+    cursor = addWorkingDays(cursor, 1, calendar);
     distance += 1;
   }
   return distance;
+}
+
+const STANDARD_CALENDAR: ScheduleCalendar = {
+  id: "standard",
+  workingWeekdays: new Set([1, 2, 3, 4, 5]),
+  nonWorkingDates: new Set(),
+};
+
+function resolveCalendars(input: ScheduleInput): {
+  readonly byId: ReadonlyMap<string, ScheduleCalendar>;
+  readonly defaultCalendar: ScheduleCalendar;
+} {
+  if (input.calendars === undefined) {
+    return { byId: new Map([[STANDARD_CALENDAR.id, STANDARD_CALENDAR]]), defaultCalendar: STANDARD_CALENDAR };
+  }
+  const calendars = input.calendars.map((calendar): ScheduleCalendar => {
+    if (calendar.id.trim().length === 0) {
+      throw new Error("Calendar ID must not be blank");
+    }
+    const weekdays = new Set(calendar.workingWeekdays);
+    if (
+      weekdays.size === 0 ||
+      weekdays.size !== calendar.workingWeekdays.length ||
+      [...weekdays].some((weekday) => !Number.isInteger(weekday) || weekday < 1 || weekday > 7)
+    ) {
+      throw new Error(`Calendar ${calendar.id} must define unique ISO weekdays from 1 to 7`);
+    }
+    const nonWorkingDates = new Set(calendar.nonWorkingDates);
+    for (const date of nonWorkingDates) parseDate(date);
+    return { id: calendar.id, workingWeekdays: weekdays, nonWorkingDates };
+  });
+  const byId = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+  if (byId.size !== calendars.length) {
+    throw new Error("Calendar IDs must be unique");
+  }
+  const defaultCalendar = byId.get(input.defaultCalendarId ?? "");
+  if (defaultCalendar === undefined) {
+    throw new Error("The default calendar must identify a configured calendar");
+  }
+  return { byId, defaultCalendar };
 }
 
 function laterDate(left: Date, right: Date): Date {
@@ -120,9 +202,40 @@ function validateActivity(activity: ScheduleActivityInput): void {
       `Activity ${activity.id} duration must be a whole number from 1 to ${MAX_ACTIVITY_DURATION_WORKING_DAYS}`,
     );
   }
+  const dependencyKeys = new Set<string>();
   for (const dependency of activity.dependencies) {
-    if (!Number.isInteger(dependency.lagWorkingDays) || dependency.lagWorkingDays < 0) {
-      throw new Error(`Activity ${activity.id} must have a non-negative whole-day lag`);
+    if (
+      !Number.isInteger(dependency.lagWorkingDays) ||
+      dependency.lagWorkingDays < 0 ||
+      dependency.lagWorkingDays > MAX_ACTIVITY_DURATION_WORKING_DAYS
+    ) {
+      throw new Error(
+        `Activity ${activity.id} lag must be a whole number from 0 to ${MAX_ACTIVITY_DURATION_WORKING_DAYS}`,
+      );
+    }
+    if (
+      dependency.type !== undefined &&
+      !(["FS", "SS", "FF", "SF"] as const).includes(dependency.type)
+    ) {
+      throw new Error(`Activity ${activity.id} has an unsupported dependency type`);
+    }
+    const key = `${dependency.predecessorId}\u0000${dependency.type ?? "FS"}`;
+    if (dependencyKeys.has(key)) {
+      throw new Error(`Activity ${activity.id} has a duplicate dependency`);
+    }
+    dependencyKeys.add(key);
+  }
+  if (activity.constraint !== undefined) {
+    parseDate(activity.constraint.date);
+    if (
+      !([
+        "START_NO_EARLIER_THAN",
+        "FINISH_NO_LATER_THAN",
+        "MUST_START_ON",
+        "MUST_FINISH_ON",
+      ] as const).includes(activity.constraint.type)
+    ) {
+      throw new Error(`Activity ${activity.id} has an unsupported constraint type`);
     }
   }
 }
@@ -245,7 +358,13 @@ function topologicalOrder(
 }
 
 export function calculateSchedule(input: ScheduleInput): ScheduleResult {
-  const projectStart = moveToWorkingDay(parseDate(input.projectStart), 1);
+  const { byId: calendarsById, defaultCalendar } = resolveCalendars(input);
+  const calendarFor = (activity: ScheduleActivityInput): ScheduleCalendar => {
+    const calendar = calendarsById.get(activity.calendarId ?? defaultCalendar.id);
+    if (calendar === undefined) throw new Error(`Unknown calendar: ${activity.calendarId}`);
+    return calendar;
+  };
+  const projectStart = moveToWorkingDay(parseDate(input.projectStart), 1, defaultCalendar);
   const byId = new Map(input.activities.map((activity) => [activity.id, activity]));
   if (byId.size !== input.activities.length) {
     throw new Error("Activity IDs must be unique");
@@ -258,20 +377,63 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
   const early = new Map<string, DateRange>();
 
   for (const activity of ordered) {
-    let start = projectStart;
+    const calendar = calendarFor(activity);
+    let start = moveToWorkingDay(projectStart, 1, calendar);
     for (const dependency of activity.dependencies) {
       const predecessor = early.get(dependency.predecessorId);
       if (predecessor === undefined) {
         throw new Error(`Predecessor was not scheduled: ${dependency.predecessorId}`);
       }
+      const type = dependency.type ?? "FS";
+      if (type === "FS" || type === "SS") {
+        const anchor = type === "FS" ? predecessor.finish : predecessor.start;
+        const offset = dependency.lagWorkingDays + (type === "FS" ? 1 : 0);
+        start = laterDate(
+          start,
+          moveToWorkingDay(
+            addWorkingDays(anchor, offset, defaultCalendar),
+            1,
+            calendar,
+          ),
+        );
+      } else {
+        const anchor = type === "FF" ? predecessor.finish : predecessor.start;
+        const requiredFinish = moveToWorkingDay(
+          addWorkingDays(anchor, dependency.lagWorkingDays, defaultCalendar),
+          1,
+          calendar,
+        );
+        start = laterDate(
+          start,
+          addWorkingDays(requiredFinish, -(activity.durationWorkingDays - 1), calendar),
+        );
+      }
+    }
+    const constraint = activity.constraint;
+    if (constraint?.type === "START_NO_EARLIER_THAN" || constraint?.type === "MUST_START_ON") {
+      const requestedStart = parseDate(constraint.date);
+      if (constraint.type === "MUST_START_ON" && !isWorkingDay(requestedStart, calendar)) {
+        throw new Error(`Activity ${activity.id} must start on a working day`);
+      }
       start = laterDate(
         start,
-        addWorkingDays(predecessor.finish, dependency.lagWorkingDays + 1),
+        constraint.type === "MUST_START_ON"
+          ? requestedStart
+          : moveToWorkingDay(requestedStart, 1, calendar),
+      );
+    } else if (constraint?.type === "MUST_FINISH_ON") {
+      const requestedFinish = parseDate(constraint.date);
+      if (!isWorkingDay(requestedFinish, calendar)) {
+        throw new Error(`Activity ${activity.id} must finish on a working day`);
+      }
+      start = laterDate(
+        start,
+        addWorkingDays(requestedFinish, -(activity.durationWorkingDays - 1), calendar),
       );
     }
     early.set(activity.id, {
       start,
-      finish: addWorkingDays(start, activity.durationWorkingDays - 1),
+      finish: addWorkingDays(start, activity.durationWorkingDays - 1, calendar),
     });
   }
 
@@ -282,7 +444,8 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
 
   const late = new Map<string, DateRange>();
   for (const activity of [...ordered].reverse()) {
-    let finish = projectFinish;
+    const calendar = calendarFor(activity);
+    let finish = moveToWorkingDay(projectFinish, -1, calendar);
     const successorLinks = input.activities.flatMap((candidate) =>
       candidate.dependencies
         .filter((dependency) => dependency.predecessorId === activity.id)
@@ -294,13 +457,49 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
       if (successor === undefined) {
         throw new Error(`Successor was not scheduled: ${link.activity.id}`);
       }
-      finish = earlierDate(
-        finish,
-        addWorkingDays(successor.start, -(link.dependency.lagWorkingDays + 1)),
+      const type = link.dependency.type ?? "FS";
+      if (type === "FS" || type === "FF") {
+        const anchor = type === "FS" ? successor.start : successor.finish;
+        const offset = -(link.dependency.lagWorkingDays + (type === "FS" ? 1 : 0));
+        finish = earlierDate(
+          finish,
+          moveToWorkingDay(
+            addWorkingDays(anchor, offset, defaultCalendar),
+            -1,
+            calendar,
+          ),
+        );
+      } else {
+        const anchor = type === "SS" ? successor.start : successor.finish;
+        const latestStart = moveToWorkingDay(
+          addWorkingDays(anchor, -link.dependency.lagWorkingDays, defaultCalendar),
+          -1,
+          calendar,
+        );
+        finish = earlierDate(
+          finish,
+          addWorkingDays(latestStart, activity.durationWorkingDays - 1, calendar),
+        );
+      }
+    }
+    const constraint = activity.constraint;
+    if (constraint?.type === "FINISH_NO_LATER_THAN" || constraint?.type === "MUST_FINISH_ON") {
+      const requestedFinish = parseDate(constraint.date);
+      const constrainedFinish =
+        constraint.type === "MUST_FINISH_ON"
+          ? requestedFinish
+          : moveToWorkingDay(requestedFinish, -1, calendar);
+      finish = earlierDate(finish, constrainedFinish);
+    } else if (constraint?.type === "MUST_START_ON") {
+      const constrainedFinish = addWorkingDays(
+        parseDate(constraint.date),
+        activity.durationWorkingDays - 1,
+        calendar,
       );
+      finish = earlierDate(finish, constrainedFinish);
     }
     late.set(activity.id, {
-      start: addWorkingDays(finish, -(activity.durationWorkingDays - 1)),
+      start: addWorkingDays(finish, -(activity.durationWorkingDays - 1), calendar),
       finish,
     });
   }
@@ -313,7 +512,24 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
       if (earlyRange === undefined || lateRange === undefined) {
         throw new Error(`Activity was not scheduled: ${activity.id}`);
       }
-      const totalFloatWorkingDays = workingDayDistance(earlyRange.start, lateRange.start);
+      const totalFloatWorkingDays = workingDayDistance(
+        earlyRange.start,
+        lateRange.start,
+        calendarFor(activity),
+      );
+      const constraint = activity.constraint;
+      const constraintDate = constraint === undefined ? undefined : parseDate(constraint.date);
+      const violatesConstraint =
+        constraint !== undefined &&
+        constraintDate !== undefined &&
+        ((constraint.type === "MUST_START_ON" &&
+          earlyRange.start.getTime() !== constraintDate.getTime()) ||
+          (constraint.type === "MUST_FINISH_ON" &&
+            earlyRange.finish.getTime() !== constraintDate.getTime()) ||
+          (constraint.type === "FINISH_NO_LATER_THAN" &&
+            earlyRange.finish.getTime() > constraintDate.getTime()) ||
+          (constraint.type === "START_NO_EARLIER_THAN" &&
+            earlyRange.start.getTime() < constraintDate.getTime()));
       return {
         id: activity.id,
         earlyStart: formatDate(earlyRange.start),
@@ -321,7 +537,8 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
         lateStart: formatDate(lateRange.start),
         lateFinish: formatDate(lateRange.finish),
         totalFloatWorkingDays,
-        critical: totalFloatWorkingDays === 0,
+        critical: totalFloatWorkingDays <= 0,
+        ...(violatesConstraint ? { constraintViolation: constraint } : {}),
       };
     }),
   };

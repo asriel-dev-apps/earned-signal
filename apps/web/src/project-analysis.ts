@@ -16,13 +16,14 @@ export interface ProjectAnalysis {
 function schedule(project: ProjectState) {
   return calculateSchedule({
     projectStart: project.projectStart,
+    defaultCalendarId: project.defaultCalendarId,
+    calendars: project.calendars,
     activities: project.tasks.map((task) => ({
       id: task.id,
       durationWorkingDays: task.durationWorkingDays,
-      dependencies:
-        task.predecessorId === null
-          ? []
-          : [{ predecessorId: task.predecessorId, lagWorkingDays: 0 }],
+      calendarId: task.calendarId,
+      dependencies: task.dependencies,
+      ...(task.constraint === null ? {} : { constraint: task.constraint }),
     })),
   });
 }

@@ -483,6 +483,20 @@ h1 {
   content: "";
 }
 
+.ag-row.constraint-violation-row {
+  box-shadow: inset 0 0 0 1px #e8a08a;
+}
+
+.ag-cell.hierarchy-cell {
+  color: #65756f;
+  font-size: 11px;
+}
+
+.ag-cell.constraint-cell {
+  font-family: "DM Mono", monospace;
+  font-size: 10px;
+}
+
 .grid-footer {
   display: flex;
   min-height: 35px;
@@ -662,6 +676,17 @@ h1 {
   line-height: 1.5;
 }
 
+.constraint-warning {
+  border: 1px solid #f0c2b4;
+  border-radius: 6px;
+  margin: 16px 0 0;
+  color: #94462f;
+  background: #fff4ef;
+  padding: 8px 9px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .detail-grid {
   display: grid;
   gap: 15px 12px;
@@ -671,6 +696,10 @@ h1 {
 
 .detail-grid div {
   min-width: 0;
+}
+
+.detail-grid .detail-grid--wide {
+  grid-column: 1 / -1;
 }
 
 .detail-grid dt {

@@ -30,6 +30,7 @@ describe("persistence migrations", () => {
       "activities",
       "audit_events",
       "baseline_activities",
+      "baseline_calendars",
       "baseline_dependencies",
       "baseline_versions",
       "baseline_wbs_nodes",
@@ -38,6 +39,7 @@ describe("persistence migrations", () => {
       "direct_actual_costs",
       "principals",
       "progress_measurements",
+      "project_calendars",
       "project_memberships",
       "projects",
       "tenant_memberships",
@@ -56,11 +58,19 @@ describe("persistence migrations", () => {
       "insert into tenants (id, name) values ($1, 'Access tenant A'), ($2, 'Access tenant B')",
       [tenantA, tenantB],
     );
+    await client.query("begin");
     await client.query(
       `insert into projects (id, tenant_id, name, project_start, status_date)
        values ($1, $2, 'Access project B', '2026-01-01', '2026-01-01')`,
       [projectB, tenantB],
     );
+    await client.query(
+      `insert into project_calendars
+         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
+       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
+      [tenantB, projectB],
+    );
+    await client.query("commit");
 
     await expect(
       client.query(
@@ -100,12 +110,21 @@ describe("persistence migrations", () => {
       "insert into tenants (id, name) values ($1, 'Tenant A'), ($2, 'Tenant B')",
       [tenantA, tenantB],
     );
+    await client.query("begin");
     await client.query(
       `insert into projects (id, tenant_id, name, project_start, status_date)
        values ($1, $2, 'Project A', '2026-01-01', '2026-01-01'),
               ($3, $4, 'Project B', '2026-01-01', '2026-01-01')`,
       [projectA, tenantA, projectB, tenantB],
     );
+    await client.query(
+      `insert into project_calendars
+         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
+       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[]),
+              ($3, $4, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
+      [tenantA, projectA, tenantB, projectB],
+    );
+    await client.query("commit");
     await client.query(
       "insert into wbs_nodes (id, tenant_id, project_id, code, name) values ($1, $2, $3, 'A', 'A')",
       [wbsA, tenantA, projectA],
@@ -134,6 +153,20 @@ describe("persistence migrations", () => {
         [tenantA, projectA, activityA],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+
+    await expect(
+      client.query("update activities set calendar_id = 'missing' where id = $1", [activityA]),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      client.query(
+        "update activities set constraint_type = 'MUST_START_ON' where id = $1",
+        [activityA],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await client.query("begin");
+    await client.query("update projects set default_calendar_id = 'missing' where id = $1", [projectA]);
+    await expect(client.query("commit")).rejects.toMatchObject({ code: "23503" });
+    await client.query("rollback");
 
     await client.query(
       `insert into direct_actual_costs
@@ -173,10 +206,17 @@ describe("persistence migrations", () => {
     await client.query("insert into tenants (id, name) values ($1, 'Baseline tenant')", [
       tenantId,
     ]);
+    await client.query("begin");
     await client.query(
       `insert into projects (id, tenant_id, name, project_start, status_date)
        values ($1, $2, 'Baseline project', '2026-01-01', '2026-01-01')`,
       [projectId, tenantId],
+    );
+    await client.query(
+      `insert into project_calendars
+         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
+       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
+      [tenantId, projectId],
     );
     await client.query(
       `insert into baseline_versions
@@ -184,6 +224,14 @@ describe("persistence migrations", () => {
        values ($1, $2, $3, 1, 'Approved plan', null, null)`,
       [versionId, tenantId, projectId],
     );
+    await client.query(
+      `insert into baseline_calendars
+         (tenant_id, project_id, baseline_version_id, source_calendar_id, name,
+          working_weekdays, non_working_dates)
+       values ($1, $2, $3, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
+      [tenantId, projectId, versionId],
+    );
+    await client.query("commit");
     await client.query(
       `insert into baseline_wbs_nodes
          (tenant_id, project_id, baseline_version_id, source_wbs_node_id, code, name, sort_order)
@@ -219,6 +267,12 @@ describe("persistence migrations", () => {
       client.query("delete from baseline_activities where source_activity_id = $1", [
         sourceActivityId,
       ]),
+    ).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      client.query(
+        "update baseline_calendars set name = 'Changed' where baseline_version_id = $1",
+        [versionId],
+      ),
     ).rejects.toMatchObject({ code: "55000" });
 
     await client.query(

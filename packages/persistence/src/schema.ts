@@ -26,6 +26,12 @@ export const measurementMethod = pgEnum("measurement_method", [
 ]);
 
 export const dependencyType = pgEnum("dependency_type", ["FS", "SS", "FF", "SF"]);
+export const scheduleConstraintType = pgEnum("schedule_constraint_type", [
+  "START_NO_EARLIER_THAN",
+  "FINISH_NO_LATER_THAN",
+  "MUST_START_ON",
+  "MUST_FINISH_ON",
+]);
 
 export const auditActorType = pgEnum("audit_actor_type", ["HUMAN", "AGENT", "SYSTEM"]);
 export const principalType = pgEnum("principal_type", ["HUMAN", "AGENT"]);
@@ -99,6 +105,7 @@ export const projects = pgTable(
     timezone: text().notNull().default("Asia/Tokyo"),
     projectStart: date("project_start", { mode: "string" }).notNull(),
     statusDate: date("status_date", { mode: "string" }).notNull(),
+    defaultCalendarId: text("default_calendar_id").notNull().default("standard"),
     revision: bigint({ mode: "bigint" }).notNull().default(sql`0`),
     createdAt: auditTimestamp("created_at").notNull().defaultNow(),
     updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
@@ -110,6 +117,34 @@ export const projects = pgTable(
     check("projects_currency_uppercase", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("projects_revision_non_negative", sql`${table.revision} >= 0`),
     check("projects_status_after_start", sql`${table.statusDate} >= ${table.projectStart}`),
+  ],
+);
+
+export const projectCalendars = pgTable(
+  "project_calendars",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    id: text().notNull(),
+    name: text().notNull(),
+    workingWeekdays: integer("working_weekdays").array().notNull(),
+    nonWorkingDates: date("non_working_dates", { mode: "string" }).array().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "project_calendars_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("project_calendars_id_not_blank", sql`length(trim(${table.id})) > 0`),
+    check("project_calendars_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check(
+      "project_calendars_working_weekdays_known",
+      sql`cardinality(${table.workingWeekdays}) > 0 and ${table.workingWeekdays} <@ array[1,2,3,4,5,6,7]::integer[]`,
+    ),
   ],
 );
 
@@ -190,6 +225,9 @@ export const activities = pgTable(
     name: text().notNull(),
     owner: text().notNull().default(""),
     durationWorkingDays: integer("duration_working_days").notNull(),
+    calendarId: text("calendar_id").notNull().default("standard"),
+    constraintType: scheduleConstraintType("constraint_type"),
+    constraintDate: date("constraint_date", { mode: "string" }),
     budgetMinor: bigint("budget_minor", { mode: "bigint" }).notNull(),
     measurementMethod: measurementMethod("measurement_method").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
@@ -208,10 +246,19 @@ export const activities = pgTable(
       columns: [table.tenantId, table.projectId, table.wbsNodeId],
       foreignColumns: [wbsNodes.tenantId, wbsNodes.projectId, wbsNodes.id],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "activities_calendar_fk",
+      columns: [table.tenantId, table.projectId, table.calendarId],
+      foreignColumns: [projectCalendars.tenantId, projectCalendars.projectId, projectCalendars.id],
+    }).onDelete("restrict"),
     check("activities_name_not_blank", sql`length(trim(${table.name})) > 0`),
     check("activities_duration_positive", sql`${table.durationWorkingDays} > 0`),
     check("activities_budget_non_negative", sql`${table.budgetMinor} >= 0`),
     check("activities_sort_order_non_negative", sql`${table.sortOrder} >= 0`),
+    check(
+      "activities_constraint_complete",
+      sql`(${table.constraintType} is null) = (${table.constraintDate} is null)`,
+    ),
   ],
 );
 
@@ -266,6 +313,7 @@ export const baselineVersions = pgTable(
     projectId: uuid("project_id").notNull(),
     version: integer().notNull(),
     label: text().notNull(),
+    defaultCalendarId: text("default_calendar_id").notNull().default("standard"),
     approvedAt: auditTimestamp("approved_at"),
     approvedBy: text("approved_by"),
     createdAt: auditTimestamp("created_at").notNull().defaultNow(),
@@ -291,6 +339,45 @@ export const baselineVersions = pgTable(
     check(
       "baseline_versions_approval_complete",
       sql`(${table.approvedAt} is null and ${table.approvedBy} is null) or (${table.approvedAt} is not null and length(trim(${table.approvedBy})) > 0)`,
+    ),
+  ],
+);
+
+export const baselineCalendars = pgTable(
+  "baseline_calendars",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    sourceCalendarId: text("source_calendar_id").notNull(),
+    name: text().notNull(),
+    workingWeekdays: integer("working_weekdays").array().notNull(),
+    nonWorkingDates: date("non_working_dates", { mode: "string" }).array().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.tenantId,
+        table.projectId,
+        table.baselineVersionId,
+        table.sourceCalendarId,
+      ],
+    }),
+    foreignKey({
+      name: "baseline_calendars_version_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId],
+      foreignColumns: [
+        baselineVersions.tenantId,
+        baselineVersions.projectId,
+        baselineVersions.id,
+      ],
+    }).onDelete("restrict"),
+    check("baseline_calendars_id_not_blank", sql`length(trim(${table.sourceCalendarId})) > 0`),
+    check("baseline_calendars_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check(
+      "baseline_calendars_working_weekdays_known",
+      sql`cardinality(${table.workingWeekdays}) > 0 and ${table.workingWeekdays} <@ array[1,2,3,4,5,6,7]::integer[]`,
     ),
   ],
 );
@@ -362,6 +449,9 @@ export const baselineActivities = pgTable(
     wbsCode: text("wbs_code").notNull(),
     name: text().notNull(),
     durationWorkingDays: integer("duration_working_days").notNull(),
+    calendarId: text("calendar_id").notNull().default("standard"),
+    constraintType: scheduleConstraintType("constraint_type"),
+    constraintDate: date("constraint_date", { mode: "string" }),
     baselineStart: date("baseline_start", { mode: "string" }).notNull(),
     baselineFinish: date("baseline_finish", { mode: "string" }).notNull(),
     budgetMinor: bigint("budget_minor", { mode: "bigint" }).notNull(),
@@ -382,6 +472,21 @@ export const baselineActivities = pgTable(
         baselineVersions.tenantId,
         baselineVersions.projectId,
         baselineVersions.id,
+      ],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "baseline_activities_calendar_fk",
+      columns: [
+        table.tenantId,
+        table.projectId,
+        table.baselineVersionId,
+        table.calendarId,
+      ],
+      foreignColumns: [
+        baselineCalendars.tenantId,
+        baselineCalendars.projectId,
+        baselineCalendars.baselineVersionId,
+        baselineCalendars.sourceCalendarId,
       ],
     }).onDelete("restrict"),
     foreignKey({
@@ -406,6 +511,10 @@ export const baselineActivities = pgTable(
     check(
       "baseline_activities_finish_after_start",
       sql`${table.baselineFinish} >= ${table.baselineStart}`,
+    ),
+    check(
+      "baseline_activities_constraint_complete",
+      sql`(${table.constraintType} is null) = (${table.constraintDate} is null)`,
     ),
   ],
 );
@@ -632,11 +741,13 @@ export const schema = {
   tenants,
   tenantMemberships,
   projects,
+  projectCalendars,
   projectMemberships,
   wbsNodes,
   activities,
   dependencies,
   baselineVersions,
+  baselineCalendars,
   baselineWbsNodes,
   baselineActivities,
   baselineDependencies,

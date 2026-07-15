@@ -19,6 +19,7 @@ import {
   dependencies,
   directActualCosts,
   progressMeasurements,
+  projectCalendars,
   projects,
   schema,
   wbsNodes,
@@ -141,6 +142,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           projectStart: projects.projectStart,
           statusDate: projects.statusDate,
           currency: projects.currency,
+          defaultCalendarId: projects.defaultCalendarId,
         })
         .from(projects)
         .where(and(eq(projects.tenantId, request.tenantId), eq(projects.id, request.projectId)))
@@ -157,9 +159,13 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           id: activities.id,
           wbsNodeId: activities.wbsNodeId,
           wbs: wbsNodes.code,
+          wbsParentId: wbsNodes.parentId,
           name: activities.name,
           owner: activities.owner,
           durationWorkingDays: activities.durationWorkingDays,
+          calendarId: activities.calendarId,
+          constraintType: activities.constraintType,
+          constraintDate: activities.constraintDate,
           budgetMinor: activities.budgetMinor,
           measurementMethod: activities.measurementMethod,
           sortOrder: activities.sortOrder,
@@ -177,6 +183,21 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           and(eq(activities.tenantId, request.tenantId), eq(activities.projectId, request.projectId)),
         )
         .orderBy(asc(activities.sortOrder));
+      const wbsNodeRows = await transaction
+        .select()
+        .from(wbsNodes)
+        .where(and(eq(wbsNodes.tenantId, request.tenantId), eq(wbsNodes.projectId, request.projectId)))
+        .orderBy(asc(wbsNodes.sortOrder));
+      const calendarRows = await transaction
+        .select()
+        .from(projectCalendars)
+        .where(
+          and(
+            eq(projectCalendars.tenantId, request.tenantId),
+            eq(projectCalendars.projectId, request.projectId),
+          ),
+        )
+        .orderBy(asc(projectCalendars.id));
       const dependencyRows = await transaction
         .select()
         .from(dependencies)
@@ -211,15 +232,18 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           ),
         );
 
-      const predecessorByActivity = new Map<string, string>();
+      const dependenciesByActivity = new Map<
+        string,
+        Array<{ predecessorId: string; type: "FS" | "SS" | "FF" | "SF"; lagWorkingDays: number }>
+      >();
       for (const dependency of dependencyRows) {
-        if (predecessorByActivity.has(dependency.successorActivityId)) {
-          throw new Error("The application command model supports one predecessor per task");
-        }
-        predecessorByActivity.set(
-          dependency.successorActivityId,
-          dependency.predecessorActivityId,
-        );
+        const entries = dependenciesByActivity.get(dependency.successorActivityId) ?? [];
+        entries.push({
+          predecessorId: dependency.predecessorActivityId,
+          type: dependency.type,
+          lagWorkingDays: dependency.lagWorkingDays,
+        });
+        dependenciesByActivity.set(dependency.successorActivityId, entries);
       }
       const progressByActivity = new Map<string, number>();
       for (const measurement of measurementRows) {
@@ -246,14 +270,35 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         projectStart: projectRow.projectStart,
         statusDate: projectRow.statusDate,
         currency: projectRow.currency,
+        defaultCalendarId: projectRow.defaultCalendarId,
+        calendars: calendarRows.map((calendar) => ({
+          id: calendar.id,
+          name: calendar.name,
+          workingWeekdays: calendar.workingWeekdays,
+          nonWorkingDates: calendar.nonWorkingDates,
+        })),
+        wbsGroups: wbsNodeRows
+          .filter((node) => !activityRows.some((activity) => activity.wbsNodeId === node.id))
+          .map((node) => ({
+            id: node.id,
+            parentId: node.parentId,
+            code: node.code,
+            name: node.name,
+          })),
         tasks: activityRows.map((activity) => ({
           id: activity.id,
           wbs: activity.wbs,
+          wbsParentId: activity.wbsParentId,
           name: activity.name,
           owner: activity.owner,
           durationWorkingDays: activity.durationWorkingDays,
           measurementMethod: activity.measurementMethod,
-          predecessorId: predecessorByActivity.get(activity.id) ?? null,
+          calendarId: activity.calendarId,
+          dependencies: dependenciesByActivity.get(activity.id) ?? [],
+          constraint:
+            activity.constraintType === null || activity.constraintDate === null
+              ? null
+              : { type: activity.constraintType, date: activity.constraintDate },
           budget: asSafeNumber(activity.budgetMinor, `Budget for ${activity.id}`),
           progressPercent: progressByActivity.get(activity.id) ?? 0,
           actualCost: asSafeNumber(costByActivity.get(activity.id) ?? 0n, `Actual cost for ${activity.id}`),
@@ -325,7 +370,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             id: wbsNodeId,
             tenantId: request.tenantId,
             projectId: request.projectId,
-            parentId: null,
+            parentId: task.wbsParentId,
             code: task.wbs,
             name: task.name,
             sortOrder,
@@ -338,6 +383,9 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             name: task.name,
             owner: task.owner,
             durationWorkingDays: task.durationWorkingDays,
+            calendarId: task.calendarId,
+            constraintType: task.constraint?.type ?? null,
+            constraintDate: task.constraint?.date ?? null,
             budgetMinor: BigInt(task.budget),
             measurementMethod: task.measurementMethod,
             sortOrder,
@@ -345,7 +393,12 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         } else {
           await transaction
             .update(wbsNodes)
-            .set({ code: task.wbs, name: task.name, sortOrder })
+            .set({
+              parentId: task.wbsParentId,
+              code: task.wbs,
+              name: task.name,
+              sortOrder,
+            })
             .where(
               and(
                 eq(wbsNodes.tenantId, request.tenantId),
@@ -359,6 +412,9 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
               name: task.name,
               owner: task.owner,
               durationWorkingDays: task.durationWorkingDays,
+              calendarId: task.calendarId,
+              constraintType: task.constraint?.type ?? null,
+              constraintDate: task.constraint?.date ?? null,
               budgetMinor: BigInt(task.budget),
               measurementMethod: task.measurementMethod,
               sortOrder,
@@ -372,14 +428,14 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             );
         }
 
-        if (task.predecessorId !== null) {
+        for (const dependency of task.dependencies) {
           await transaction.insert(dependencies).values({
             tenantId: request.tenantId,
             projectId: request.projectId,
-            predecessorActivityId: task.predecessorId,
+            predecessorActivityId: dependency.predecessorId,
             successorActivityId: task.id,
-            type: "FS",
-            lagWorkingDays: 0,
+            type: dependency.type,
+            lagWorkingDays: dependency.lagWorkingDays,
           });
         }
 

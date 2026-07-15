@@ -1,16 +1,41 @@
 import {
   calculateSchedule,
   MAX_ACTIVITY_DURATION_WORKING_DAYS,
+  type DependencyType,
+  type ScheduleConstraintInput,
 } from "@earned-signal/domain";
+
+export interface ProjectCalendar {
+  readonly id: string;
+  readonly name: string;
+  readonly workingWeekdays: readonly number[];
+  readonly nonWorkingDates: readonly string[];
+}
+
+export interface ProjectWbsGroup {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly code: string;
+  readonly name: string;
+}
+
+export interface ProjectDependency {
+  readonly predecessorId: string;
+  readonly type: DependencyType;
+  readonly lagWorkingDays: number;
+}
 
 export interface ProjectTask {
   readonly id: string;
   readonly wbs: string;
+  readonly wbsParentId: string | null;
   readonly name: string;
   readonly owner: string;
   readonly durationWorkingDays: number;
   readonly measurementMethod: "ZERO_HUNDRED" | "PHYSICAL_PERCENT";
-  readonly predecessorId: string | null;
+  readonly calendarId: string;
+  readonly dependencies: readonly ProjectDependency[];
+  readonly constraint: ScheduleConstraintInput | null;
   readonly budget: number;
   readonly progressPercent: number;
   readonly actualCost: number;
@@ -23,6 +48,9 @@ export interface ProjectState {
   readonly projectStart: string;
   readonly statusDate: string;
   readonly currency: "JPY";
+  readonly defaultCalendarId: string;
+  readonly calendars: readonly ProjectCalendar[];
+  readonly wbsGroups: readonly ProjectWbsGroup[];
   readonly tasks: readonly ProjectTask[];
 }
 
@@ -61,12 +89,42 @@ function validateSafeMinorUnits(value: number, field: string): void {
 }
 
 function validateProject(project: ProjectState): void {
+  const wbsGroupIds = new Set(project.wbsGroups.map((group) => group.id));
+  if (wbsGroupIds.size !== project.wbsGroups.length) {
+    throw new Error("WBS group IDs must be unique");
+  }
+  const wbsCodes = new Set<string>();
+  for (const group of project.wbsGroups) {
+    if (group.id.trim().length === 0 || group.code.trim().length === 0 || group.name.trim().length === 0) {
+      throw new Error("WBS groups require an ID, code, and name");
+    }
+    if (wbsCodes.has(group.code)) throw new Error(`WBS code must be unique: ${group.code}`);
+    wbsCodes.add(group.code);
+    if (group.parentId !== null && !wbsGroupIds.has(group.parentId)) {
+      throw new Error(`Unknown WBS parent: ${group.parentId}`);
+    }
+    const visited = new Set([group.id]);
+    let parentId = group.parentId;
+    while (parentId !== null) {
+      if (visited.has(parentId)) throw new Error("WBS hierarchy contains a cycle");
+      visited.add(parentId);
+      parentId = project.wbsGroups.find((candidate) => candidate.id === parentId)?.parentId ?? null;
+    }
+  }
+
   const ids = new Set<string>();
   for (const task of project.tasks) {
     if (task.id.length === 0 || ids.has(task.id)) {
       throw new Error(`Task ID must be unique: ${task.id}`);
     }
     ids.add(task.id);
+    if (task.wbs.trim().length === 0 || wbsCodes.has(task.wbs)) {
+      throw new Error(`WBS code must be unique: ${task.wbs}`);
+    }
+    wbsCodes.add(task.wbs);
+    if (task.wbsParentId !== null && !wbsGroupIds.has(task.wbsParentId)) {
+      throw new Error(`Unknown WBS parent: ${task.wbsParentId}`);
+    }
     if (
       !Number.isInteger(task.durationWorkingDays) ||
       task.durationWorkingDays < 1 ||
@@ -100,13 +158,14 @@ function validateProject(project: ProjectState): void {
 
   calculateSchedule({
     projectStart: project.projectStart,
+    defaultCalendarId: project.defaultCalendarId,
+    calendars: project.calendars,
     activities: project.tasks.map((task) => ({
       id: task.id,
       durationWorkingDays: task.durationWorkingDays,
-      dependencies:
-        task.predecessorId === null
-          ? []
-          : [{ predecessorId: task.predecessorId, lagWorkingDays: 0 }],
+      calendarId: task.calendarId,
+      dependencies: task.dependencies,
+      ...(task.constraint === null ? {} : { constraint: task.constraint }),
     })),
   });
 }

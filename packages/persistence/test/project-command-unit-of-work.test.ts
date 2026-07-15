@@ -233,12 +233,14 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     expect(reloaded?.auditEvents).toHaveLength(1);
   });
 
-  it("persists a newly added task and its dependency", async () => {
+  it("persists a task with hierarchy, calendar, constraint, and multiple typed dependencies", async () => {
     const service = createProjectCommandService(
       new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
     );
     const taskId = "30000000-0000-4000-8000-000000000099";
     const predecessorId = demoProjectRecord.activities[8]!.id;
+    const secondPredecessorId = demoProjectRecord.activities[7]!.id;
+    const parentId = demoProjectRecord.wbsNodes.find((node) => node.code === "3")!.id;
 
     await service.execute({
       tenantId: demoProjectRecord.tenant.id,
@@ -251,11 +253,17 @@ describe("PostgresProjectCommandUnitOfWork", () => {
         task: {
           id: taskId,
           wbs: "4.1",
+          wbsParentId: parentId,
           name: "Post-launch review",
           owner: "Maya Chen",
           durationWorkingDays: 2,
           measurementMethod: "PHYSICAL_PERCENT",
-          predecessorId,
+          calendarId: "support",
+          dependencies: [
+            { predecessorId, type: "SS", lagWorkingDays: 1 },
+            { predecessorId: secondPredecessorId, type: "FF", lagWorkingDays: 2 },
+          ],
+          constraint: { type: "FINISH_NO_LATER_THAN", date: "2026-09-30" },
           budget: 200_000,
           progressPercent: 0,
           actualCost: 0,
@@ -270,11 +278,27 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     );
     expect(reloaded?.activities.find((activity) => activity.id === taskId)).toMatchObject({
       name: "Post-launch review",
+      calendarId: "support",
+      constraintType: "FINISH_NO_LATER_THAN",
+      constraintDate: "2026-09-30",
       budgetMinor: 200_000n,
     });
     expect(
-      reloaded?.dependencies.find((dependency) => dependency.successorActivityId === taskId),
-    ).toMatchObject({ predecessorActivityId: predecessorId });
+      reloaded?.wbsNodes.find((node) => node.id === reloaded.activities.find((activity) => activity.id === taskId)?.wbsNodeId),
+    ).toMatchObject({ parentId });
+    expect(
+      reloaded?.dependencies
+        .filter((dependency) => dependency.successorActivityId === taskId)
+        .map(({ predecessorActivityId, type, lagWorkingDays }) => ({
+          predecessorActivityId,
+          type,
+          lagWorkingDays,
+        }))
+        .sort((left, right) => left.predecessorActivityId.localeCompare(right.predecessorActivityId)),
+    ).toEqual([
+      { predecessorActivityId: secondPredecessorId, type: "FF", lagWorkingDays: 2 },
+      { predecessorActivityId: predecessorId, type: "SS", lagWorkingDays: 1 },
+    ]);
   });
 
   it("deletes a task without actuals while preserving its approved baseline snapshot", async () => {

@@ -27,10 +27,13 @@ type ProjectMode = "current" | "baseline";
 
 interface TaskRow extends ProjectTask {
   readonly actualHours: number;
+  readonly dependenciesText: string;
+  readonly constraintText: string;
   readonly earlyStart: string;
   readonly earlyFinish: string;
   readonly totalFloatWorkingDays: number;
   readonly critical: boolean;
+  readonly constraintViolation?: NonNullable<ProjectTask["constraint"]>;
 }
 
 const gridTheme = themeQuartz.withParams({
@@ -189,9 +192,11 @@ function PerformanceBars({ analysis }: { readonly analysis: ProjectAnalysis }) {
 function TaskDetail({
   task,
   row,
+  project,
 }: {
   readonly task: ProjectTask | null;
   readonly row: TaskRow | undefined;
+  readonly project: ProjectState;
 }) {
   return (
     <section className="task-detail">
@@ -205,6 +210,10 @@ function TaskDetail({
       {task === null || row === undefined ? (
         <p className="empty-detail">Choose a task to inspect its schedule and actuals.</p>
       ) : (
+        <>
+        {row.constraintViolation === undefined ? null : (
+          <p className="constraint-warning">Forecast violates {formatConstraint(task)}.</p>
+        )}
         <dl className="detail-grid">
           <div>
             <dt>Owner</dt>
@@ -222,18 +231,102 @@ function TaskDetail({
             <dt>Total float</dt>
             <dd>{row.totalFloatWorkingDays} working days</dd>
           </div>
+          <div>
+            <dt>WBS parent</dt>
+            <dd>{project.wbsGroups.find((group) => group.id === task.wbsParentId)?.name ?? "Root"}</dd>
+          </div>
+          <div>
+            <dt>Calendar</dt>
+            <dd>{project.calendars.find((calendar) => calendar.id === task.calendarId)?.name ?? task.calendarId}</dd>
+          </div>
+          <div className="detail-grid--wide">
+            <dt>Dependencies</dt>
+            <dd>{row.dependenciesText || "None"}</dd>
+          </div>
+          <div className="detail-grid--wide">
+            <dt>Constraint</dt>
+            <dd>{row.constraintText || "None"}</dd>
+          </div>
         </dl>
+        </>
       )}
     </section>
   );
 }
 
-function changesForField(field: string, value: unknown): Partial<Omit<ProjectTask, "id">> {
-  if (field === "name" || field === "owner") {
+const constraintTypeByCode = {
+  SNET: "START_NO_EARLIER_THAN",
+  FNLT: "FINISH_NO_LATER_THAN",
+  MSO: "MUST_START_ON",
+  MFO: "MUST_FINISH_ON",
+} as const;
+
+function formatDependencies(task: ProjectTask): string {
+  return task.dependencies
+    .map(
+      (dependency) =>
+        `${dependency.predecessorId} ${dependency.type}${
+          dependency.lagWorkingDays === 0 ? "" : `+${String(dependency.lagWorkingDays)}`
+        }`,
+    )
+    .join(", ");
+}
+
+function formatConstraint(task: ProjectTask): string {
+  if (task.constraint === null) return "";
+  const code = Object.entries(constraintTypeByCode).find(
+    ([, type]) => type === task.constraint?.type,
+  )?.[0];
+  return `${code ?? task.constraint.type} ${task.constraint.date}`;
+}
+
+function parseDependencies(value: unknown, project: ProjectState) {
+  const text = String(value ?? "").trim();
+  if (text.length === 0) return [];
+  const taskIds = new Set(project.tasks.map((task) => task.id));
+  return text.split(",").map((entry) => {
+    const match = /^([^\s]+)\s+(FS|SS|FF|SF)(?:\+(\d+))?$/i.exec(entry.trim());
+    if (match === null) {
+      throw new Error("Dependencies use ‘Task FS+lag’, separated by commas");
+    }
+    const predecessorId = match[1] ?? "";
+    if (!taskIds.has(predecessorId)) throw new Error(`Unknown predecessor: ${predecessorId}`);
+    return {
+      predecessorId,
+      type: (match[2] ?? "FS").toUpperCase() as "FS" | "SS" | "FF" | "SF",
+      lagWorkingDays: Number(match[3] ?? 0),
+    };
+  });
+}
+
+function parseConstraint(value: unknown): ProjectTask["constraint"] {
+  const text = String(value ?? "").trim();
+  if (text.length === 0) return null;
+  const match = /^(SNET|FNLT|MSO|MFO)\s+(\d{4}-\d{2}-\d{2})$/i.exec(text);
+  if (match === null) throw new Error("Constraints use ‘SNET|FNLT|MSO|MFO YYYY-MM-DD’");
+  const code = (match[1] ?? "").toUpperCase() as keyof typeof constraintTypeByCode;
+  return { type: constraintTypeByCode[code], date: match[2] ?? "" };
+}
+
+function changesForField(
+  field: string,
+  value: unknown,
+  project: ProjectState,
+): Partial<Omit<ProjectTask, "id">> {
+  if (field === "name" || field === "owner" || field === "wbs") {
     return { [field]: String(value ?? "") };
   }
-  if (field === "predecessorId") {
-    return { predecessorId: value === null || value === "" ? null : String(value) };
+  if (field === "wbsParentId") {
+    return { wbsParentId: value === null || value === "" ? null : String(value) };
+  }
+  if (field === "calendarId") {
+    return { calendarId: String(value ?? "") };
+  }
+  if (field === "dependenciesText") {
+    return { dependencies: parseDependencies(value, project) };
+  }
+  if (field === "constraintText") {
+    return { constraint: parseConstraint(value) };
   }
   const numericValue = Number(value);
   if (field === "durationWorkingDays") {
@@ -268,7 +361,13 @@ export function App() {
         if (scheduled === undefined) {
           throw new Error(`Task ${task.id} has no schedule result`);
         }
-        return { ...task, actualHours: task.actualMinutes / 60, ...scheduled };
+        return {
+          ...task,
+          actualHours: task.actualMinutes / 60,
+          dependenciesText: formatDependencies(task),
+          constraintText: formatConstraint(task),
+          ...scheduled,
+        };
       }),
     [analysis, displayedProject.tasks],
   );
@@ -293,7 +392,7 @@ export function App() {
         return;
       }
       try {
-        const changes = changesForField(event.colDef.field, event.newValue);
+        const changes = changesForField(event.colDef.field, event.newValue, currentProject);
         executeCommand({
           type: "task.update",
           taskId: event.data.id,
@@ -304,17 +403,34 @@ export function App() {
         setNotice(error instanceof Error ? error.message : "The edit could not be applied");
       }
     },
-    [executeCommand, mode],
+    [currentProject, executeCommand, mode],
   );
 
-  const predecessorValues = useMemo(
-    () => ["", ...displayedProject.tasks.map((task) => task.id)],
-    [displayedProject.tasks],
+  const wbsParentValues = useMemo(
+    () => ["", ...displayedProject.wbsGroups.map((group) => group.id)],
+    [displayedProject.wbsGroups],
+  );
+  const calendarValues = useMemo(
+    () => displayedProject.calendars.map((calendar) => calendar.id),
+    [displayedProject.calendars],
   );
   const editable = mode === "current";
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
-      { field: "wbs", headerName: "WBS", pinned: "left", width: 74 },
+      { field: "wbs", headerName: "WBS", pinned: "left", width: 82, editable, cellClass: "editable-cell" },
+      {
+        field: "wbsParentId",
+        headerName: "Parent",
+        width: 112,
+        editable,
+        cellEditor: "agSelectCellEditor",
+        cellEditorParams: { values: wbsParentValues },
+        valueFormatter: ({ value }) => {
+          const group = displayedProject.wbsGroups.find((candidate) => candidate.id === value);
+          return group === undefined ? "Root" : `${group.code} ${group.name}`;
+        },
+        cellClass: "editable-cell hierarchy-cell",
+      },
       {
         field: "name",
         headerName: "Work package",
@@ -323,6 +439,7 @@ export function App() {
         flex: 1,
         editable,
         cellClass: "editable-cell task-name-cell",
+        valueFormatter: ({ value }) => `↳ ${String(value ?? "")}`,
       },
       { field: "owner", headerName: "Owner", width: 132, editable, cellClass: "editable-cell" },
       {
@@ -333,14 +450,31 @@ export function App() {
         cellClass: "editable-cell numeric-cell",
       },
       {
-        field: "predecessorId",
-        headerName: "Pred.",
-        width: 82,
+        field: "dependenciesText",
+        headerName: "Dependencies",
+        width: 190,
+        editable,
+        cellClass: "editable-cell",
+        valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
+      },
+      {
+        field: "calendarId",
+        headerName: "Calendar",
+        width: 142,
         editable,
         cellEditor: "agSelectCellEditor",
-        cellEditorParams: { values: predecessorValues },
+        cellEditorParams: { values: calendarValues },
+        valueFormatter: ({ value }) =>
+          displayedProject.calendars.find((calendar) => calendar.id === value)?.name ?? String(value),
         cellClass: "editable-cell",
-        valueFormatter: ({ value }) => (value === null || value === "" ? "—" : String(value)),
+      },
+      {
+        field: "constraintText",
+        headerName: "Constraint",
+        width: 170,
+        editable,
+        cellClass: "editable-cell constraint-cell",
+        valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
       },
       {
         field: "earlyFinish",
@@ -382,7 +516,7 @@ export function App() {
         cellClass: "editable-cell numeric-cell",
       },
     ],
-    [editable, predecessorValues],
+    [calendarValues, displayedProject.calendars, displayedProject.wbsGroups, editable, wbsParentValues],
   );
 
   const selectedTask = displayedProject.tasks.find((task) => task.id === selectedTaskId) ?? null;
@@ -403,11 +537,14 @@ export function App() {
     const task: ProjectTask = {
       id: `A${String(nextNumber)}`,
       wbs: `4.${String(nextNumber - currentProject.tasks.length)}`,
+      wbsParentId: null,
       name: "New work package",
       owner: "",
       durationWorkingDays: 1,
       measurementMethod: "PHYSICAL_PERCENT",
-      predecessorId: null,
+      calendarId: currentProject.defaultCalendarId,
+      dependencies: [],
+      constraint: null,
       budget: 0,
       progressPercent: 0,
       actualCost: 0,
@@ -528,7 +665,7 @@ export function App() {
                 <div className="grid-toolbar">
                   <div>
                     <h2>Work breakdown</h2>
-                    <span>{displayedProject.tasks.length} leaf work packages</span>
+                    <span>{displayedProject.tasks.length} work packages · hierarchy, calendars, links &amp; constraints editable</span>
                   </div>
                   <div className="toolbar-actions">
                     {mode === "baseline" ? <span className="readonly-pill">Read only</span> : null}
@@ -556,7 +693,10 @@ export function App() {
                     headerHeight={39}
                     singleClickEdit
                     stopEditingWhenCellsLoseFocus
-                    getRowClass={({ data }) => (data?.critical === true ? "critical-row" : undefined)}
+                    getRowClass={({ data }) => [
+                      data?.critical === true ? "critical-row" : "",
+                      data?.constraintViolation !== undefined ? "constraint-violation-row" : "",
+                    ].filter(Boolean).join(" ")}
                   />
                 </div>
                 <footer className="grid-footer">
@@ -568,7 +708,7 @@ export function App() {
 
               <aside className="insight-column">
                 <PerformanceBars analysis={analysis} />
-                <TaskDetail task={selectedTask} row={selectedRow} />
+                <TaskDetail task={selectedTask} row={selectedRow} project={displayedProject} />
               </aside>
             </div>
           </div>

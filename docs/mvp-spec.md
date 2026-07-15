@@ -18,12 +18,12 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 
 ## This technical slice
 
-- A Monday-to-Friday scheduling module with finish-to-start dependencies, non-negative working-day lag, forward and backward passes, total float, critical-path flags, and cycle detection.
+- A calendar-aware scheduling module with multiple FS/SS/FF/SF dependencies, bounded non-negative working-day lag, project and activity calendars, holidays, date constraints, forward and backward passes, total float, critical-path flags, constraint-violation signals, and cycle detection.
 - A pure earned value module producing BAC, PV, EV, AC, SV, CV, SPI, CPI, EAC, ETC, VAC, and TCPI. Ratios with a zero denominator are `null`.
 - A React shell and Hono `/api/health` route built together by the Cloudflare Vite plugin.
-- An editable AG Grid Community workspace for leaf work packages, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
+- An editable AG Grid Community workspace for hierarchical leaf work packages, typed dependencies, calendars, and constraints, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
 - Add and delete commands plus typed cell updates through the shared application command boundary.
-- A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
+- A PostgreSQL system of record with reviewed Drizzle migrations, tenant/project boundary constraints, schedule calendars and constraints, exact minor-unit money, integer-minute effort, immutable approved baseline snapshots, immutable audit events, and a tenant-scoped Repository.
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
@@ -36,8 +36,8 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 
 - Billing, self-service signup/invitation UI, and production identity-provider tenant/client provisioning.
 - Production PostgreSQL provisioning and Hyperdrive bindings.
-- Hierarchical WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features.
-- Resource calendars beyond Monday to Friday, holidays, constraints, resource leveling, and non-FS dependency types.
+- Enterprise-only WBS Tree Data, Gantt product integration, range clipboard, and other Enterprise-only grid features. Hierarchy is edited through typed Community-grid columns.
+- Resource leveling and capacity optimization. Activity calendars and holidays are supported without automatic leveling.
 - Monte Carlo simulation, optimization, and AI estimates.
 - EIA-748 compliance.
 
