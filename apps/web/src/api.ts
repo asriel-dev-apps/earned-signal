@@ -2,7 +2,9 @@ import {
   type AuthenticatedIdentity,
   type ProjectCommandAuthorizer,
   type ProjectCommandService,
+  type ProjectQueryAuthorizer,
 } from "@earned-signal/application";
+import type { EvmSnapshot } from "@earned-signal/domain";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
@@ -14,15 +16,20 @@ import {
 } from "./project-command-contract.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
 
-export interface ProjectCommandSession {
+export interface ProjectSession {
   readonly service: ProjectCommandService;
   readonly authorizer: ProjectCommandAuthorizer;
+  readonly queryAuthorizer: ProjectQueryAuthorizer;
+  readonly performance: {
+    calculate(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
+    refresh(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
+  };
   close(): Promise<void>;
 }
 
 export interface ApiDependencies {
   authenticate(request: Request, environment: Env): Promise<AuthenticatedIdentity>;
-  openCommandSession(environment: Env): Promise<ProjectCommandSession>;
+  openProjectSession(environment: Env): Promise<ProjectSession>;
 }
 
 const CommandRequestSchema = z
@@ -50,6 +57,87 @@ const ErrorResponseSchema = z
     }),
   })
   .openapi("ErrorResponse");
+
+const EvmMetricsSchema = z.object({
+  bac: z.number(),
+  pv: z.number(),
+  ev: z.number(),
+  ac: z.number(),
+  sv: z.number(),
+  cv: z.number(),
+  spi: z.number().nullable(),
+  cpi: z.number().nullable(),
+  eac: z.number().nullable(),
+  etc: z.number().nullable(),
+  vac: z.number().nullable(),
+  tcpi: z.number().nullable(),
+});
+
+const PerformanceResponseSchema = z
+  .object({
+    snapshots: z.array(
+      z.object({
+        period: z.object({
+          periodStart: z.iso.date(),
+          periodEnd: z.iso.date(),
+          statusDate: z.iso.date(),
+        }),
+        metrics: EvmMetricsSchema,
+        wbsVariances: z.array(
+          z.object({
+            id: UuidSchema,
+            wbs: z.string(),
+            pv: z.number(),
+            ev: z.number(),
+            ac: z.number(),
+            sv: z.number(),
+            cv: z.number(),
+          }),
+        ),
+      }),
+    ),
+  })
+  .openapi("ProjectPerformanceResponse");
+
+const performanceRoute = createRoute({
+  method: "get",
+  path: "/api/tenants/{tenantId}/projects/{projectId}/performance",
+  security: [{ OidcBearer: [] }],
+  request: {
+    params: z.object({
+      tenantId: UuidSchema.openapi({ param: { name: "tenantId", in: "path" } }),
+      projectId: UuidSchema.openapi({ param: { name: "projectId", in: "path" } }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Weekly EVM snapshots and ranked WBS variances",
+      content: { "application/json": { schema: PerformanceResponseSchema } },
+    },
+    401: {
+      description: "Authentication required",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: "Authenticated principal cannot read the project",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    500: {
+      description: "Internal server error",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+function performanceResponse(snapshots: readonly EvmSnapshot[]) {
+  return {
+    snapshots: snapshots.map((snapshot) => ({
+      period: { ...snapshot.period },
+      metrics: { ...snapshot.metrics },
+      wbsVariances: snapshot.wbsVariances.map((variance) => ({ ...variance })),
+    })),
+  };
+}
 
 const commandRoute = createRoute({
   method: "post",
@@ -157,7 +245,7 @@ export function createApiApp(dependencies: ApiDependencies) {
     const headers = context.req.valid("header");
     const body = context.req.valid("json");
     const identity = await dependencies.authenticate(context.req.raw, context.env);
-    const session = await dependencies.openCommandSession(context.env);
+    const session = await dependencies.openProjectSession(context.env);
     try {
       const command = toCommand(body.command);
       const actor = await session.authorizer.authorize({
@@ -174,6 +262,7 @@ export function createApiApp(dependencies: ApiDependencies) {
         actor,
         command,
       });
+      await session.performance.refresh(tenantId, projectId);
       context.header("ETag", `"${result.revision}"`);
       context.header("Cache-Control", "no-store");
       return context.json(
@@ -182,6 +271,22 @@ export function createApiApp(dependencies: ApiDependencies) {
           revision: result.revision.toString(),
           replayed: result.replayed,
         },
+        200,
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(performanceRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      context.header("Cache-Control", "no-store");
+      return context.json(
+        performanceResponse(await session.performance.calculate(tenantId, projectId)),
         200,
       );
     } finally {

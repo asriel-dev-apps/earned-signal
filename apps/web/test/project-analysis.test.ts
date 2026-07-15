@@ -50,5 +50,6 @@ describe("analyzeProject", () => {
 
     expect(analyzeProject(zeroHundredProject(0), baseline).evm.ev).toBe(0);
     expect(analyzeProject(zeroHundredProject(100), baseline).evm.ev).toBe(100_000);
+    expect(analyzeProject(zeroHundredProject(100), baseline).performanceHistory).toHaveLength(1);
   });
 });

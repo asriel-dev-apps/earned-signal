@@ -1,6 +1,7 @@
 import {
   createProjectCommandAuthorizer,
   createProjectCommandService,
+  createProjectQueryAuthorizer,
   type ProjectAccessGrant,
 } from "@earned-signal/application";
 import {
@@ -9,6 +10,7 @@ import {
   migratePersistenceDatabase,
   PostgresProjectCommandUnitOfWork,
   ProjectAccessRepository,
+  ProjectPerformanceRepository,
   ProjectRepository,
 } from "@earned-signal/persistence";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
@@ -28,6 +30,7 @@ describe("project command REST API", () => {
   let client: Client;
   let accessRepository: ProjectAccessRepository;
   let repository: ProjectRepository;
+  let performanceRepository: ProjectPerformanceRepository;
   let stopContainer: (() => Promise<void>) | undefined;
   let workerProcess: ChildProcess | undefined;
   let workerOrigin: string;
@@ -95,6 +98,7 @@ describe("project command REST API", () => {
     await migratePersistenceDatabase(client);
     const database = createPersistenceDatabase(client);
     repository = new ProjectRepository(database);
+    performanceRepository = new ProjectPerformanceRepository(database);
     accessRepository = new ProjectAccessRepository(database);
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,
@@ -250,11 +254,13 @@ describe("project command REST API", () => {
         subject: "test-principal",
         scopes: [],
       }),
-      openCommandSession: async () => ({
+      openProjectSession: async () => ({
         service: createProjectCommandService(
           new PostgresProjectCommandUnitOfWork(createPersistenceDatabase(client)),
         ),
         authorizer: createProjectCommandAuthorizer({ resolve: async () => grant }),
+        queryAuthorizer: createProjectQueryAuthorizer({ resolve: async () => grant }),
+        performance: performanceRepository,
         close: async () => undefined,
       }),
     });
@@ -289,6 +295,12 @@ describe("project command REST API", () => {
       replayed: false,
     });
     expect(response.headers.get("etag")).toBe('"2"');
+    await expect(
+      performanceRepository.load(
+        demoProjectRecord.tenant.id,
+        demoProjectRecord.project.id,
+      ),
+    ).resolves.toHaveLength(4);
 
     const specificationResponse = await app.request("/api/openapi.json");
     expect(specificationResponse.status).toBe(200);
@@ -299,7 +311,37 @@ describe("project command REST API", () => {
     expect(specification.paths).toHaveProperty(
       "/api/tenants/{tenantId}/projects/{projectId}/commands",
     );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}/performance",
+    );
     expect(specification.components?.securitySchemes).toHaveProperty("OidcBearer");
+  });
+
+  it("returns authenticated weekly EVM history and ranked WBS variances through workerd", async () => {
+    const response = await fetch(
+      `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/performance`,
+      { headers: { authorization: `Bearer ${humanAccessToken}` } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json<{ snapshots: Array<Record<string, unknown>> }>();
+    expect(body.snapshots).toHaveLength(4);
+    expect(body.snapshots.at(-1)).toMatchObject({
+      period: { statusDate: "2026-08-07" },
+      metrics: { bac: 4_700_000, ev: 2_147_500, ac: 2_820_000 },
+      wbsVariances: expect.arrayContaining([
+        expect.objectContaining({ id: demoProjectRecord.activities[3]!.id, wbs: "2.2" }),
+      ]),
+    });
+  });
+
+  it("does not expose performance across tenant boundaries", async () => {
+    const response = await fetch(
+      `${workerOrigin}/api/tenants/00000000-0000-4000-8000-000000000099/projects/${demoProjectRecord.project.id}/performance`,
+      { headers: { authorization: `Bearer ${humanAccessToken}` } },
+    );
+    expect(response.status).toBe(403);
   });
 
   it("executes an authenticated command through workerd and Hyperdrive", async () => {

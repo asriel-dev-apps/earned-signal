@@ -51,6 +51,51 @@ export interface EvmResult {
   readonly tcpi: number | null;
 }
 
+export interface EvmProgressMeasurement {
+  readonly measurementDate: string;
+  readonly progressBasisPoints: number;
+}
+
+export interface EvmHistoryWorkPackage {
+  readonly id: string;
+  readonly wbs: string;
+  readonly baselineBudget: number;
+  readonly baselineStart: string;
+  readonly baselineFinish: string;
+  readonly measurementMethod: "ZERO_HUNDRED" | "PHYSICAL_PERCENT";
+  readonly measurements: readonly EvmProgressMeasurement[];
+  readonly worklogs: readonly WorklogCost[];
+  readonly actualCosts?: readonly DirectActualCost[];
+}
+
+export interface PeriodBucket {
+  readonly periodStart: string;
+  readonly periodEnd: string;
+  readonly statusDate: string;
+}
+
+export interface EvmWbsVariance {
+  readonly id: string;
+  readonly wbs: string;
+  readonly pv: number;
+  readonly ev: number;
+  readonly ac: number;
+  readonly sv: number;
+  readonly cv: number;
+}
+
+export interface EvmSnapshot {
+  readonly period: PeriodBucket;
+  readonly metrics: EvmResult;
+  readonly wbsVariances: readonly EvmWbsVariance[];
+}
+
+export interface EvmHistoryInput {
+  readonly projectStart: string;
+  readonly statusDate: string;
+  readonly workPackages: readonly EvmHistoryWorkPackage[];
+}
+
 const DAY_IN_MILLISECONDS = 86_400_000;
 
 function asUtcDate(value: string): Date {
@@ -59,6 +104,14 @@ function asUtcDate(value: string): Date {
     throw new Error(`Invalid ISO calendar date: ${value}`);
   }
   return date;
+}
+
+function isoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function addDays(value: Date, days: number): Date {
+  return new Date(value.getTime() + days * DAY_IN_MILLISECONDS);
 }
 
 function workingDaysThrough(start: Date, finish: Date): number {
@@ -196,4 +249,105 @@ export function calculateEvm(input: EvmInput): EvmResult {
     vac: rawEac === null ? null : round(bac - rawEac, 2),
     tcpi: rawTcpi === null ? null : round(rawTcpi, 4),
   };
+}
+
+function workPackageAt(
+  workPackage: EvmHistoryWorkPackage,
+  statusDate: string,
+): EvmWorkPackage {
+  const applicableMeasurements = workPackage.measurements
+    .filter((measurement) => measurement.measurementDate <= statusDate)
+    .sort((left, right) => left.measurementDate.localeCompare(right.measurementDate));
+  for (const measurement of workPackage.measurements) {
+    asUtcDate(measurement.measurementDate);
+    if (
+      !Number.isInteger(measurement.progressBasisPoints) ||
+      measurement.progressBasisPoints < 0 ||
+      measurement.progressBasisPoints > 10_000 ||
+      (workPackage.measurementMethod === "ZERO_HUNDRED" &&
+        measurement.progressBasisPoints !== 0 &&
+        measurement.progressBasisPoints !== 10_000)
+    ) {
+      throw new Error(`Work package ${workPackage.id} has an invalid progress measurement`);
+    }
+  }
+  const latest = applicableMeasurements.at(-1);
+  const base = {
+    id: workPackage.id,
+    baselineBudget: workPackage.baselineBudget,
+    baselineStart: workPackage.baselineStart,
+    baselineFinish: workPackage.baselineFinish,
+    measurementDate: latest?.measurementDate ?? statusDate,
+    worklogs: workPackage.worklogs,
+    ...(workPackage.actualCosts === undefined ? {} : { actualCosts: workPackage.actualCosts }),
+  };
+  return workPackage.measurementMethod === "ZERO_HUNDRED"
+    ? {
+        ...base,
+        measurementMethod: workPackage.measurementMethod,
+        completed: latest?.progressBasisPoints === 10_000,
+      }
+    : {
+        ...base,
+        measurementMethod: workPackage.measurementMethod,
+        physicalPercent: (latest?.progressBasisPoints ?? 0) / 100,
+      };
+}
+
+function periodBuckets(projectStart: string, statusDate: string): readonly PeriodBucket[] {
+  const start = asUtcDate(projectStart);
+  const finish = asUtcDate(statusDate);
+  if (finish.getTime() < start.getTime()) {
+    throw new Error("Status date must not precede project start");
+  }
+  const buckets: PeriodBucket[] = [];
+  let periodStart = start;
+  while (periodStart.getTime() <= finish.getTime()) {
+    const day = periodStart.getUTCDay();
+    const daysThroughSunday = day === 0 ? 0 : 7 - day;
+    const periodEnd = addDays(periodStart, daysThroughSunday);
+    const snapshotDate = periodEnd.getTime() < finish.getTime() ? periodEnd : finish;
+    buckets.push({
+      periodStart: isoDate(periodStart),
+      periodEnd: isoDate(periodEnd),
+      statusDate: isoDate(snapshotDate),
+    });
+    periodStart = addDays(periodEnd, 1);
+  }
+  return buckets;
+}
+
+export function calculateEvmHistory(input: EvmHistoryInput): readonly EvmSnapshot[] {
+  return periodBuckets(input.projectStart, input.statusDate).map((period) => {
+    const workPackages = input.workPackages.map((workPackage) =>
+      workPackageAt(workPackage, period.statusDate),
+    );
+    const wbsVariances = input.workPackages
+      .map((workPackage, index): EvmWbsVariance => {
+        const result = calculateEvm({
+          statusDate: period.statusDate,
+          workPackages: [workPackages[index]!],
+        });
+        return {
+          id: workPackage.id,
+          wbs: workPackage.wbs,
+          pv: result.pv,
+          ev: result.ev,
+          ac: result.ac,
+          sv: result.sv,
+          cv: result.cv,
+        };
+      })
+      .sort(
+        (left, right) =>
+          Math.abs(right.sv) + Math.abs(right.cv) -
+            (Math.abs(left.sv) + Math.abs(left.cv)) ||
+          left.wbs.localeCompare(right.wbs),
+      );
+    return {
+      period,
+      metrics: calculateEvm({ statusDate: period.statusDate, workPackages }),
+      wbsVariances,
+    };
+  });
 }

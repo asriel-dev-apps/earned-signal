@@ -508,6 +508,140 @@ h1 {
   gap: 14px;
 }
 
+.mode-switch--hidden {
+  visibility: hidden;
+}
+
+.performance-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.performance-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.performance-layout {
+  display: grid;
+  align-items: start;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.8fr);
+}
+
+.trend-card,
+.variance-card {
+  border: 1px solid #dce2de;
+  border-radius: 9px;
+  background: #fff;
+  padding: 20px;
+}
+
+.trend-card header,
+.variance-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.trend-card h2,
+.variance-card h2 {
+  margin: 5px 0 0;
+  color: #203d34;
+  font-size: 15px;
+}
+
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  color: #6f7d77;
+  font-size: 9px;
+}
+
+.trend-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.trend-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.trend-card svg {
+  display: block;
+  width: 100%;
+  margin-top: 18px;
+  overflow: visible;
+}
+
+.trend-card svg text {
+  fill: #87938e;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+}
+
+.trend-gridline {
+  stroke: #e8ece9;
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.variance-table {
+  display: grid;
+  margin-top: 18px;
+}
+
+.variance-table__header,
+.variance-table__row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 76px 76px;
+}
+
+.variance-table__header {
+  border-bottom: 1px solid #e3e8e5;
+  color: #87938e;
+  padding: 0 4px 9px;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.variance-table__header span:not(:first-child),
+.variance-table__row > span:not(:first-child) {
+  text-align: right;
+}
+
+.variance-table__row {
+  min-height: 54px;
+  border-bottom: 1px solid #edf0ee;
+  color: #53635c;
+  padding: 7px 4px;
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+}
+
+.variance-table__row > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variance-table__row strong {
+  color: #1f6656;
+  font-size: 8px;
+}
+
 .team-summary {
   display: grid;
   border: 1px solid #dce2de;

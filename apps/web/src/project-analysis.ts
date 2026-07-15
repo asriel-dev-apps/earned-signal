@@ -4,8 +4,10 @@ import {
 } from "@earned-signal/application";
 import {
   calculateEvm,
+  calculateEvmHistory,
   calculateSchedule,
   type EvmResult,
+  type EvmSnapshot,
   type CapacityResult,
   type ScheduledActivity,
 } from "@earned-signal/domain";
@@ -16,6 +18,7 @@ export interface ProjectAnalysis {
   readonly baselineFinish: string;
   readonly evm: EvmResult;
   readonly capacity: CapacityResult;
+  readonly performanceHistory: readonly EvmSnapshot[];
 }
 
 function schedule(project: ProjectState) {
@@ -81,6 +84,32 @@ export function analyzeProject(
     }),
   });
   const capacity = calculateProjectCapacity(project, currentSchedule);
+  const performanceHistory = calculateEvmHistory({
+    projectStart: project.projectStart,
+    statusDate: project.statusDate,
+    workPackages: baseline.tasks.map((baselineTask) => {
+      const baselineActivity = baselineById.get(baselineTask.id);
+      if (baselineActivity === undefined) throw new Error(`Baseline task ${baselineTask.id} was not scheduled`);
+      const currentTask = project.tasks.find((task) => task.id === baselineTask.id);
+      return {
+        id: baselineTask.id,
+        wbs: baselineTask.wbs,
+        baselineBudget: baselineTask.budget,
+        baselineStart: baselineActivity.earlyStart,
+        baselineFinish: baselineActivity.earlyFinish,
+        measurementMethod: currentTask?.measurementMethod ?? baselineTask.measurementMethod,
+        measurements:
+          currentTask === undefined
+            ? []
+            : [{ measurementDate: project.statusDate, progressBasisPoints: Math.round(currentTask.progressPercent * 100) }],
+        worklogs: [],
+        actualCosts:
+          currentTask === undefined || currentTask.actualCost === 0
+            ? []
+            : [{ costDate: project.statusDate, amount: currentTask.actualCost }],
+      };
+    }),
+  });
 
   return {
     scheduleById: currentById,
@@ -88,5 +117,6 @@ export function analyzeProject(
     baselineFinish: baselineSchedule.projectFinish,
     evm,
     capacity,
+    performanceHistory,
   };
 }

@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { and, asc, desc, eq, isNotNull, type ExtractTablesWithRelations } from "drizzle-orm";
+import type { NodePgDatabase, NodePgTransaction } from "drizzle-orm/node-postgres";
 import type { PersistedProjectRecord } from "./project-record.js";
 import {
   activities,
@@ -37,7 +37,11 @@ function withoutGeneratedFields<T extends object>(
 }
 
 export class ProjectRepository {
-  constructor(private readonly database: NodePgDatabase<typeof schema>) {}
+  constructor(
+    private readonly database:
+      | NodePgDatabase<typeof schema>
+      | NodePgTransaction<typeof schema, ExtractTablesWithRelations<typeof schema>>,
+  ) {}
 
   async save(record: PersistedProjectRecord): Promise<void> {
     await this.database.transaction(async (transaction) => {

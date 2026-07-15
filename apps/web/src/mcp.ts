@@ -12,7 +12,7 @@ import {
   UuidSchema,
   toCommand,
 } from "./project-command-contract.js";
-import type { ApiDependencies, ProjectCommandSession } from "./api.js";
+import type { ApiDependencies, ProjectSession } from "./api.js";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
 
@@ -51,10 +51,10 @@ async function executeCommand(
   context: ProjectCommandContext,
   createCommand: () => ProjectCommand,
 ) {
-  let session: ProjectCommandSession | undefined;
+  let session: ProjectSession | undefined;
   try {
     const command = createCommand();
-    session = await dependencies.openCommandSession(environment);
+    session = await dependencies.openProjectSession(environment);
     const actor = await session.authorizer.authorize({
       identity,
       tenantId: context.tenantId,

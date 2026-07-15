@@ -710,6 +710,97 @@ export const baselineDependencies = pgTable(
   ],
 );
 
+export const periodBuckets = pgTable(
+  "period_buckets",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    statusDate: date("status_date", { mode: "string" }).notNull(),
+    periodStart: date("period_start", { mode: "string" }).notNull(),
+    periodEnd: date("period_end", { mode: "string" }).notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.statusDate] }),
+    foreignKey({
+      name: "period_buckets_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("period_buckets_dates_ordered", sql`${table.periodStart} <= ${table.statusDate} and ${table.statusDate} <= ${table.periodEnd}`),
+  ],
+);
+
+export const evmSnapshots = pgTable(
+  "evm_snapshots",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    statusDate: date("status_date", { mode: "string" }).notNull(),
+    baselineVersionId: uuid("baseline_version_id").notNull(),
+    bac: numeric({ precision: 20, scale: 2 }).notNull(),
+    pv: numeric({ precision: 20, scale: 2 }).notNull(),
+    ev: numeric({ precision: 20, scale: 2 }).notNull(),
+    ac: numeric({ precision: 20, scale: 2 }).notNull(),
+    sv: numeric({ precision: 20, scale: 2 }).notNull(),
+    cv: numeric({ precision: 20, scale: 2 }).notNull(),
+    spi: numeric({ precision: 20, scale: 4 }),
+    cpi: numeric({ precision: 20, scale: 4 }),
+    eac: numeric({ precision: 20, scale: 2 }),
+    etc: numeric({ precision: 20, scale: 2 }),
+    vac: numeric({ precision: 20, scale: 2 }),
+    tcpi: numeric({ precision: 20, scale: 4 }),
+    calculatedAt: auditTimestamp("calculated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.statusDate] }),
+    foreignKey({
+      name: "evm_snapshots_period_bucket_fk",
+      columns: [table.tenantId, table.projectId, table.statusDate],
+      foreignColumns: [periodBuckets.tenantId, periodBuckets.projectId, periodBuckets.statusDate],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "evm_snapshots_baseline_version_fk",
+      columns: [table.tenantId, table.projectId, table.baselineVersionId],
+      foreignColumns: [baselineVersions.tenantId, baselineVersions.projectId, baselineVersions.id],
+    }).onDelete("restrict"),
+    check("evm_snapshots_non_negative_totals", sql`${table.bac} >= 0 and ${table.pv} >= 0 and ${table.ev} >= 0 and ${table.ac} >= 0`),
+  ],
+);
+
+export const evmSnapshotWbsVariances = pgTable(
+  "evm_snapshot_wbs_variances",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    statusDate: date("status_date", { mode: "string" }).notNull(),
+    activityId: uuid("activity_id").notNull(),
+    wbs: text().notNull(),
+    rank: integer().notNull(),
+    pv: numeric({ precision: 20, scale: 2 }).notNull(),
+    ev: numeric({ precision: 20, scale: 2 }).notNull(),
+    ac: numeric({ precision: 20, scale: 2 }).notNull(),
+    sv: numeric({ precision: 20, scale: 2 }).notNull(),
+    cv: numeric({ precision: 20, scale: 2 }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.statusDate, table.activityId] }),
+    unique("evm_snapshot_wbs_variances_rank_unique").on(
+      table.tenantId,
+      table.projectId,
+      table.statusDate,
+      table.rank,
+    ),
+    foreignKey({
+      name: "evm_snapshot_wbs_variances_snapshot_fk",
+      columns: [table.tenantId, table.projectId, table.statusDate],
+      foreignColumns: [evmSnapshots.tenantId, evmSnapshots.projectId, evmSnapshots.statusDate],
+    }).onDelete("cascade"),
+    check("evm_snapshot_wbs_variances_wbs_not_blank", sql`length(trim(${table.wbs})) > 0`),
+    check("evm_snapshot_wbs_variances_rank_positive", sql`${table.rank} > 0`),
+  ],
+);
+
 export const progressMeasurements = pgTable(
   "progress_measurements",
   {
@@ -887,6 +978,9 @@ export const schema = {
   baselineWbsNodes,
   baselineActivities,
   baselineDependencies,
+  periodBuckets,
+  evmSnapshots,
+  evmSnapshotWbsVariances,
   progressMeasurements,
   worklogs,
   directActualCosts,

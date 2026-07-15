@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AgentPlanApprovalRequiredError,
   createProjectCommandAuthorizer,
+  createProjectQueryAuthorizer,
   ProjectAccessDeniedError,
   type ProjectAccessGrantResolver,
 } from "../src/index.js";
@@ -207,5 +208,36 @@ describe("ProjectCommandAuthorizer", () => {
     await expect(unprovisioned.authorize(request)).rejects.toBeInstanceOf(
       ProjectAccessDeniedError,
     );
+  });
+});
+
+describe("ProjectQueryAuthorizer", () => {
+  it("allows every provisioned project role to read performance", async () => {
+    const grant = {
+      principalId: "90000000-0000-4000-8000-000000000003",
+      principalType: "HUMAN" as const,
+      projectRole: "VIEWER" as const,
+      allowedScopes: [],
+    };
+    const authorizer = createProjectQueryAuthorizer({ resolve: async () => grant });
+
+    await expect(
+      authorizer.authorize({
+        identity: { issuer: "https://identity.example.test/", subject: "viewer", scopes: [] },
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        projectId: "10000000-0000-4000-8000-000000000001",
+      }),
+    ).resolves.toEqual(grant);
+  });
+
+  it("denies an identity without a project grant", async () => {
+    const authorizer = createProjectQueryAuthorizer({ resolve: async () => null });
+    await expect(
+      authorizer.authorize({
+        identity: { issuer: "https://identity.example.test/", subject: "missing", scopes: [] },
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        projectId: "10000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toBeInstanceOf(ProjectAccessDeniedError);
   });
 });

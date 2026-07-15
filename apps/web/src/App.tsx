@@ -24,7 +24,7 @@ import { baselineProject, initialProject } from "./demo-project";
 import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 
 type ProjectMode = "current" | "baseline";
-type WorkspaceView = "wbs" | "team";
+type WorkspaceView = "wbs" | "performance" | "team";
 
 interface TaskRow extends ProjectTask {
   readonly actualHours: number;
@@ -104,10 +104,11 @@ function formatDate(value: string): string {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
-function Icon({ name }: { readonly name: "grid" | "pulse" | "layers" | "settings" }) {
+function Icon({ name }: { readonly name: "grid" | "pulse" | "users" | "layers" | "settings" }) {
   const paths = {
     grid: "M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z",
     pulse: "M3 12h4l2-6 4 12 2-6h6",
+    users: "M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7.5 4a4 4 0 0 1 4 4v2m-2-10a4 4 0 0 0 0-8",
     layers: "m4 9 8-5 8 5-8 5-8-5Zm0 5 8 5 8-5",
     settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19 12a7 7 0 0 0-.08-1l2-1.55-2-3.46-2.46 1A7.2 7.2 0 0 0 14.72 6L14.4 3h-4.8l-.32 3a7.2 7.2 0 0 0-1.74 1L5.08 6l-2 3.46L5.08 11A7 7 0 0 0 5 12c0 .34.03.67.08 1l-2 1.55 2 3.46 2.46-1a7.2 7.2 0 0 0 1.74 1l.32 3h4.8l.32-3a7.2 7.2 0 0 0 1.74-1l2.46 1 2-3.46-2-1.55c.05-.33.08-.66.08-1Z",
   } as const;
@@ -387,6 +388,110 @@ function changesForField(
   return {};
 }
 
+function trendPath(
+  values: readonly number[],
+  maximum: number,
+  width = 900,
+  height = 250,
+): string {
+  const left = 42;
+  const right = width - 24;
+  const top = 18;
+  const bottom = height - 38;
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? right : left + ((right - left) * index) / (values.length - 1);
+      const y = bottom - ((bottom - top) * value) / maximum;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function PerformanceWorkspace({
+  project,
+  analysis,
+}: {
+  readonly project: ProjectState;
+  readonly analysis: ProjectAnalysis;
+}) {
+  const snapshots = analysis.performanceHistory;
+  const latest = snapshots.at(-1);
+  const maximum = Math.max(
+    1,
+    ...snapshots.flatMap((snapshot) => [
+      snapshot.metrics.bac,
+      snapshot.metrics.pv,
+      snapshot.metrics.ev,
+      snapshot.metrics.ac,
+    ]),
+  );
+  const lines = [
+    { key: "pv", label: "Planned value", color: "#8b9993", values: snapshots.map((snapshot) => snapshot.metrics.pv) },
+    { key: "ev", label: "Earned value", color: "#1d7665", values: snapshots.map((snapshot) => snapshot.metrics.ev) },
+    { key: "ac", label: "Actual cost", color: "#d38348", values: snapshots.map((snapshot) => snapshot.metrics.ac) },
+  ] as const;
+  return (
+    <section className="performance-workspace" aria-label="Performance history">
+      <div className="performance-summary">
+        <MetricCard label="SCHEDULE VARIANCE" value={formatCurrency(latest?.metrics.sv ?? null)} detail={`SPI ${formatRatio(latest?.metrics.spi ?? null)}`} tone={(latest?.metrics.sv ?? 0) < 0 ? "risk" : "good"} />
+        <MetricCard label="COST VARIANCE" value={formatCurrency(latest?.metrics.cv ?? null)} detail={`CPI ${formatRatio(latest?.metrics.cpi ?? null)}`} tone={(latest?.metrics.cv ?? 0) < 0 ? "risk" : "good"} />
+        <MetricCard label="ESTIMATE AT COMPLETION" value={formatCurrency(latest?.metrics.eac ?? null)} detail={formatBudgetVariance(latest?.metrics.vac ?? null)} tone={(latest?.metrics.vac ?? 0) < 0 ? "risk" : "good"} />
+        <MetricCard label="TO-COMPLETE INDEX" value={formatRatio(latest?.metrics.tcpi ?? null)} detail="TCPI · required efficiency" tone={(latest?.metrics.tcpi ?? 0) > 1 ? "risk" : "good"} />
+      </div>
+      <div className="performance-layout">
+        <article className="trend-card">
+          <header>
+            <div>
+              <span className="section-kicker">WEEKLY STATUS HISTORY</span>
+              <h2>Value and cost trend</h2>
+            </div>
+            <div className="trend-legend">
+              {lines.map((line) => <span key={line.key}><i style={{ backgroundColor: line.color }} />{line.label}</span>)}
+            </div>
+          </header>
+          <svg viewBox="0 0 900 250" role="img" aria-label="Planned value, earned value, and actual cost by weekly status date">
+            {[0.25, 0.5, 0.75, 1].map((fraction) => (
+              <g key={fraction}>
+                <line x1="42" x2="876" y1={212 - 194 * fraction} y2={212 - 194 * fraction} className="trend-gridline" />
+                <text x="6" y={216 - 194 * fraction}>{formatCurrency(maximum * fraction)}</text>
+              </g>
+            ))}
+            {lines.map((line) => (
+              <path key={line.key} d={trendPath(line.values, maximum)} fill="none" stroke={line.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            ))}
+            {snapshots.map((snapshot, index) => {
+              const x = snapshots.length === 1 ? 876 : 42 + (834 * index) / (snapshots.length - 1);
+              return <text key={snapshot.period.statusDate} x={x} y="238" textAnchor="middle">{formatDate(snapshot.period.statusDate)}</text>;
+            })}
+          </svg>
+        </article>
+        <article className="variance-card">
+          <header>
+            <div>
+              <span className="section-kicker">ATTENTION REQUIRED</span>
+              <h2>Largest WBS variances</h2>
+            </div>
+            <span className="status-pill">As of {latest === undefined ? "—" : formatDate(latest.period.statusDate)}</span>
+          </header>
+          <div className="variance-table" role="table" aria-label="Largest WBS variances">
+            <div className="variance-table__header" role="row"><span>Work package</span><span>Schedule</span><span>Cost</span></div>
+            {latest?.wbsVariances.slice(0, 6).map((variance) => {
+              const task = project.tasks.find((candidate) => candidate.id === variance.id);
+              return (
+                <div className="variance-table__row" role="row" key={variance.id}>
+                  <span><strong>{variance.wbs}</strong>{task?.name ?? variance.id}</span>
+                  <span className={variance.sv < 0 ? "risk-text" : ""}>{formatCurrency(variance.sv)}</span>
+                  <span className={variance.cv < 0 ? "risk-text" : ""}>{formatCurrency(variance.cv)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function TeamWorkload({
   project,
   analysis,
@@ -487,9 +592,13 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [notice, setNotice] = useState<string | null>(null);
   const displayedProject = mode === "baseline" ? baselineProject : currentProject;
+  const currentAnalysis = useMemo(
+    () => analyzeProject(currentProject, baselineProject),
+    [currentProject],
+  );
   const analysis = useMemo(
-    () => analyzeProject(displayedProject, baselineProject),
-    [displayedProject],
+    () => mode === "current" ? currentAnalysis : analyzeProject(baselineProject, baselineProject),
+    [currentAnalysis, mode],
   );
   const rows = useMemo<readonly TaskRow[]>(
     () =>
@@ -742,6 +851,16 @@ export function App() {
               <Icon name="grid" />
             </button>
             <button
+              className={`nav-button ${workspaceView === "performance" ? "nav-button--active" : ""}`}
+              aria-label="Performance history"
+              onClick={() => {
+                setMode("current");
+                setWorkspaceView("performance");
+              }}
+            >
+              <Icon name="pulse" />
+            </button>
+            <button
               className={`nav-button ${workspaceView === "team" ? "nav-button--active" : ""}`}
               aria-label="Team workload"
               onClick={() => {
@@ -749,7 +868,7 @@ export function App() {
                 setMode("current");
               }}
             >
-              <Icon name="pulse" />
+              <Icon name="users" />
             </button>
             <button className="nav-button" aria-label="Scenarios">
               <Icon name="layers" />
@@ -782,9 +901,9 @@ export function App() {
             <div className="page-heading">
               <div>
                 <p className="breadcrumb">PROJECTS / CUSTOMER PORTAL LAUNCH</p>
-                <h1>{workspaceView === "wbs" ? "Project control" : "Team workload"}</h1>
+                <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : "Team workload"}</h1>
               </div>
-              <div className="mode-switch" aria-label="Plan view">
+              <div className={`mode-switch ${workspaceView === "performance" ? "mode-switch--hidden" : ""}`} aria-label="Plan view">
                 <button
                   className={mode === "current" ? "active" : ""}
                   onClick={() => setMode("current")}
@@ -810,7 +929,9 @@ export function App() {
               </div>
             )}
 
-            {workspaceView === "team" ? (
+            {workspaceView === "performance" ? (
+              <PerformanceWorkspace project={currentProject} analysis={currentAnalysis} />
+            ) : workspaceView === "team" ? (
               <TeamWorkload project={displayedProject} analysis={analysis} />
             ) : (
             <>

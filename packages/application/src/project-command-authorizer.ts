@@ -34,6 +34,10 @@ export interface ProjectCommandAuthorizer {
   authorize(request: ProjectCommandAuthorizationRequest): Promise<AuditActor>;
 }
 
+export interface ProjectQueryAuthorizer {
+  authorize(request: ProjectAccessGrantRequest): Promise<ProjectAccessGrant>;
+}
+
 export class ProjectAccessDeniedError extends Error {
   constructor() {
     super("Project command is not permitted");
@@ -97,6 +101,18 @@ export function createProjectCommandAuthorizer(
         throw new ProjectAccessDeniedError();
       }
       return { type: grant.principalType, id: grant.principalId };
+    },
+  };
+}
+
+export function createProjectQueryAuthorizer(
+  resolver: ProjectAccessGrantResolver,
+): ProjectQueryAuthorizer {
+  return {
+    async authorize(request) {
+      const grant = await resolver.resolve(request);
+      if (grant === null) throw new ProjectAccessDeniedError();
+      return grant;
     },
   };
 }

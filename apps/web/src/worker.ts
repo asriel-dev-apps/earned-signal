@@ -1,33 +1,36 @@
 import {
   createProjectCommandAuthorizer,
   createProjectCommandService,
+  createProjectQueryAuthorizer,
 } from "@earned-signal/application";
 import {
   createPersistenceDatabase,
   PostgresProjectAccessGrantResolver,
   PostgresProjectCommandUnitOfWork,
+  ProjectPerformanceRepository,
 } from "@earned-signal/persistence";
 import { Client } from "pg";
-import { createApiApp, type ProjectCommandSession } from "./api.js";
+import { createApiApp, type ProjectSession } from "./api.js";
 import { createProjectMcpHandler } from "./mcp.js";
 import {
   createJoseOidcTokenVerifier,
   createOidcBearerAuthenticator,
 } from "./oidc-auth.js";
 
-export async function openHyperdriveCommandSession(
+export async function openHyperdriveProjectSession(
   environment: Env,
-): Promise<ProjectCommandSession> {
+): Promise<ProjectSession> {
   const client = new Client({ connectionString: environment.HYPERDRIVE.connectionString });
   await client.connect();
   const database = createPersistenceDatabase(client);
+  const grantResolver = new PostgresProjectAccessGrantResolver(database);
   return {
     service: createProjectCommandService(
       new PostgresProjectCommandUnitOfWork(database),
     ),
-    authorizer: createProjectCommandAuthorizer(
-      new PostgresProjectAccessGrantResolver(database),
-    ),
+    authorizer: createProjectCommandAuthorizer(grantResolver),
+    queryAuthorizer: createProjectQueryAuthorizer(grantResolver),
+    performance: new ProjectPerformanceRepository(database),
     // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.
     close: async () => undefined,
   };
@@ -41,7 +44,7 @@ const app = createApiApp({
       audience: environment.OIDC_AUDIENCE,
       jwksUrl: environment.OIDC_JWKS_URL,
     }),
-  openCommandSession: openHyperdriveCommandSession,
+  openProjectSession: openHyperdriveProjectSession,
 });
 
 const mcp = createProjectMcpHandler({
@@ -51,7 +54,7 @@ const mcp = createProjectMcpHandler({
       audience: environment.MCP_RESOURCE_URL,
       jwksUrl: environment.OIDC_JWKS_URL,
     }),
-  openCommandSession: openHyperdriveCommandSession,
+  openProjectSession: openHyperdriveProjectSession,
 });
 
 export default {

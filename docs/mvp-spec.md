@@ -20,6 +20,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 
 - A calendar-aware scheduling module with multiple FS/SS/FF/SF dependencies, bounded non-negative working-day lag, project and activity calendars, holidays, date constraints, forward and backward passes, total float, critical-path flags, constraint-violation signals, and cycle detection.
 - A pure earned value module producing BAC, PV, EV, AC, SV, CV, SPI, CPI, EAC, ETC, VAC, and TCPI. Ratios with a zero denominator are `null`.
+- Weekly Period Buckets and replayable EVM Snapshots using the latest measurement and actuals available at each status date, including ranked leaf-WBS schedule/cost variances.
 - A React shell and Hono `/api/health` route built together by the Cloudflare Vite plugin.
 - An editable AG Grid Community workspace for hierarchical leaf work packages, typed dependencies, calendars, and constraints, with immediate schedule and single-status-date EVM recalculation. Baseline dates remain frozen while Current inputs change.
 - Add and delete commands plus typed cell updates through the shared application command boundary.
@@ -29,6 +30,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A deterministic demo seed that round-trips current WBS, activities, dependencies, measurements, worklogs, direct actual costs, and the full approved baseline through real PostgreSQL.
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
+- An authenticated no-store Performance API and workspace with PV/EV/AC trend lines, SPI/CPI/EAC/TCPI indicators, and largest WBS variances.
 - An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
 - Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.
 - A stateless Streamable HTTP MCP endpoint with OAuth protected-resource metadata, a resource-specific token audience, focused task, Resource, and Assignment tools, and the same authorization, validation, idempotency, transaction, and audit boundary as REST.
