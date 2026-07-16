@@ -118,6 +118,30 @@ def test_completed_task_load_is_fixed_in_overtime_and_cost() -> None:
     assert response.solution.total_cost_minor == 96_000
 
 
+def test_resource_load_and_cost_cover_non_task_working_days_inside_the_schedule_span() -> None:
+    payload = base_payload()
+    payload["resources"] = [payload["resources"][0]]
+    payload["tasks"][0].update(
+        remainingEffortMinutes=960,
+        workingDates=["2026-07-20", "2026-07-22"],
+        currentDurationWorkingDays=2,
+        minDurationWorkingDays=2,
+        maxDurationWorkingDays=2,
+    )
+    payload["constraints"].update(
+        maxCostMinor=200_000,
+        maxChangedAssignmentPairs=0,
+        maxCandidateResources=0,
+    )
+
+    response = solve(request_from(payload))
+
+    assert response.status == SolveStatus.OPTIMAL
+    assert response.solution is not None
+    assert response.solution.tasks[0].finish_date == date(2026, 7, 22)
+    assert response.solution.total_cost_minor == 144_000
+
+
 def test_completed_predecessor_sets_a_fixed_fs_boundary() -> None:
     payload = base_payload()
     payload["fixedTasks"] = [

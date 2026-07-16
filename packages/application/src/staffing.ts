@@ -250,36 +250,56 @@ function validatedSolverMetadata(value: unknown, status: StaffingSolverStatus): 
   return metadata as StaffingSolverMetadata;
 }
 
-const PRIMARY_OBJECTIVE_NAMES = [
-  "finishDayIndex",
-  "overtimeScaledMinutes",
-  "costNumerator",
-  "changedAssignmentPairCount",
-] as const;
-
 function verifyObjectiveEvidence(
   metadata: StaffingSolverMetadata,
   status: "OPTIMAL" | "FEASIBLE",
   metrics: StaffingProposalMetrics,
-  projectStart: string,
+  plan: ProjectState,
+  problem: StaffingProblemV1,
 ): void {
+  const projectStart = problem.current.projectStart;
   const finishDayIndex = Math.round(
     (new Date(`${metrics.finish}T00:00:00.000Z`).getTime() -
       new Date(`${projectStart}T00:00:00.000Z`).getTime()) /
       DAY_MILLISECONDS,
   );
+  const assignmentUnits = new Map(plan.assignments.map((assignment) => [
+    `${assignment.taskId}\u0000${assignment.resourceId}`,
+    assignment.unitsPercent,
+  ]));
+  const taskIds = problem.tasks.map((task) => task.id).sort();
+  const resourceIds = [...problem.current.resources, ...problem.candidateResources]
+    .map((resource) => resource.id).sort();
+  const stableAssignmentScore = taskIds.flatMap((taskId) =>
+    resourceIds.map((resourceId) => `${taskId}\u0000${resourceId}`))
+    .reduce((total, key, index) => total + (index + 1) * (assignmentUnits.get(key) ?? 0), 0);
+  const plannedActivities = new Map(schedule(plan).activities.map((activity) => [activity.id, activity]));
+  const stableStartScore = taskIds.reduce((total, taskId, index) => {
+    const activity = plannedActivities.get(taskId);
+    if (activity === undefined) invalid(`Verified plan omitted staffing Task: ${taskId}`);
+    const startDayIndex = Math.round(
+      (new Date(`${activity.earlyStart}T00:00:00.000Z`).getTime() -
+        new Date(`${projectStart}T00:00:00.000Z`).getTime()) /
+        DAY_MILLISECONDS,
+    );
+    return total + (index + 1) * startDayIndex;
+  }, 0);
   const expectedValues = [
     finishDayIndex,
     metrics.overtimeMinutes * 100,
     Math.round(metrics.plannedLaborCostMinor * 60 * 100),
     metrics.assignmentChanges,
+    metrics.scheduleChanges,
+    metrics.candidateResources,
+    stableAssignmentScore,
+    stableStartScore,
   ] as const;
-  if (status === "OPTIMAL" && metadata.objectives.length < PRIMARY_OBJECTIVE_NAMES.length) {
-    invalid("Staffing solver OPTIMAL result omitted primary objective evidence");
+  if (status === "OPTIMAL" && metadata.objectives.length !== STAFFING_SOLVER_STAGE_NAMES.length) {
+    invalid("Staffing solver OPTIMAL result omitted objective evidence");
   }
-  for (let index = 0; index < Math.min(metadata.objectives.length, PRIMARY_OBJECTIVE_NAMES.length); index += 1) {
+  for (let index = 0; index < metadata.objectives.length; index += 1) {
     const objective = metadata.objectives[index]!;
-    if (objective.name !== PRIMARY_OBJECTIVE_NAMES[index] || objective.value !== expectedValues[index]) {
+    if (objective.name !== STAFFING_SOLVER_STAGE_NAMES[index] || objective.value !== expectedValues[index]) {
       invalid("Staffing solver objective evidence does not match the verified plan");
     }
   }
@@ -718,9 +738,14 @@ function explanationInput(
 }
 
 const CLAIM_TOKEN = /\b(?:[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z][A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*|\d{4}-\d{2}-\d{2}|\d+(?:\.\d+)?)\b/gi;
+const ENTITY_REFERENCE = /\b(?:assign(?:ed)?(?:\s+to)?|task|resource|skill|candidate|predecessor|successor)\s*[:#]?\s+([A-Za-z][A-Za-z0-9._:-]*)/gi;
 
 function claimTokens(values: readonly string[]): ReadonlySet<string> {
   return new Set(values.flatMap((value) => value.match(CLAIM_TOKEN) ?? []).map((value) => value.toLowerCase()));
+}
+
+function entityReferences(values: readonly string[]): readonly string[] {
+  return values.flatMap((value) => [...value.matchAll(ENTITY_REFERENCE)].map((match) => match[1]!.toLowerCase()));
 }
 
 export function staffingExplanationFallback(input: StaffingExplanationInput): StaffingExplanation {
@@ -746,7 +771,10 @@ function verifiedExplanation(
     value.details.some((detail) => typeof detail !== "string" || detail.trim().length === 0 || detail.length > 500)
   ) return fallback;
   const trustedClaims = new Set([...input.facts, ...input.changeDescriptions]);
+  const trustedText = [...trustedClaims].join(" ").toLowerCase();
   if (claimTokens([value.summary]).size > 0) return fallback;
+  if (entityReferences([value.summary, ...value.details]).some((reference) =>
+    !trustedText.includes(reference))) return fallback;
   if (value.details.some((detail) =>
     claimTokens([detail]).size > 0 && !trustedClaims.has(detail.trim()))) return fallback;
   return {
@@ -789,7 +817,7 @@ export function createStaffingProposalService(dependencies: {
         }
       }
       const metrics = verifiedMetrics(current, plan, changes, problem);
-      verifyObjectiveEvidence(solverMetadata, solverResult.status, metrics, current.projectStart);
+      verifyObjectiveEvidence(solverMetadata, solverResult.status, metrics, plan, problem);
       const explanationFacts = explanationInput(metrics, changes, diagnostics);
       let explanation: StaffingExplanation;
       try {

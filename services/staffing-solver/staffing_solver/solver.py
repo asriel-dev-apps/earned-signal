@@ -83,6 +83,7 @@ def _build_model(request: SolveRequest) -> ModelArtifacts:
 
     patterns: dict[tuple[str, int, int], cp_model.IntVar] = {}
     active: dict[tuple[str, int], cp_model.IntVar] = {}
+    working_active: dict[tuple[str, int], cp_model.IntVar] = {}
     start: dict[str, cp_model.IntVar] = {}
     finish: dict[str, cp_model.IntVar] = {}
     duration: dict[str, cp_model.IntVar] = {}
@@ -104,14 +105,22 @@ def _build_model(request: SolveRequest) -> ModelArtifacts:
         model.add(finish[task.id] == sum(eligible_days[s + length - 1] * var for s, length, var in task_patterns))
         model.add(duration[task.id] == sum(length * var for _, length, var in task_patterns))
         for day in range(day_count):
-            active_var = model.new_bool_var(f"active:{task.id}:{day}")
-            active[(task.id, day)] = active_var
-            containing = [
+            working_active_var = model.new_bool_var(f"workingActive:{task.id}:{day}")
+            working_active[(task.id, day)] = working_active_var
+            working_containing = [
                 var
                 for s, length, var in task_patterns
                 if day in eligible_days[s : s + length]
             ]
-            model.add(active_var == (sum(containing) if containing else 0))
+            model.add(working_active_var == (sum(working_containing) if working_containing else 0))
+            active_var = model.new_bool_var(f"spanActive:{task.id}:{day}")
+            active[(task.id, day)] = active_var
+            span_containing = [
+                var
+                for s, length, var in task_patterns
+                if eligible_days[s] <= day <= eligible_days[s + length - 1]
+            ]
+            model.add(active_var == (sum(span_containing) if span_containing else 0))
 
         if task.constraint is not None:
             constraint_index = _day_index(task.constraint.date, request)
@@ -195,13 +204,19 @@ def _build_model(request: SolveRequest) -> ModelArtifacts:
                 active_unit = model.new_int_var(0, 100, f"activeUnits:{task.id}:{resource.id}:{day}")
                 model.add_multiplication_equality(active_unit, [active[(task.id, day)], unit])
                 active_units[(task.id, resource.id, day)] = active_unit
+                effort_active_unit = model.new_int_var(0, 100, f"effortActiveUnits:{task.id}:{resource.id}:{day}")
+                model.add_multiplication_equality(
+                    effort_active_unit, [working_active[(task.id, day)], unit]
+                )
                 capacity = availability.get((resource.id, day), 0)
                 if capacity > 0:
-                    scaled_load = model.new_int_var(0, capacity * 100, f"load:{task.id}:{resource.id}:{day}")
-                    model.add(scaled_load == capacity * active_unit)
-                    task_loads[task.id].append(scaled_load)
-                    resource_day_loads[(resource.id, day)].append(scaled_load)
-                    contributed.append(scaled_load)
+                    effort_load = model.new_int_var(0, capacity * 100, f"effortLoad:{task.id}:{resource.id}:{day}")
+                    model.add(effort_load == capacity * effort_active_unit)
+                    resource_load = model.new_int_var(0, capacity * 100, f"resourceLoad:{task.id}:{resource.id}:{day}")
+                    model.add(resource_load == capacity * active_unit)
+                    task_loads[task.id].append(effort_load)
+                    resource_day_loads[(resource.id, day)].append(resource_load)
+                    contributed.append(effort_load)
             model.add(sum(contributed) >= is_present) if contributed else model.add(is_present == 0)
 
         model.add(sum(present[(task.id, resource.id)] for resource in request.resources) <= task.max_parallel_resources)
@@ -442,7 +457,7 @@ def solve(request: SolveRequest) -> SolveResponse:
     task_plans.sort(key=lambda item: item.task_id)
     commands.sort(key=lambda item: item.task_id)
     capacities = {
-        (resource.id, item.date): item.capacity_minutes
+        (resource.id, _day_index(item.date, request)): item.capacity_minutes
         for resource in request.resources
         for item in resource.availability
     }
@@ -450,10 +465,10 @@ def solve(request: SolveRequest) -> SolveResponse:
         resource.hourly_rate_minor
         * capacities.get((resource.id, day), 0)
         * final_solver.value(artifacts.units[(task.id, resource.id)])
-        * final_solver.value(artifacts.active[(task.id, _day_index(day, request))])
+        * final_solver.value(artifacts.active[(task.id, day)])
         for task in request.tasks
         for resource in request.resources
-        for day in task.working_dates
+        for day in range((request.horizon.end_date - request.horizon.start_date).days + 1)
     ) + sum(
         resource.hourly_rate_minor * item.fixed_load_scaled_minutes
         for resource in request.resources

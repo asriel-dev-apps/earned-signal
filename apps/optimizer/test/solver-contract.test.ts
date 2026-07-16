@@ -46,6 +46,30 @@ describe("staffing solver boundary", () => {
     ]);
   });
 
+  it("keeps completed assignment load on Resource-working days inside a Task schedule span", () => {
+    const sparseCalendar = {
+      id: "sparse",
+      name: "Sparse Task calendar",
+      workingWeekdays: [1, 2, 3, 4, 5],
+      nonWorkingDates: ["2026-07-20"],
+    };
+    const completedAcrossHoliday: StaffingProblemV1 = {
+      ...problem,
+      current: {
+        ...problem.current,
+        calendars: [...problem.current.calendars, sparseCalendar],
+        tasks: problem.current.tasks.map((task) => task.id === "task-done"
+          ? { ...task, calendarId: sparseCalendar.id, durationWorkingDays: 2 }
+          : task),
+      },
+    };
+
+    const request = staffingSolverRequest(completedAcrossHoliday);
+    const resource = request.resources.find((item) => item.id === "resource-a");
+    expect(resource?.availability.find((item) => item.date === "2026-07-20"))
+      .toMatchObject({ capacityMinutes: 480, fixedLoadScaledMinutes: 24_000 });
+  });
+
   it("retains a completed predecessor as a fixed dependency boundary", () => {
     const withCompletedPredecessor: StaffingProblemV1 = {
       ...problem,

@@ -158,13 +158,11 @@ export function staffingSolverRequest(problem: StaffingProblemV1): SolverRequest
           date: value,
           capacityMinutes: isWorkingDate(value, calendar) ? resource.dailyCapacityMinutes : 0,
           fixedLoadScaledMinutes: fixedAssignments.reduce((total, assignment) => {
-            const task = problem.current.tasks.find((candidate) => candidate.id === assignment.taskId);
             const activity = scheduled.get(assignment.taskId);
-            const taskCalendar = task === undefined ? undefined : calendars.get(task.calendarId);
             if (
-              activity === undefined || taskCalendar === undefined ||
+              activity === undefined ||
               value < activity.earlyStart || value > activity.earlyFinish ||
-              !isWorkingDate(value, calendar) || !isWorkingDate(value, taskCalendar)
+              !isWorkingDate(value, calendar)
             ) return total;
             return total + resource.dailyCapacityMinutes * assignment.unitsPercent;
           }, 0),

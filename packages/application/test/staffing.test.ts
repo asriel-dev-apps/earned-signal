@@ -105,7 +105,7 @@ function solved(overrides: Partial<StaffingSolvedResult> = {}): StaffingSolverRe
         { name: "changedAssignmentPairCount", value: 2, bestBound: 2 },
         { name: "scheduleChangeCount", value: 0, bestBound: 0 },
         { name: "candidateResourceCount", value: 0, bestBound: 0 },
-        { name: "stableAssignmentScore", value: 300, bestBound: 300 },
+        { name: "stableAssignmentScore", value: 500, bestBound: 500 },
         { name: "stableStartScore", value: 0, bestBound: 0 },
       ],
     },
@@ -115,7 +115,7 @@ function solved(overrides: Partial<StaffingSolvedResult> = {}): StaffingSolverRe
 
 function solvedWithPrimaryObjectives(
   overrides: Partial<StaffingSolvedResult>,
-  values: readonly [number, number, number, number],
+  values: readonly [number, number, number, number, number, number, number, number],
 ): StaffingSolverResult {
   const result = solved(overrides);
   if (result.status !== "OPTIMAL") throw new Error("expected solved fixture");
@@ -202,7 +202,7 @@ describe("StaffingProposalService", () => {
         { taskId: "A", durationWorkingDays: 2 },
         { taskId: "B", durationWorkingDays: 3 },
       ],
-    }, [4, 0, 1_008_000_000, 2]);
+    }, [4, 0, 1_008_000_000, 2, 1, 0, 500, 4]);
     const service = createStaffingProposalService({
       optimizer: optimizer(result),
       explainer: { explain: async () => ({ summary: "Staggered.", details: [] }) },
@@ -320,7 +320,7 @@ describe("StaffingProposalService", () => {
         { taskId: "A", resourceId: "R2", unitsPercent: 25 },
         { taskId: "B", resourceId: "R1", unitsPercent: 100 },
       ],
-    }, [1, 72_000, 1_080_000_000, 2]);
+    }, [1, 72_000, 1_080_000_000, 2, 0, 0, 425, 0]);
     const service = createStaffingProposalService({
       optimizer: optimizer(result),
       explainer: { explain: async () => ({ summary: "", details: [] }) },
@@ -462,6 +462,20 @@ describe("StaffingProposalService", () => {
     expect(result.explanation.details).not.toContain("Verified overtime minutes: 144000");
   });
 
+  it("falls back when the explainer invents a digit-free Resource identifier", async () => {
+    const service = createStaffingProposalService({
+      optimizer: optimizer(solved()),
+      explainer: {
+        explain: async () => ({ summary: "Assign alice to the verified plan.", details: [] }),
+      },
+    });
+
+    const result = await service.generate(request());
+    if (result.status !== "OPTIMAL") throw new StaffingProposalValidationError("Expected a solution");
+    expect(result.explanation.summary).toBe("The proposal satisfies the verified staffing constraints shown below.");
+    expect(result.explanation.summary).not.toContain("alice");
+  });
+
   it("rejects objective evidence that does not match the verified plan", async () => {
     const invalidEvidence = solved();
     if (invalidEvidence.status !== "OPTIMAL") throw new Error("expected solved fixture");
@@ -489,7 +503,7 @@ describe("StaffingProposalService", () => {
           { taskId: "A", resourceId: "R1", unitsPercent: 100 },
           { taskId: "B", resourceId: "R3", unitsPercent: 100 },
         ],
-      }, [1, 0, 768_000_000, 2])),
+      }, [1, 0, 768_000_000, 2, 0, 1, 700, 0])),
       explainer: { explain: async () => ({ summary: "Add the confirmed contractor.", details: [] }) },
     });
 
