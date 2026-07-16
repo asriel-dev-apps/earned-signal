@@ -737,16 +737,11 @@ function explanationInput(
   };
 }
 
-const CLAIM_TOKEN = /\b(?:[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z][A-Za-z0-9._:-]*\d[A-Za-z0-9._:-]*|\d{4}-\d{2}-\d{2}|\d+(?:\.\d+)?)\b/gi;
-const ENTITY_REFERENCE = /\b(?:assign(?:ed)?(?:\s+to)?|task|resource|skill|candidate|predecessor|successor)\s*[:#]?\s+([A-Za-z][A-Za-z0-9._:-]*)/gi;
-
-function claimTokens(values: readonly string[]): ReadonlySet<string> {
-  return new Set(values.flatMap((value) => value.match(CLAIM_TOKEN) ?? []).map((value) => value.toLowerCase()));
-}
-
-function entityReferences(values: readonly string[]): readonly string[] {
-  return values.flatMap((value) => [...value.matchAll(ENTITY_REFERENCE)].map((match) => match[1]!.toLowerCase()));
-}
+export const STAFFING_EXPLANATION_SUMMARIES = [
+  "The verified proposal is ready for human review.",
+  "The verified proposal satisfies the configured staffing constraints.",
+  "Review the verified facts and exact Scenario changes before approval.",
+] as const;
 
 export function staffingExplanationFallback(input: StaffingExplanationInput): StaffingExplanation {
   return {
@@ -771,12 +766,8 @@ function verifiedExplanation(
     value.details.some((detail) => typeof detail !== "string" || detail.trim().length === 0 || detail.length > 500)
   ) return fallback;
   const trustedClaims = new Set([...input.facts, ...input.changeDescriptions]);
-  const trustedText = [...trustedClaims].join(" ").toLowerCase();
-  if (claimTokens([value.summary]).size > 0) return fallback;
-  if (entityReferences([value.summary, ...value.details]).some((reference) =>
-    !trustedText.includes(reference))) return fallback;
-  if (value.details.some((detail) =>
-    claimTokens([detail]).size > 0 && !trustedClaims.has(detail.trim()))) return fallback;
+  if (!(STAFFING_EXPLANATION_SUMMARIES as readonly string[]).includes(value.summary.trim())) return fallback;
+  if (value.details.some((detail) => !trustedClaims.has(detail.trim()))) return fallback;
   return {
     summary: value.summary.trim(),
     details: value.details.map((detail) => detail.trim()),

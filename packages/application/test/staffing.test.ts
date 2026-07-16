@@ -149,7 +149,10 @@ describe("StaffingProposalService", () => {
         });
       }),
       explainer: {
-        explain: async (input) => ({ summary: "Split the concurrent work.", details: [input.facts[0]!] }),
+        explain: async (input) => ({
+          summary: "The verified proposal is ready for human review.",
+          details: [input.facts[0]!],
+        }),
       },
     });
 
@@ -166,7 +169,7 @@ describe("StaffingProposalService", () => {
         scheduleChanges: 0,
         skillGapTaskIds: [],
       },
-      explanation: { summary: "Split the concurrent work." },
+      explanation: { summary: "The verified proposal is ready for human review." },
     });
   });
 
@@ -410,8 +413,8 @@ describe("StaffingProposalService", () => {
       optimizer: optimizer(solved()),
       explainer: {
         explain: async () => ({
-          summary: "Verified explanation",
-          details: ["No overtime"],
+          summary: "The verified proposal is ready for human review.",
+          details: ["Verified overtime minutes: 0"],
           finish: "2099-01-01",
           plannedLaborCostMinor: 0,
         } as never),
@@ -422,7 +425,10 @@ describe("StaffingProposalService", () => {
     if (result.status !== "OPTIMAL") throw new StaffingProposalValidationError("Expected a solution");
     expect(result.metrics.finish).toBe("2026-01-06");
     expect(result.metrics.plannedLaborCostMinor).toBe(144_000);
-    expect(result.explanation).toEqual({ summary: "Verified explanation", details: ["No overtime"] });
+    expect(result.explanation).toEqual({
+      summary: "The verified proposal is ready for human review.",
+      details: ["Verified overtime minutes: 0"],
+    });
     expect(result.explanation).not.toHaveProperty("finish");
   });
 
@@ -462,18 +468,22 @@ describe("StaffingProposalService", () => {
     expect(result.explanation.details).not.toContain("Verified overtime minutes: 144000");
   });
 
-  it("falls back when the explainer invents a digit-free Resource identifier", async () => {
+  it.each([
+    "Assign ali to the verified plan.",
+    "Add bob to the plan.",
+    "Bob should join the plan.",
+  ])("falls back for unverified digit-free entity prose: %s", async (summary) => {
     const service = createStaffingProposalService({
       optimizer: optimizer(solved()),
       explainer: {
-        explain: async () => ({ summary: "Assign alice to the verified plan.", details: [] }),
+        explain: async () => ({ summary, details: [] }),
       },
     });
 
     const result = await service.generate(request());
     if (result.status !== "OPTIMAL") throw new StaffingProposalValidationError("Expected a solution");
     expect(result.explanation.summary).toBe("The proposal satisfies the verified staffing constraints shown below.");
-    expect(result.explanation.summary).not.toContain("alice");
+    expect(result.explanation.summary).not.toBe(summary);
   });
 
   it("rejects objective evidence that does not match the verified plan", async () => {

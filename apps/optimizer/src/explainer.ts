@@ -1,4 +1,5 @@
 import {
+  STAFFING_EXPLANATION_SUMMARIES,
   staffingExplanationFallback,
   type StaffingExplainer,
   type StaffingExplanation,
@@ -30,12 +31,13 @@ export function createStaffingExplainer(ai: Env["AI"]): StaffingExplainer {
   return {
     async explain(input) {
       const fallback = staffingExplanationFallback(input);
+      const allowedDetails = [...input.facts, ...input.changeDescriptions];
       try {
         const result = await ai.run(MODEL, {
           messages: [
             {
               role: "system",
-              content: "Explain only the supplied verified staffing facts and exact changes. Copy every numeric, date, and entity identifier literal exactly; do not invent, revise, or recommend plan values.",
+              content: "Select one allowed neutral summary and copy zero or more allowed detail lines exactly. Do not paraphrase, invent, revise, or recommend plan values.",
             },
             {
               role: "user",
@@ -48,8 +50,8 @@ export function createStaffingExplainer(ai: Env["AI"]): StaffingExplainer {
               type: "object",
               additionalProperties: false,
               properties: {
-                summary: { type: "string" },
-                details: { type: "array", maxItems: 8, items: { type: "string" } },
+                summary: { type: "string", enum: [...STAFFING_EXPLANATION_SUMMARIES] },
+                details: { type: "array", maxItems: 8, items: { type: "string", enum: allowedDetails } },
               },
               required: ["summary", "details"],
             },
