@@ -4,7 +4,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 
 class ContractModel(BaseModel):
@@ -23,9 +23,22 @@ Identifier = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za
 PositiveMinutes = Annotated[int, Field(ge=1, le=10_000_000)]
 
 
+def _parse_contract_date(value: object) -> object:
+    if type(value) is not str:
+        return value
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return value
+    return parsed if parsed.isoformat() == value else value
+
+
+ContractDate = Annotated[date, BeforeValidator(_parse_contract_date)]
+
+
 class Horizon(ContractModel):
-    start_date: date
-    end_date: date
+    start_date: ContractDate
+    end_date: ContractDate
 
     @model_validator(mode="after")
     def validate_range(self) -> Horizon:
@@ -48,13 +61,13 @@ class TaskConstraint(ContractModel):
         "MUST_START_ON",
         "MUST_FINISH_ON",
     ]
-    date: date
+    date: ContractDate
 
 
 class FixedTask(ContractModel):
     id: Identifier
-    start_date: date
-    finish_date: date
+    start_date: ContractDate
+    finish_date: ContractDate
 
     @model_validator(mode="after")
     def validate_schedule(self) -> FixedTask:
@@ -67,8 +80,8 @@ class Task(ContractModel):
     id: Identifier
     remaining_effort_minutes: PositiveMinutes
     required_skills: list[Identifier] = Field(default_factory=list, max_length=64)
-    working_dates: list[date] = Field(min_length=1, max_length=366)
-    current_start_date: date
+    working_dates: list[ContractDate] = Field(min_length=1, max_length=366)
+    current_start_date: ContractDate
     current_duration_working_days: Annotated[int, Field(ge=1, le=366)]
     min_duration_working_days: Annotated[int, Field(ge=1, le=366)] = 1
     max_duration_working_days: Annotated[int, Field(ge=1, le=366)]
@@ -94,7 +107,7 @@ class Task(ContractModel):
 
 
 class Availability(ContractModel):
-    date: date
+    date: ContractDate
     capacity_minutes: Annotated[int, Field(ge=0, le=1_440)]
     fixed_load_scaled_minutes: Annotated[int, Field(ge=0, le=1_000_000_000)] = 0
 
@@ -125,7 +138,7 @@ class CurrentAssignment(ContractModel):
 
 
 class HardConstraints(ContractModel):
-    deadline: date | None = None
+    deadline: ContractDate | None = None
     max_cost_minor: Annotated[int | None, Field(ge=0, le=10**15)] = None
     max_total_overtime_minutes: Annotated[int | None, Field(ge=0, le=10_000_000)] = None
     max_changed_assignment_pairs: Annotated[int | None, Field(ge=0, le=10_000)] = None
@@ -151,7 +164,7 @@ class SolveRequest(ContractModel):
     contract_version: Literal["staffing.v1"]
     request_id: Identifier
     horizon: Horizon
-    default_working_dates: list[date] = Field(min_length=1, max_length=366)
+    default_working_dates: list[ContractDate] = Field(min_length=1, max_length=366)
     fixed_tasks: list[FixedTask] = Field(default_factory=list, max_length=10_000)
     tasks: list[Task] = Field(min_length=1, max_length=100)
     resources: list[Resource] = Field(min_length=1, max_length=100)
