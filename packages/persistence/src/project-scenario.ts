@@ -284,6 +284,53 @@ export interface MarkScenarioPublishedRequest extends ScenarioIdentity {
   readonly actor: ScenarioActor;
 }
 
+export interface CreateScenarioRequest {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly baseProjectRevision: bigint;
+  readonly changes: readonly ScenarioPlanChange[];
+  readonly actor: ScenarioActor;
+}
+
+export async function createScenarioInTransaction(
+  transaction: ScenarioTransaction,
+  request: CreateScenarioRequest,
+): Promise<ProjectScenario> {
+  assertActor(request.actor);
+  assertChanges(request.changes);
+  const name = request.name.trim();
+  if (name.length === 0 || name.length > 200) {
+    throw new Error("Scenario name must contain 1 to 200 characters");
+  }
+  const projectRevision = await lockProject(
+    transaction,
+    request.tenantId,
+    request.projectId,
+  );
+  requireCurrentProject(request.baseProjectRevision, projectRevision);
+  const [created] = await transaction.insert(scenarios).values({
+    tenantId: request.tenantId,
+    projectId: request.projectId,
+    name,
+    baseProjectRevision: request.baseProjectRevision,
+    changes: request.changes,
+    createdBy: request.actor.id,
+    updatedBy: request.actor.id,
+  }).returning();
+  if (created === undefined) throw new Error("Scenario was not created");
+  const identity = {
+    tenantId: created.tenantId,
+    projectId: created.projectId,
+    scenarioId: created.id,
+  };
+  await appendAudit(transaction, identity, created.revision, request.actor, "scenario.created", {
+    name,
+    baseProjectRevision: created.baseProjectRevision.toString(),
+  });
+  return asScenario(transaction, created);
+}
+
 export async function markScenarioPublished(
   transaction: ScenarioTransaction,
   request: MarkScenarioPublishedRequest,
@@ -359,38 +406,9 @@ export class ProjectScenarioRepository {
     return row === undefined ? null : asScenario(this.database, row);
   }
 
-  async create(request: {
-    readonly tenantId: string;
-    readonly projectId: string;
-    readonly name: string;
-    readonly baseProjectRevision: bigint;
-    readonly changes: readonly ScenarioPlanChange[];
-    readonly actor: ScenarioActor;
-  }): Promise<ProjectScenario> {
-    assertActor(request.actor);
-    assertChanges(request.changes);
-    const name = request.name.trim();
-    if (name.length === 0 || name.length > 200) throw new Error("Scenario name must contain 1 to 200 characters");
-    return this.database.transaction(async (transaction) => {
-      const projectRevision = await lockProject(transaction, request.tenantId, request.projectId);
-      requireCurrentProject(request.baseProjectRevision, projectRevision);
-      const [created] = await transaction.insert(scenarios).values({
-        tenantId: request.tenantId,
-        projectId: request.projectId,
-        name,
-        baseProjectRevision: request.baseProjectRevision,
-        changes: request.changes,
-        createdBy: request.actor.id,
-        updatedBy: request.actor.id,
-      }).returning();
-      if (created === undefined) throw new Error("Scenario was not created");
-      const identity = { tenantId: created.tenantId, projectId: created.projectId, scenarioId: created.id };
-      await appendAudit(transaction, identity, created.revision, request.actor, "scenario.created", {
-        name,
-        baseProjectRevision: created.baseProjectRevision.toString(),
-      });
-      return asScenario(transaction, created);
-    });
+  async create(request: CreateScenarioRequest): Promise<ProjectScenario> {
+    return this.database.transaction((transaction) =>
+      createScenarioInTransaction(transaction, request));
   }
 
   async updateChanges(request: ScenarioIdentity & {

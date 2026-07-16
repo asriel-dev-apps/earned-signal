@@ -16,6 +16,8 @@ PostgresProjectCommandUnitOfWork locks the tenant-scoped Project row and commits
 
 Scenarios are tenant/project-scoped plan-change branches pinned to a base Project revision. Draft edits increment only the Scenario revision and invalidate its latest Run; Scenario Runs and Scenario Audit Events are append-only. Published and discarded Scenarios are terminal. Scenario calculation and lifecycle operations never mutate Current or its Project revision; publishing into Current is a separate atomic Application use case.
 
+Staffing Proposals are tenant/project-scoped, idempotent optimization requests pinned to a base Project revision. Their JSON input is immutable, state transitions are one-way from requested through running to a first terminal result, and Proposal Runs and Proposal Audit Events are append-only. A ready Proposal can create and link one Scenario in the same transaction only while its base Project revision is current; Current and Baseline remain unchanged until the Scenario is published through the normal human approval boundary.
+
 ## Language
 
 - **Current resource plan**: the mutable Resources, Skills, and Assignments attached to the Current project state.

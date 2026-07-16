@@ -38,6 +38,14 @@ export const principalType = pgEnum("principal_type", ["HUMAN", "AGENT"]);
 export const tenantRole = pgEnum("tenant_role", ["OWNER", "ADMIN", "MEMBER"]);
 export const projectRole = pgEnum("project_role", ["OWNER", "EDITOR", "VIEWER"]);
 export const scenarioStatus = pgEnum("scenario_status", ["DRAFT", "PUBLISHED", "DISCARDED"]);
+export const staffingProposalStatus = pgEnum("staffing_proposal_status", [
+  "REQUESTED",
+  "RUNNING",
+  "READY",
+  "INFEASIBLE",
+  "UNKNOWN",
+  "FAILED",
+]);
 
 const auditTimestamp = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "string", precision: 6 });
@@ -1220,6 +1228,147 @@ export const scenarioAuditEvents = pgTable(
   ],
 );
 
+export const staffingProposals = pgTable(
+  "staffing_proposals",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    status: staffingProposalStatus().notNull().default("REQUESTED"),
+    baseProjectRevision: bigint("base_project_revision", { mode: "bigint" }).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: char("request_hash", { length: 64 }).notNull(),
+    input: jsonb().notNull(),
+    latestRunId: uuid("latest_run_id"),
+    linkedScenarioId: uuid("linked_scenario_id"),
+    createdByType: auditActorType("created_by_type").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+    startedAt: auditTimestamp("started_at"),
+    completedAt: auditTimestamp("completed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    unique("staffing_proposals_id_unique").on(table.id),
+    unique("staffing_proposals_project_idempotency_unique").on(
+      table.tenantId,
+      table.projectId,
+      table.idempotencyKey,
+    ),
+    index("staffing_proposals_project_status_idx").on(
+      table.tenantId,
+      table.projectId,
+      table.status,
+      table.createdAt,
+    ),
+    foreignKey({
+      name: "staffing_proposals_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "staffing_proposals_linked_scenario_fk",
+      columns: [table.tenantId, table.projectId, table.linkedScenarioId],
+      foreignColumns: [scenarios.tenantId, scenarios.projectId, scenarios.id],
+    }).onDelete("restrict"),
+    check("staffing_proposals_name_length", sql`length(trim(${table.name})) between 1 and 200`),
+    check("staffing_proposals_base_revision_non_negative", sql`${table.baseProjectRevision} >= 0`),
+    check(
+      "staffing_proposals_idempotency_key_length",
+      sql`length(trim(${table.idempotencyKey})) between 1 and 200`,
+    ),
+    check("staffing_proposals_request_hash_hex", sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check("staffing_proposals_created_by_not_blank", sql`length(trim(${table.createdBy})) > 0`),
+    check(
+      "staffing_proposals_status_metadata_consistent",
+      sql`(
+        ${table.status} = 'REQUESTED' and ${table.startedAt} is null and ${table.completedAt} is null and ${table.latestRunId} is null
+      ) or (
+        ${table.status} = 'RUNNING' and ${table.startedAt} is not null and ${table.completedAt} is null and ${table.latestRunId} is null
+      ) or (
+        ${table.status} in ('READY', 'INFEASIBLE', 'UNKNOWN', 'FAILED') and ${table.completedAt} is not null and ${table.latestRunId} is not null
+      )`,
+    ),
+    check(
+      "staffing_proposals_scenario_requires_ready",
+      sql`${table.linkedScenarioId} is null or ${table.status} = 'READY'`,
+    ),
+  ],
+);
+
+export const staffingProposalRuns = pgTable(
+  "staffing_proposal_runs",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    status: staffingProposalStatus().notNull(),
+    algorithmVersion: text("algorithm_version").notNull(),
+    output: jsonb().notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.proposalId, table.id] }),
+    unique("staffing_proposal_runs_id_unique").on(table.id),
+    index("staffing_proposal_runs_proposal_created_idx").on(
+      table.tenantId,
+      table.projectId,
+      table.proposalId,
+      table.createdAt,
+    ),
+    foreignKey({
+      name: "staffing_proposal_runs_proposal_fk",
+      columns: [table.tenantId, table.projectId, table.proposalId],
+      foreignColumns: [staffingProposals.tenantId, staffingProposals.projectId, staffingProposals.id],
+    }).onDelete("restrict"),
+    check(
+      "staffing_proposal_runs_terminal_status",
+      sql`${table.status} in ('READY', 'INFEASIBLE', 'UNKNOWN', 'FAILED')`,
+    ),
+    check(
+      "staffing_proposal_runs_algorithm_version_not_blank",
+      sql`length(trim(${table.algorithmVersion})) between 1 and 100`,
+    ),
+    check("staffing_proposal_runs_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+  ],
+);
+
+export const staffingProposalAuditEvents = pgTable(
+  "staffing_proposal_audit_events",
+  {
+    sequence: bigserial({ mode: "bigint" }).primaryKey(),
+    id: uuid().notNull().defaultRandom().unique(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb().notNull(),
+    occurredAt: auditTimestamp("occurred_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("staffing_proposal_audit_events_proposal_sequence_idx").on(
+      table.tenantId,
+      table.projectId,
+      table.proposalId,
+      table.sequence,
+    ),
+    foreignKey({
+      name: "staffing_proposal_audit_events_proposal_fk",
+      columns: [table.tenantId, table.projectId, table.proposalId],
+      foreignColumns: [staffingProposals.tenantId, staffingProposals.projectId, staffingProposals.id],
+    }).onDelete("restrict"),
+    check("staffing_proposal_audit_events_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+    check("staffing_proposal_audit_events_event_type_not_blank", sql`length(trim(${table.eventType})) > 0`),
+  ],
+);
+
 export const schema = {
   principals,
   tenants,
@@ -1251,4 +1400,7 @@ export const schema = {
   scenarios,
   scenarioRuns,
   scenarioAuditEvents,
+  staffingProposals,
+  staffingProposalRuns,
+  staffingProposalAuditEvents,
 };
