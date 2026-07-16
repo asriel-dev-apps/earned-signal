@@ -31,6 +31,7 @@ EarnedSignal provides one consistent place to maintain a WBS, an approved baseli
 - A shared Project Command Service with an atomic PostgreSQL unit of work, optimistic revision checks, canonical idempotency receipts, and append-only audit events.
 - A Zod-validated Hono REST command route with generated OpenAPI 3.1, stable validation/conflict responses, bounded request bodies, decimal-string revisions and minor-unit money, and a fail-closed authentication seam.
 - An authenticated no-store Project workspace query and browser client for persisted Current/Baseline loading, explicit save state, revision conflicts, actual entry, and immutable Baseline publishing; unconnected preview data is never represented as saved.
+- A revision-pinned Scenario workspace for typed plan changes, reproducible deterministic trend runs, Current/cost/capacity comparison, discard, and stale-safe human publication into Current without changing Baseline.
 - An authenticated no-store Performance API and workspace with PV/EV/AC trend lines, SPI/CPI/EAC/TCPI indicators, and largest WBS variances.
 - An OIDC resource-server adapter that verifies asymmetric bearer JWTs and maps issuer/subject to PostgreSQL principals, tenant/project memberships, project roles, agent scopes, and stable internal audit actors.
 - Human owners/editors may change Current. Agent service identities may directly record only scoped progress/actuals; agent plan changes are rejected until a human-approved proposal flow exists.

@@ -1,26 +1,48 @@
 import {
+  calculateScenario,
   type AuthenticatedIdentity,
   type ProjectCommandAuthorizer,
   type ProjectCommandService,
   type ProjectQueryAuthorizer,
   type ProjectState,
+  ProjectNotFoundError,
+  type ScenarioMutationAuthorizer,
+  type ScenarioPlanCommand,
+  ProjectCommandValidationError,
 } from "@earned-signal/application";
 import type { EvmSnapshot } from "@earned-signal/domain";
+import {
+  ScenarioNotFoundError,
+  ScenarioRevisionConflictError,
+  ScenarioRunRequiredError,
+  ScenarioTerminalError,
+  type ProjectScenario,
+  type ProjectScenarioRepository,
+  type ScenarioJson,
+  type ScenarioPlanChange,
+} from "@earned-signal/persistence";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
 import {
   ApiCommandSchema,
   RevisionSchema,
+  ScenarioPlanCommandSchema,
   UuidSchema,
   toCommand,
 } from "./project-command-contract.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
+import { ScenarioResponseSchema, ScenarioResultSchema } from "./scenario-response-contract.js";
 
 export interface ProjectSession {
   readonly service: ProjectCommandService;
   readonly authorizer: ProjectCommandAuthorizer;
   readonly queryAuthorizer: ProjectQueryAuthorizer;
+  readonly scenarioAuthorizer: ScenarioMutationAuthorizer;
+  readonly scenarios: Pick<
+    ProjectScenarioRepository,
+    "list" | "load" | "create" | "updateChanges" | "saveRun" | "discard"
+  >;
   readonly performance: {
     calculate(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
     refresh(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
@@ -40,6 +62,8 @@ export interface ApiDependencies {
   authenticate(request: Request, environment: Env): Promise<AuthenticatedIdentity>;
   openProjectSession(environment: Env): Promise<ProjectSession>;
 }
+
+const SCENARIO_ALGORITHM_VERSION = "deterministic-trend-v1";
 
 const CommandRequestSchema = z
   .object({
@@ -180,6 +204,64 @@ const PerformanceResponseSchema = z
   })
   .openapi("ProjectPerformanceResponse");
 
+const ScenarioParamsSchema = z.object({
+  tenantId: UuidSchema.openapi({ param: { name: "tenantId", in: "path" } }),
+  projectId: UuidSchema.openapi({ param: { name: "projectId", in: "path" } }),
+});
+const ScenarioIdentityParamsSchema = ScenarioParamsSchema.extend({
+  scenarioId: UuidSchema.openapi({ param: { name: "scenarioId", in: "path" } }),
+});
+const ScenarioChangesSchema = z.array(ScenarioPlanCommandSchema).max(500);
+const ScenarioCreateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  changes: ScenarioChangesSchema.default([]),
+});
+const ScenarioUpdateSchema = z.object({
+  expectedRevision: RevisionSchema,
+  changes: ScenarioChangesSchema,
+});
+const ScenarioRevisionSchema = z.object({ expectedRevision: RevisionSchema });
+const ScenarioPublishSchema = z.object({
+  expectedProjectRevision: RevisionSchema,
+  expectedScenarioRevision: RevisionSchema,
+});
+
+const scenarioListRoute = createRoute({
+  method: "get", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioParamsSchema },
+  responses: { 200: { description: "Project scenarios", content: { "application/json": { schema: z.object({ scenarios: z.array(ScenarioResponseSchema) }) } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioCreateRoute = createRoute({
+  method: "post", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioParamsSchema, body: { required: true, content: { "application/json": { schema: ScenarioCreateSchema } } } },
+  responses: { 201: { description: "Created draft scenario", content: { "application/json": { schema: ScenarioResponseSchema } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Mutation denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Project revision conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioLoadRoute = createRoute({
+  method: "get", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioIdentityParamsSchema },
+  responses: { 200: { description: "Scenario", content: { "application/json": { schema: ScenarioResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 404: { description: "Scenario not found", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioUpdateRoute = createRoute({
+  method: "patch", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioIdentityParamsSchema, body: { required: true, content: { "application/json": { schema: ScenarioUpdateSchema } } } },
+  responses: { 200: { description: "Updated scenario", content: { "application/json": { schema: ScenarioResponseSchema } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Mutation denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Revision or state conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioRunRoute = createRoute({
+  method: "post", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/runs",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioIdentityParamsSchema, body: { required: true, content: { "application/json": { schema: ScenarioRevisionSchema } } } },
+  responses: { 200: { description: "Calculated immutable scenario run", content: { "application/json": { schema: ScenarioResponseSchema } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Mutation denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 404: { description: "Scenario or project not found", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Revision or stale conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } }, 422: { description: "Scenario cannot be calculated", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioDiscardRoute = createRoute({
+  method: "post", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/discard",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioIdentityParamsSchema, body: { required: true, content: { "application/json": { schema: ScenarioRevisionSchema } } } },
+  responses: { 200: { description: "Discarded scenario", content: { "application/json": { schema: ScenarioResponseSchema } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Mutation denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 404: { description: "Scenario not found", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Revision or state conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const scenarioPublishRoute = createRoute({
+  method: "post", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/publish",
+  security: [{ OidcBearer: [] }], request: { params: ScenarioIdentityParamsSchema, headers: z.object({ "Idempotency-Key": z.string().trim().min(1).max(200).openapi({ param: { name: "Idempotency-Key", in: "header" } }) }), body: { required: true, content: { "application/json": { schema: ScenarioPublishSchema } } } },
+  responses: { 200: { description: "Published Scenario into Current", content: { "application/json": { schema: CommandResponseSchema } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Mutation denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 404: { description: "Scenario not found", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Revision or state conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } }, 422: { description: "Scenario cannot be published", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+
 const performanceRoute = createRoute({
   method: "get",
   path: "/api/tenants/{tenantId}/projects/{projectId}/performance",
@@ -218,6 +300,149 @@ function performanceResponse(snapshots: readonly EvmSnapshot[]) {
       wbsVariances: snapshot.wbsVariances.map((variance) => ({ ...variance })),
     })),
   };
+}
+
+function isScenarioPlanCommand(command: ReturnType<typeof toCommand>): command is ScenarioPlanCommand {
+  return command.type !== "baseline.publish" && command.type !== "scenario.publish";
+}
+
+function parseScenarioChanges(
+  changes: readonly z.infer<typeof ScenarioPlanCommandSchema>[],
+): readonly ScenarioPlanCommand[] {
+  return changes.map((change) => {
+    const command = toCommand(change);
+    if (!isScenarioPlanCommand(command)) {
+      throw new ProjectCommandValidationError("Scenario contains a non-plan command");
+    }
+    return command;
+  });
+}
+
+function parseStoredScenarioChanges(
+  changes: readonly ScenarioPlanChange[],
+): readonly ScenarioPlanCommand[] {
+  return changes.map((change) => {
+    const knownTypes = new Set([
+      "task.update", "task.add", "task.delete", "resource.add", "resource.update",
+      "resource.delete", "assignment.replace",
+    ]);
+    if (!knownTypes.has(change.type)) {
+      throw new ProjectCommandValidationError(`Stored Scenario command is invalid: ${change.type}`);
+    }
+    const parsed = ScenarioPlanCommandSchema.parse(storedExternalChange(change));
+    return parseScenarioChanges([parsed])[0]!;
+  });
+}
+
+function scenarioObject(value: ScenarioJson, label: string): Readonly<Record<string, ScenarioJson>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectCommandValidationError(`${label} is invalid`);
+  }
+  const result: Record<string, ScenarioJson> = {};
+  for (const [key, entry] of Object.entries(value)) result[key] = entry;
+  return result;
+}
+
+function storedExternalChange(change: ScenarioPlanChange): unknown {
+  if (change.type === "task.update") {
+    const values = { ...scenarioObject(change.changes ?? null, "Stored task changes") };
+    if (typeof values.budget === "number") {
+      values.budgetMinor = String(values.budget);
+      delete values.budget;
+    }
+    return { type: change.type, taskId: change.taskId, changes: values };
+  }
+  if (change.type === "task.add") {
+    const task = { ...scenarioObject(change.task ?? null, "Stored Scenario task") };
+    task.budgetMinor = String(task.budget);
+    task.progressBasisPoints = typeof task.progressPercent === "number"
+      ? Math.round(task.progressPercent * 100)
+      : null;
+    task.actualCostMinor = String(task.actualCost);
+    delete task.budget;
+    delete task.progressPercent;
+    delete task.actualCost;
+    return { type: change.type, task };
+  }
+  if (change.type === "resource.add") {
+    const resource = { ...scenarioObject(change.resource ?? null, "Stored Scenario Resource") };
+    resource.costRateMinorPerHour = String(resource.costRateMinorPerHour);
+    return { type: change.type, resource };
+  }
+  if (change.type === "resource.update") {
+    const values = { ...scenarioObject(change.changes ?? null, "Stored Resource changes") };
+    if (typeof values.costRateMinorPerHour === "number") {
+      values.costRateMinorPerHour = String(values.costRateMinorPerHour);
+    }
+    return { type: change.type, resourceId: change.resourceId, changes: values };
+  }
+  if (change.type === "assignment.replace") {
+    return { type: change.type, taskId: change.taskId, assignments: change.assignments };
+  }
+  if (change.type === "task.delete") return { type: change.type, taskId: change.taskId };
+  return { type: change.type, resourceId: change.resourceId };
+}
+
+function scenarioJson(value: unknown, path = "value"): ScenarioJson {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new ProjectCommandValidationError(`${path} is not JSON-safe`);
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((entry, index) => scenarioJson(entry, `${path}[${index}]`));
+  if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const result: Record<string, ScenarioJson> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) result[key] = scenarioJson(entry, `${path}.${key}`);
+    }
+    return result;
+  }
+  throw new ProjectCommandValidationError(`${path} is not JSON-safe`);
+}
+
+function storedChanges(changes: readonly ScenarioPlanCommand[]): readonly ScenarioPlanChange[] {
+  return changes.map((change) => {
+    const value = scenarioJson(change, "Scenario change");
+    return { ...scenarioObject(value, "Scenario change"), type: change.type };
+  });
+}
+
+function canonicalJson(value: ScenarioJson): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  ).map(
+    ([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`,
+  ).join(",")}}`;
+}
+
+async function sha256(value: ScenarioJson): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(value)));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function scenarioResponse(scenario: ProjectScenario) {
+  return ScenarioResponseSchema.parse({
+    id: scenario.id,
+    name: scenario.name,
+    status: scenario.status,
+    baseProjectRevision: scenario.baseProjectRevision.toString(),
+    revision: scenario.revision.toString(),
+    changes: scenario.changes.map((change) => ({ ...change })),
+    latestRun: scenario.latestRun === null ? null : {
+      id: scenario.latestRun.id,
+      sourceProjectRevision: scenario.latestRun.sourceProjectRevision.toString(),
+      sourceScenarioRevision: scenario.latestRun.sourceScenarioRevision.toString(),
+      algorithmVersion: scenario.latestRun.algorithmVersion,
+      inputHash: scenario.latestRun.inputHash,
+      output: scenario.latestRun.output,
+      createdAt: scenario.latestRun.createdAt,
+    },
+    updatedAt: scenario.updatedAt,
+    publishedAt: scenario.publishedAt,
+    discardedAt: scenario.discardedAt,
+  });
 }
 
 const commandRoute = createRoute({
@@ -313,6 +538,23 @@ export function createApiApp(dependencies: ApiDependencies) {
     }),
   );
 
+  for (const path of [
+    "/api/tenants/:tenantId/projects/:projectId/scenarios",
+    "/api/tenants/:tenantId/projects/:projectId/scenarios/*",
+  ]) {
+    app.use(path, bodyLimit({
+      maxSize: 64 * 1024,
+      onError: (context) => context.json(
+        { error: { code: "BODY_TOO_LARGE", message: "Request body exceeds 64 KiB" } },
+        413,
+      ),
+    }));
+    app.use(path, async (context, next) => {
+      context.header("Cache-Control", "no-store");
+      await next();
+    });
+  }
+
   app.use(
     "/api/tenants/:tenantId/projects/:projectId/commands",
     async (context, next) => {
@@ -394,6 +636,182 @@ export function createApiApp(dependencies: ApiDependencies) {
         current: projectStateResponse(workspace.current),
         baseline: workspace.baseline === null ? null : projectStateResponse(workspace.baseline),
         baselineVersion: workspace.baselineVersion === null ? null : { ...workspace.baselineVersion },
+      }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioListRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const scenarios = await session.scenarios.list(tenantId, projectId);
+      return context.json({ scenarios: scenarios.map(scenarioResponse) }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioCreateRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const workspace = await session.workspace.load(tenantId, projectId);
+      if (workspace === null) throw new ProjectNotFoundError(projectId);
+      const changes = parseScenarioChanges(body.changes);
+      const created = await session.scenarios.create({
+        tenantId, projectId, name: body.name, baseProjectRevision: workspace.revision,
+        changes: storedChanges(changes), actor,
+      });
+      return context.json(scenarioResponse(created), 201);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioLoadRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const scenario = await session.scenarios.load(tenantId, projectId, scenarioId);
+      if (scenario === null) throw new ScenarioNotFoundError(scenarioId);
+      return context.json(scenarioResponse(scenario), 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioUpdateRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const changes = parseScenarioChanges(body.changes);
+      const updated = await session.scenarios.updateChanges({
+        tenantId, projectId, scenarioId, expectedRevision: BigInt(body.expectedRevision),
+        changes: storedChanges(changes), actor,
+      });
+      return context.json(scenarioResponse(updated), 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioRunRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const scenario = await session.scenarios.load(tenantId, projectId, scenarioId);
+      const workspace = await session.workspace.load(tenantId, projectId);
+      if (scenario === null) throw new ScenarioNotFoundError(scenarioId);
+      if (scenario.status !== "DRAFT") throw new ScenarioTerminalError(scenario.status);
+      const expectedRevision = BigInt(body.expectedRevision);
+      if (scenario.revision !== expectedRevision) {
+        throw new ScenarioRevisionConflictError(expectedRevision, scenario.revision);
+      }
+      if (workspace === null) throw new ProjectCommandValidationError("Scenario project was not found");
+      if (workspace.baseline === null) throw new ProjectCommandValidationError("Scenario requires an approved Baseline");
+      const changes = parseStoredScenarioChanges(scenario.changes);
+      const snapshots = await session.performance.calculate(tenantId, projectId);
+      const metrics = snapshots.at(-1)?.metrics;
+      const trend = { spi: metrics?.spi ?? null, cpi: metrics?.cpi ?? null };
+      const inputSnapshot = scenarioJson({
+        algorithmVersion: SCENARIO_ALGORITHM_VERSION,
+        projectRevision: workspace.revision.toString(),
+        scenarioRevision: scenario.revision.toString(),
+        current: projectStateResponse(workspace.current),
+        baseline: projectStateResponse(workspace.baseline),
+        changes,
+        trend,
+      }, "Scenario input");
+      let calculation: ReturnType<typeof calculateScenario>;
+      try {
+        calculation = calculateScenario({
+          current: workspace.current, baseline: workspace.baseline, changes, trend,
+        });
+      } catch (error) {
+        throw new ProjectCommandValidationError(
+          error instanceof Error ? error.message : "Scenario calculation failed",
+        );
+      }
+      const output = scenarioJson(ScenarioResultSchema.parse(calculation), "Scenario output");
+      await session.scenarios.saveRun({
+        tenantId, projectId, scenarioId,
+        expectedScenarioRevision: scenario.revision,
+        sourceProjectRevision: workspace.revision,
+        algorithmVersion: SCENARIO_ALGORITHM_VERSION,
+        inputHash: await sha256(inputSnapshot), inputSnapshot, output, actor,
+      });
+      const saved = await session.scenarios.load(tenantId, projectId, scenarioId);
+      if (saved === null) throw new ScenarioNotFoundError(scenarioId);
+      return context.json(scenarioResponse(saved), 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioDiscardRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const discarded = await session.scenarios.discard({
+        tenantId, projectId, scenarioId, expectedRevision: BigInt(body.expectedRevision), actor,
+      });
+      return context.json(scenarioResponse(discarded), 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(scenarioPublishRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const headers = context.req.valid("header");
+    const body = context.req.valid("json");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const scenario = await session.scenarios.load(tenantId, projectId, scenarioId);
+      if (scenario === null) throw new ScenarioNotFoundError(scenarioId);
+      if (scenario.status === "DISCARDED") throw new ScenarioTerminalError(scenario.status);
+      if (scenario.status === "DRAFT" && scenario.latestRun === null) {
+        throw new ScenarioRunRequiredError();
+      }
+      const changes = parseStoredScenarioChanges(scenario.changes);
+      const result = await session.service.execute({
+        tenantId, projectId, expectedRevision: BigInt(body.expectedProjectRevision),
+        idempotencyKey: headers["Idempotency-Key"], actor,
+        command: {
+          type: "scenario.publish", scenarioId,
+          scenarioRevision: body.expectedScenarioRevision,
+          sourceProjectRevision: body.expectedProjectRevision,
+          changes,
+        },
+      });
+      try {
+        await session.performance.refresh(tenantId, projectId);
+      } catch (error) {
+        console.error("Scenario published, but the derived performance cache could not be refreshed", error);
+      }
+      context.header("ETag", `"${result.revision}"`);
+      return context.json({
+        projectId: result.projectId, revision: result.revision.toString(), replayed: result.replayed,
       }, 200);
     } finally {
       await session.close();

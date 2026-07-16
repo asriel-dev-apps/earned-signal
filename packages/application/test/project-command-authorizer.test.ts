@@ -3,6 +3,7 @@ import {
   AgentPlanApprovalRequiredError,
   createProjectCommandAuthorizer,
   createProjectQueryAuthorizer,
+  createScenarioMutationAuthorizer,
   ProjectAccessDeniedError,
   type ProjectAccessGrantResolver,
 } from "../src/index.js";
@@ -208,6 +209,55 @@ describe("ProjectCommandAuthorizer", () => {
     await expect(unprovisioned.authorize(request)).rejects.toBeInstanceOf(
       ProjectAccessDeniedError,
     );
+  });
+});
+
+describe("ScenarioMutationAuthorizer", () => {
+  it("allows a human editor to create, run, discard, or publish a Scenario", async () => {
+    const authorizer = createScenarioMutationAuthorizer({
+      resolve: async () => ({
+        principalId: "90000000-0000-4000-8000-000000000001",
+        principalType: "HUMAN",
+        projectRole: "EDITOR",
+        allowedScopes: [],
+      }),
+    });
+
+    await expect(authorizer.authorize({
+      identity: { issuer: "https://identity.example.test/", subject: "editor", scopes: [] },
+      tenantId: "00000000-0000-4000-8000-000000000001",
+      projectId: "10000000-0000-4000-8000-000000000001",
+    })).resolves.toEqual({
+      type: "HUMAN",
+      id: "90000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("requires human approval and rejects viewers", async () => {
+    const agent = createScenarioMutationAuthorizer({
+      resolve: async () => ({
+        principalId: "agent",
+        principalType: "AGENT",
+        projectRole: "EDITOR",
+        allowedScopes: [],
+      }),
+    });
+    const viewer = createScenarioMutationAuthorizer({
+      resolve: async () => ({
+        principalId: "viewer",
+        principalType: "HUMAN",
+        projectRole: "VIEWER",
+        allowedScopes: [],
+      }),
+    });
+    const request = {
+      identity: { issuer: "https://identity.example.test/", subject: "principal", scopes: [] },
+      tenantId: "00000000-0000-4000-8000-000000000001",
+      projectId: "10000000-0000-4000-8000-000000000001",
+    };
+
+    await expect(agent.authorize(request)).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
+    await expect(viewer.authorize(request)).rejects.toBeInstanceOf(ProjectAccessDeniedError);
   });
 });
 

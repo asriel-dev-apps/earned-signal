@@ -14,6 +14,8 @@ Period Buckets, EVM Snapshots, and ranked snapshot WBS variances are tenant/proj
 
 PostgresProjectCommandUnitOfWork locks the tenant-scoped Project row and commits the validated Current mutation, revision, AuditEvent, and command receipt atomically. Command receipts are append-only and keyed by tenant/project/idempotency key; a canonical SHA-256 request hash prevents the same key from representing different commands. Concurrent retries serialize on the Project lock and replay one result.
 
+Scenarios are tenant/project-scoped plan-change branches pinned to a base Project revision. Draft edits increment only the Scenario revision and invalidate its latest Run; Scenario Runs and Scenario Audit Events are append-only. Published and discarded Scenarios are terminal. Scenario calculation and lifecycle operations never mutate Current or its Project revision; publishing into Current is a separate atomic Application use case.
+
 ## Language
 
 - **Current resource plan**: the mutable Resources, Skills, and Assignments attached to the Current project state.
@@ -21,3 +23,5 @@ PostgresProjectCommandUnitOfWork locks the tenant-scoped Project row and commits
 - **Resource Skill**: a project-scoped link between a Resource and a Skill.
 - **Work-package Skill requirement**: a project-scoped link declaring that a work package requires a Skill.
 - **Stored performance**: a reproducible derived cache of Period Buckets and EVM Snapshots; progress, worklogs, costs, and the approved Baseline remain authoritative.
+- **Scenario**: a versioned, isolated set of prospective plan changes based on one Project revision.
+- **Scenario Run**: an immutable calculation result tied to exact Project and Scenario revisions, input, algorithm version, and input hash.

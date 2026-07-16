@@ -41,6 +41,7 @@ import {
   wbsNodes,
   worklogs,
 } from "./schema.js";
+import { markScenarioPublished } from "./project-scenario.js";
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "string") {
@@ -258,6 +259,11 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
             eq(dependencies.tenantId, request.tenantId),
             eq(dependencies.projectId, request.projectId),
           ),
+        )
+        .orderBy(
+          asc(dependencies.successorActivityId),
+          asc(dependencies.predecessorActivityId),
+          asc(dependencies.type),
         );
       const measurementRows = await transaction
         .select()
@@ -387,6 +393,19 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           actualMinutes: minutesByActivity.get(activity.id) ?? 0,
         })),
       };
+      if (request.command.type === "scenario.publish") {
+        const published = await markScenarioPublished(transaction, {
+          tenantId: request.tenantId,
+          projectId: request.projectId,
+          scenarioId: request.command.scenarioId,
+          expectedScenarioRevision: BigInt(request.command.scenarioRevision),
+          sourceProjectRevision: BigInt(request.command.sourceProjectRevision),
+          actor: request.actor,
+        });
+        if (canonicalJson(published.changes) !== canonicalJson(request.command.changes)) {
+          throw new ProjectCommandValidationError("Scenario publication changes do not match the stored draft");
+        }
+      }
       const next = transition(current);
       const currentById = new Map(current.tasks.map((task) => [task.id, task]));
       const nextById = new Map(next.tasks.map((task) => [task.id, task]));

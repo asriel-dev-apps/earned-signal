@@ -2,6 +2,7 @@ import {
   createProjectCommandAuthorizer,
   createProjectCommandService,
   createProjectQueryAuthorizer,
+  createScenarioMutationAuthorizer,
   type ProjectAccessGrant,
 } from "@earned-signal/application";
 import {
@@ -12,6 +13,7 @@ import {
   ProjectAccessRepository,
   ProjectPerformanceRepository,
   ProjectRepository,
+  ProjectScenarioRepository,
   ProjectWorkspaceRepository,
 } from "@earned-signal/persistence";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
@@ -33,6 +35,7 @@ describe("project command REST API", () => {
   let repository: ProjectRepository;
   let performanceRepository: ProjectPerformanceRepository;
   let workspaceRepository: ProjectWorkspaceRepository;
+  let scenarioRepository: ProjectScenarioRepository;
   let stopContainer: (() => Promise<void>) | undefined;
   let workerProcess: ChildProcess | undefined;
   let workerOrigin: string;
@@ -102,6 +105,7 @@ describe("project command REST API", () => {
     repository = new ProjectRepository(database);
     performanceRepository = new ProjectPerformanceRepository(database);
     workspaceRepository = new ProjectWorkspaceRepository(database);
+    scenarioRepository = new ProjectScenarioRepository(database);
     accessRepository = new ProjectAccessRepository(database);
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,
@@ -266,6 +270,8 @@ describe("project command REST API", () => {
         ),
         authorizer: createProjectCommandAuthorizer({ resolve: async () => grant }),
         queryAuthorizer: createProjectQueryAuthorizer({ resolve: async () => grant }),
+        scenarioAuthorizer: createScenarioMutationAuthorizer({ resolve: async () => grant }),
+        scenarios: scenarioRepository,
         performance,
         workspace: workspaceRepository,
         close: async () => undefined,
@@ -324,6 +330,15 @@ describe("project command REST API", () => {
     expect(specification.paths).toHaveProperty(
       "/api/tenants/{tenantId}/projects/{projectId}",
     );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}/scenarios",
+    );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/runs",
+    );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/publish",
+    );
     expect(specification.components?.securitySchemes).toHaveProperty("OidcBearer");
   });
 
@@ -371,6 +386,223 @@ describe("project command REST API", () => {
       current: { id: demoProjectRecord.project.id },
       baseline: { id: demoProjectRecord.project.id },
       baselineVersion: { version: 1 },
+    });
+  });
+
+  it("creates, edits, runs, and atomically publishes a Scenario through workerd", async () => {
+    const projectUrl = `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}`;
+    const scenarioUrl = `${projectUrl}/scenarios`;
+    const headers = { authorization: `Bearer ${humanAccessToken}`, "content-type": "application/json" };
+    const createdResponse = await fetch(scenarioUrl, {
+      method: "POST", headers,
+      body: JSON.stringify({ name: "Recover delivery", changes: [] }),
+    });
+    expect(createdResponse.status).toBe(201);
+    expect(createdResponse.headers.get("cache-control")).toBe("no-store");
+    const created = await createdResponse.json<{ id: string; revision: string }>();
+    const loadedDraft = await fetch(`${scenarioUrl}/${created.id}`, {
+      headers: { authorization: `Bearer ${humanAccessToken}` },
+    });
+    expect(loadedDraft.status).toBe(200);
+    const listedDrafts = await fetch(scenarioUrl, {
+      headers: { authorization: `Bearer ${humanAccessToken}` },
+    });
+    await expect(listedDrafts.json()).resolves.toMatchObject({
+      scenarios: [expect.objectContaining({ id: created.id, status: "DRAFT" })],
+    });
+    const duration = demoProjectRecord.activities[2]!.durationWorkingDays + 2;
+    const editedResponse = await fetch(`${scenarioUrl}/${created.id}`, {
+      method: "PATCH", headers,
+      body: JSON.stringify({
+        expectedRevision: created.revision,
+        changes: [{
+          type: "task.update",
+          taskId: demoProjectRecord.activities[2]!.id,
+          changes: { durationWorkingDays: duration },
+        }],
+      }),
+    });
+    expect(editedResponse.status).toBe(200);
+    const edited = await editedResponse.json<{ revision: string }>();
+    const runResponse = await fetch(`${scenarioUrl}/${created.id}/runs`, {
+      method: "POST", headers,
+      body: JSON.stringify({ expectedRevision: edited.revision }),
+    });
+    expect(runResponse.status).toBe(200);
+    const run = await runResponse.json<{
+      latestRun: { algorithmVersion: string; inputHash: string; output: { forecast: { finish: string } } };
+    }>();
+    expect(run.latestRun).toMatchObject({ algorithmVersion: "deterministic-trend-v1" });
+    expect(run.latestRun.inputHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(run.latestRun.output.forecast.finish).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const repeatedRunResponse = await fetch(`${scenarioUrl}/${created.id}/runs`, {
+      method: "POST", headers,
+      body: JSON.stringify({ expectedRevision: edited.revision }),
+    });
+    const repeatedRun = await repeatedRunResponse.json<{
+      latestRun: { inputHash: string; output: unknown };
+    }>();
+    expect(repeatedRun.latestRun.inputHash).toBe(run.latestRun.inputHash);
+    expect(repeatedRun.latestRun.output).toEqual(run.latestRun.output);
+    const publishResponse = await fetch(`${scenarioUrl}/${created.id}/publish`, {
+      method: "POST",
+      headers: { ...headers, "idempotency-key": "scenario-workerd-publish" },
+      body: JSON.stringify({ expectedProjectRevision: "1", expectedScenarioRevision: edited.revision }),
+    });
+    expect(publishResponse.status).toBe(200);
+    await expect(publishResponse.json()).resolves.toMatchObject({ revision: "2", replayed: false });
+    const stored = await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    expect(stored?.activities.find((task) => task.id === demoProjectRecord.activities[2]!.id)?.durationWorkingDays).toBe(duration);
+    expect(await scenarioRepository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id, created.id)).toMatchObject({
+      status: "PUBLISHED",
+      revision: 3n,
+      latestRun: {
+        algorithmVersion: "deterministic-trend-v1",
+        inputSnapshot: {
+          algorithmVersion: "deterministic-trend-v1",
+          projectRevision: "1",
+          scenarioRevision: "2",
+          current: { id: demoProjectRecord.project.id },
+          baseline: { id: demoProjectRecord.project.id },
+          changes: expect.any(Array),
+          trend: { spi: expect.any(Number), cpi: expect.any(Number) },
+        },
+      },
+    });
+  });
+
+  it("discards a draft Scenario and makes it terminal", async () => {
+    const app = createTestApp();
+    const base = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios`;
+    const createdResponse = await app.request(base, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Discard me", changes: [] }),
+    });
+    const created = await createdResponse.json<{ id: string; revision: string }>();
+    const discarded = await app.request(`${base}/${created.id}/discard`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: created.revision }),
+    });
+    expect(discarded.status).toBe(200);
+    await expect(discarded.json()).resolves.toMatchObject({ status: "DISCARDED", revision: "2" });
+    const rerun = await app.request(`${base}/${created.id}/runs`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: "2" }),
+    });
+    expect(rerun.status).toBe(409);
+    await expect(rerun.json()).resolves.toMatchObject({ error: { code: "SCENARIO_TERMINAL" } });
+  });
+
+  it("returns a stable stale conflict after Current changes", async () => {
+    const app = createTestApp();
+    const base = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}`;
+    const created = await (await app.request(`${base}/scenarios`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Stale", changes: [] }),
+    })).json<{ id: string }>();
+    await app.request(`${base}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "make-scenario-stale" },
+      body: JSON.stringify({ expectedRevision: "1", command: { type: "baseline.publish", label: "New baseline" } }),
+    });
+    const response = await app.request(`${base}/scenarios/${created.id}/runs`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: "1" }),
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "SCENARIO_STALE",
+        message: "Scenario is based on Project revision 1, not 2",
+        expectedRevision: "1",
+        actualRevision: "2",
+      },
+    });
+  });
+
+  it("rejects a stale Scenario revision before calculating performance", async () => {
+    const calculate = vi.fn(async () => {
+      throw new Error("performance calculation must not run for a stale revision");
+    });
+    const app = createTestApp({
+      principalId: "user-001",
+      principalType: "HUMAN",
+      projectRole: "EDITOR",
+      allowedScopes: [],
+    }, {
+      calculate,
+      refresh: performanceRepository.refresh.bind(performanceRepository),
+    });
+    const base = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios`;
+    const created = await (await app.request(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Revision race", changes: [] }),
+    })).json<{ id: string }>();
+
+    const response = await app.request(`${base}/${created.id}/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: "2" }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "SCENARIO_REVISION_CONFLICT", expectedRevision: "2", actualRevision: "1" },
+    });
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  it("rejects agent mutation and cross-tenant Scenario reads through workerd", async () => {
+    const scenariosUrl = `${workerOrigin}/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios`;
+    const agentResponse = await fetch(scenariosUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${agentAccessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Agent draft", changes: [] }),
+    });
+    expect(agentResponse.status).toBe(403);
+    await expect(agentResponse.json()).resolves.toMatchObject({ error: { code: "AGENT_APPROVAL_REQUIRED" } });
+    const crossTenant = await fetch(
+      `${workerOrigin}/api/tenants/00000000-0000-4000-8000-000000000099/projects/${demoProjectRecord.project.id}/scenarios`,
+      { headers: { authorization: `Bearer ${humanAccessToken}` } },
+    );
+    expect(crossTenant.status).toBe(403);
+  });
+
+  it("rejects a Scenario body larger than 64 KiB before JSON buffering", async () => {
+    const app = createTestApp();
+    const response = await app.request(
+      `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios`,
+      {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Oversized", padding: "x".repeat(70 * 1024) }),
+      },
+    );
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BODY_TOO_LARGE", message: "Request body exceeds 64 KiB" },
+    });
+  });
+
+  it("rejects progress or actual fields mixed into a Scenario plan change", async () => {
+    const app = createTestApp();
+    const response = await app.request(
+      `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios`,
+      {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Invalid progress",
+          changes: [{
+            type: "task.update",
+            taskId: demoProjectRecord.activities[0]!.id,
+            changes: { durationWorkingDays: 3, progressBasisPoints: 5_000 },
+          }],
+        }),
+      },
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "REQUEST_INVALID", message: "Request validation failed" },
     });
   });
 

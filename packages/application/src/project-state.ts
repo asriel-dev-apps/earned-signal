@@ -7,6 +7,7 @@ import {
   type ScheduleConstraintInput,
   type ScheduleResult,
 } from "@earned-signal/domain";
+import type { ScenarioPlanCommand } from "./scenario.js";
 
 export interface ProjectCalendar {
   readonly id: string;
@@ -149,6 +150,14 @@ export interface PublishBaselineCommand {
   readonly label: string;
 }
 
+export interface PublishScenarioCommand {
+  readonly type: "scenario.publish";
+  readonly scenarioId: string;
+  readonly scenarioRevision: string;
+  readonly sourceProjectRevision: string;
+  readonly changes: readonly ScenarioPlanCommand[];
+}
+
 export type ProjectCommand =
   | UpdateTaskCommand
   | AddTaskCommand
@@ -157,7 +166,8 @@ export type ProjectCommand =
   | UpdateResourceCommand
   | DeleteResourceCommand
   | ReplaceTaskAssignmentsCommand
-  | PublishBaselineCommand;
+  | PublishBaselineCommand
+  | PublishScenarioCommand;
 
 function validateFiniteNonNegative(value: number, message: string): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -282,7 +292,21 @@ export function applyProjectCommand(
   command: ProjectCommand,
 ): ProjectState {
   let next: ProjectState;
-  if (command.type === "baseline.publish") {
+  if (command.type === "scenario.publish") {
+    if (command.changes.length === 0) throw new Error("Scenario publication requires plan changes");
+    next = command.changes.reduce<ProjectState>((project, change) => {
+      if (change.type === "task.update") {
+        const fields = Object.keys(change.changes);
+        if (fields.some((field) => field === "progressPercent" || field === "actualCost" || field === "actualMinutes")) {
+          throw new Error("Scenario commands cannot change progress or actuals");
+        }
+      }
+      if (change.type === "task.add" && (change.task.progressPercent !== 0 || change.task.actualCost !== 0 || change.task.actualMinutes !== 0)) {
+        throw new Error("Scenario commands cannot add progress or actuals");
+      }
+      return applyProjectCommand(project, change);
+    }, state);
+  } else if (command.type === "baseline.publish") {
     if (command.label.trim().length === 0) throw new Error("Baseline label must not be blank");
     next = state;
   } else if (command.type === "resource.add") {

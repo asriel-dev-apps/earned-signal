@@ -237,7 +237,11 @@ export class ProjectRepository {
       .select()
       .from(dependencies)
       .where(and(eq(dependencies.tenantId, tenantId), eq(dependencies.projectId, projectId)))
-      .orderBy(asc(dependencies.successorActivityId));
+      .orderBy(
+        asc(dependencies.successorActivityId),
+        asc(dependencies.predecessorActivityId),
+        asc(dependencies.type),
+      );
     const progressRows = await this.database
       .select()
       .from(progressMeasurements)
@@ -419,7 +423,11 @@ export class ProjectRepository {
           eq(baselineDependencies.baselineVersionId, versionRow.id),
         ),
       )
-      .orderBy(asc(baselineDependencies.successorSourceActivityId));
+      .orderBy(
+        asc(baselineDependencies.successorSourceActivityId),
+        asc(baselineDependencies.predecessorSourceActivityId),
+        asc(baselineDependencies.type),
+      );
     const activitySkillRows = await this.database
       .select()
       .from(baselineActivitySkillRequirements)

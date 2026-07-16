@@ -8,6 +8,8 @@ ProjectCommandAuthorizer is the shared authorization boundary. Human project own
 
 ProjectQueryAuthorizer permits a provisioned owner, editor, viewer, or agent to read its project while rejecting identities without the tenant/project grant. Query adapters must use it before loading project performance or other project data.
 
+Scenario calculation applies an ordered, plan-only subset of Project Commands to an immutable Current input. It reuses Project validation, scheduling, and capacity calculation, then applies deterministic SPI/CPI factors only to unfinished duration and remaining budget. Scenario commands cannot publish a Baseline or write progress and actuals.
+
 ## Language
 
 - **Owner**: the accountable label on a work package; it does not reserve capacity.
@@ -15,3 +17,4 @@ ProjectQueryAuthorizer permits a provisioned owner, editor, viewer, or agent to 
 - **Plan change**: a Current mutation other than progress or actual recording; Resource and Assignment commands are plan changes.
 - **Project query**: a read-only project operation authorized by tenant/project membership rather than mutation role or agent write scopes.
 - **Baseline publish**: a human plan command that freezes the complete Current plan as the next approved, immutable Baseline version.
+- **Scenario plan command**: a Task, Resource, or Assignment plan command evaluated in order against an in-memory Scenario without mutating Current.

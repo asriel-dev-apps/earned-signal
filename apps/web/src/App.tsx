@@ -23,9 +23,10 @@ import {
 import { baselineProject, initialProject } from "./demo-project";
 import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
+import { ScenarioWorkspace } from "./ScenarioWorkspace";
 
 type ProjectMode = "current" | "baseline";
-type WorkspaceView = "wbs" | "performance" | "team";
+type WorkspaceView = "wbs" | "performance" | "team" | "scenarios";
 
 interface TaskRow extends ProjectTask {
   readonly actualHours: number;
@@ -598,7 +599,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [hasLoaded, setHasLoaded] = useState(client === undefined);
   const saving = useRef(false);
   const [mode, setMode] = useState<ProjectMode>("current");
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wbs");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
+    window.location.hash === "#scenarios" ? "scenarios" : "wbs",
+  );
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [notice, setNotice] = useState<string | null>(null);
   const referenceBaseline = approvedBaseline ?? currentProject;
@@ -623,6 +626,28 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     setSelectedTaskId(workspace.current.tasks[0]?.id ?? null);
     setHasLoaded(true);
   }, [client]);
+
+  const reloadAfterScenarioPublished = useCallback(async () => {
+    setSaveState("loading");
+    setNotice(null);
+    try {
+      await reloadWorkspace();
+      setSaveState("saved");
+    } catch (error) {
+      setSaveState("error");
+      setNotice("The Scenario was published, but the updated Current could not be loaded. Editing is disabled until the workspace is reloaded.");
+      throw error;
+    }
+  }, [reloadWorkspace]);
+
+  const retryWorkspace = useCallback(() => {
+    setSaveState("loading");
+    setNotice(null);
+    reloadWorkspace().then(() => setSaveState("saved")).catch((error: unknown) => {
+      setSaveState("error");
+      setNotice(error instanceof Error ? error.message : "The project could not be loaded");
+    });
+  }, [reloadWorkspace]);
 
   useEffect(() => {
     if (client === undefined) return;
@@ -738,7 +763,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     () => displayedProject.calendars.map((calendar) => calendar.id),
     [displayedProject.calendars],
   );
-  const editable = mode === "current" && saveState !== "saving" && saveState !== "loading";
+  const editable = mode === "current" && (saveState === "preview" || saveState === "saved");
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
       { field: "wbs", headerName: "WBS", pinned: "left", width: 82, editable, cellClass: "editable-cell" },
@@ -937,7 +962,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             >
               <Icon name="users" />
             </button>
-            <button className="nav-button" aria-label="Scenarios">
+            <button className={`nav-button ${workspaceView === "scenarios" ? "nav-button--active" : ""}`} aria-label="Scenarios" onClick={() => { setMode("current"); setWorkspaceView("scenarios"); }}>
               <Icon name="layers" />
             </button>
           </nav>
@@ -973,10 +998,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             <div className="page-heading">
               <div>
                 <p className="breadcrumb">PROJECTS / CUSTOMER PORTAL LAUNCH</p>
-                <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : "Team workload"}</h1>
+                <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : workspaceView === "team" ? "Team workload" : "Scenario planning"}</h1>
               </div>
               <div className="heading-actions">
-              <button className="publish-button" onClick={() => setShowBaselineDialog(true)} disabled={client === undefined || saveState === "saving" || saveState === "loading"}>Publish baseline</button>
+              <button className="publish-button" onClick={() => setShowBaselineDialog(true)} disabled={client === undefined || saveState !== "saved"}>Publish baseline</button>
               <div className={`mode-switch ${workspaceView === "performance" ? "mode-switch--hidden" : ""}`} aria-label="Plan view">
                 <button
                   className={mode === "current" ? "active" : ""}
@@ -1015,7 +1040,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               <div className="notice" role="alert">
                 <strong>{saveState === "error" ? "Workspace needs attention" : "Edit rejected"}</strong>
                 <span>{notice}</span>
-                <button onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
+                {saveState === "error" && client !== undefined
+                  ? <button className="notice-retry" onClick={retryWorkspace}>Retry workspace</button>
+                  : <button onClick={() => setNotice(null)} aria-label="Dismiss">×</button>}
               </div>
             )}
 
@@ -1024,15 +1051,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 <span className="section-kicker">PERSISTED PROJECT</span>
                 <h2>{saveState === "loading" ? "Loading Current and Baseline…" : "The workspace could not be loaded"}</h2>
                 <p>{saveState === "loading" ? "Reading the authorized project, approved Baseline, and performance history." : "Check the session and connection, then retry. Preview data is never shown as saved project data."}</p>
-                {saveState === "error" ? <button className="primary-button" onClick={() => {
-                  setSaveState("loading");
-                  setNotice(null);
-                  reloadWorkspace().then(() => setSaveState("saved")).catch((error: unknown) => {
-                    setSaveState("error");
-                    setNotice(error instanceof Error ? error.message : "The project could not be loaded");
-                  });
-                }}>Retry loading</button> : null}
+                {saveState === "error" ? <button className="primary-button" onClick={retryWorkspace}>Retry loading</button> : null}
               </section>
+            ) : workspaceView === "scenarios" ? (
+              <ScenarioWorkspace project={currentProject} baseline={referenceBaseline} analysis={currentAnalysis} projectRevision={revision} client={client} onPublished={reloadAfterScenarioPublished} />
             ) : workspaceView === "performance" ? (
               <PerformanceWorkspace project={currentProject} analysis={currentAnalysis} />
             ) : workspaceView === "team" ? (

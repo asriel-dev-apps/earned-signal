@@ -2,6 +2,7 @@ import {
   ProjectCommandValidationError,
   type ProjectCommand,
   type ProjectTask,
+  type ScenarioPlanCommand,
 } from "@earned-signal/application";
 import { MAX_ACTIVITY_DURATION_WORKING_DAYS } from "@earned-signal/domain";
 import { z } from "zod";
@@ -29,8 +30,7 @@ const ConstraintSchema = z.object({
   date: z.iso.date(),
 });
 
-export const TaskChangesSchema = z
-  .object({
+const TaskChangesFieldsSchema = z.object({
     wbs: z.string().trim().min(1).optional(),
     wbsParentId: UuidSchema.nullable().optional(),
     name: z.string().trim().min(1).optional(),
@@ -45,8 +45,16 @@ export const TaskChangesSchema = z
     progressBasisPoints: ProgressBasisPointsSchema.optional(),
     actualCostMinor: MinorUnitSchema.optional(),
     actualMinutes: z.number().int().nonnegative().optional(),
-  })
+  }).strict();
+
+export const TaskChangesSchema = TaskChangesFieldsSchema
   .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
+
+const ScenarioTaskChangesSchema = TaskChangesFieldsSchema.omit({
+  progressBasisPoints: true,
+  actualCostMinor: true,
+  actualMinutes: true,
+}).refine((changes) => Object.keys(changes).length > 0, "At least one plan change is required");
 
 export const TaskSchema = z.object({
   id: UuidSchema,
@@ -64,7 +72,7 @@ export const TaskSchema = z.object({
   progressBasisPoints: ProgressBasisPointsSchema,
   actualCostMinor: MinorUnitSchema,
   actualMinutes: z.number().int().nonnegative(),
-});
+}).strict();
 
 export const ResourceSchema = z.object({
   id: UuidSchema,
@@ -73,19 +81,40 @@ export const ResourceSchema = z.object({
   dailyCapacityMinutes: z.number().int().min(1).max(1_440),
   costRateMinorPerHour: MinorUnitSchema,
   skillIds: SkillIdsSchema,
-});
+}).strict();
 
 export const ResourceChangesSchema = ResourceSchema.omit({ id: true })
   .partial()
+  .strict()
   .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
 
 export const AssignmentSchema = z.object({
   resourceId: UuidSchema,
   unitsPercent: z.number().int().min(1).max(100),
-});
+}).strict();
+
+export const ScenarioPlanCommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("task.update"), taskId: UuidSchema, changes: ScenarioTaskChangesSchema }).strict(),
+  z.object({ type: z.literal("task.add"), task: TaskSchema.refine(
+    (task) => task.progressBasisPoints === 0 && task.actualCostMinor === "0" && task.actualMinutes === 0,
+    "Scenario tasks cannot contain progress or actuals",
+  ) }).strict(),
+  z.object({ type: z.literal("task.delete"), taskId: UuidSchema }).strict(),
+  z.object({ type: z.literal("resource.add"), resource: ResourceSchema }).strict(),
+  z.object({ type: z.literal("resource.update"), resourceId: UuidSchema, changes: ResourceChangesSchema }).strict(),
+  z.object({ type: z.literal("resource.delete"), resourceId: UuidSchema }).strict(),
+  z.object({ type: z.literal("assignment.replace"), taskId: UuidSchema, assignments: z.array(AssignmentSchema).max(100) }).strict(),
+]);
 
 export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("baseline.publish"), label: z.string().trim().min(1).max(200) }),
+  z.object({
+    type: z.literal("scenario.publish"),
+    scenarioId: UuidSchema,
+    scenarioRevision: RevisionSchema,
+    sourceProjectRevision: RevisionSchema,
+    changes: z.array(ScenarioPlanCommandSchema).min(1).max(500),
+  }),
   z.object({
     type: z.literal("task.update"),
     taskId: UuidSchema,
@@ -138,6 +167,12 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
 
 export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCommand {
   if (command.type === "baseline.publish") return command;
+  if (command.type === "scenario.publish") {
+    return {
+      ...command,
+      changes: command.changes.map((change) => toCommand(change) as ScenarioPlanCommand),
+    };
+  }
   if (command.type === "task.add") {
     return { type: command.type, task: toTask(command.task) };
   }
@@ -246,6 +281,12 @@ function fromTask(task: ProjectTask): z.infer<typeof TaskSchema> {
 
 export function fromCommand(command: ProjectCommand): z.infer<typeof ApiCommandSchema> {
   if (command.type === "baseline.publish") return command;
+  if (command.type === "scenario.publish") {
+    return {
+      ...command,
+      changes: command.changes.map((change) => fromCommand(change) as z.infer<typeof ScenarioPlanCommandSchema>),
+    };
+  }
   if (command.type === "task.add") return { type: command.type, task: fromTask(command.task) };
   if (command.type === "task.delete" || command.type === "resource.delete") return command;
   if (command.type === "assignment.replace") return { ...command, assignments: command.assignments.map((assignment) => ({ ...assignment })) };

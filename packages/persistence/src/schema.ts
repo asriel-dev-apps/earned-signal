@@ -37,6 +37,7 @@ export const auditActorType = pgEnum("audit_actor_type", ["HUMAN", "AGENT", "SYS
 export const principalType = pgEnum("principal_type", ["HUMAN", "AGENT"]);
 export const tenantRole = pgEnum("tenant_role", ["OWNER", "ADMIN", "MEMBER"]);
 export const projectRole = pgEnum("project_role", ["OWNER", "EDITOR", "VIEWER"]);
+export const scenarioStatus = pgEnum("scenario_status", ["DRAFT", "PUBLISHED", "DISCARDED"]);
 
 const auditTimestamp = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "string", precision: 6 });
@@ -1099,6 +1100,126 @@ export const commandReceipts = pgTable(
   ],
 );
 
+export const scenarios = pgTable(
+  "scenarios",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    status: scenarioStatus().notNull().default("DRAFT"),
+    baseProjectRevision: bigint("base_project_revision", { mode: "bigint" }).notNull(),
+    revision: bigint({ mode: "bigint" }).notNull().default(sql`1`),
+    changes: jsonb().notNull().default(sql`'[]'::jsonb`),
+    latestRunId: uuid("latest_run_id"),
+    createdBy: text("created_by").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+    publishedBy: text("published_by"),
+    publishedAt: auditTimestamp("published_at"),
+    discardedBy: text("discarded_by"),
+    discardedAt: auditTimestamp("discarded_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    unique("scenarios_id_unique").on(table.id),
+    index("scenarios_project_status_idx").on(table.tenantId, table.projectId, table.status),
+    foreignKey({
+      name: "scenarios_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("restrict"),
+    check("scenarios_name_length", sql`length(trim(${table.name})) between 1 and 200`),
+    check("scenarios_base_revision_non_negative", sql`${table.baseProjectRevision} >= 0`),
+    check("scenarios_revision_positive", sql`${table.revision} > 0`),
+    check("scenarios_created_by_not_blank", sql`length(trim(${table.createdBy})) > 0`),
+    check("scenarios_updated_by_not_blank", sql`length(trim(${table.updatedBy})) > 0`),
+    check(
+      "scenarios_terminal_metadata_consistent",
+      sql`(
+        ${table.status} = 'DRAFT' and ${table.publishedAt} is null and ${table.publishedBy} is null and ${table.discardedAt} is null and ${table.discardedBy} is null
+      ) or (
+        ${table.status} = 'PUBLISHED' and ${table.latestRunId} is not null and ${table.publishedAt} is not null and length(trim(${table.publishedBy})) > 0 and ${table.discardedAt} is null and ${table.discardedBy} is null
+      ) or (
+        ${table.status} = 'DISCARDED' and ${table.discardedAt} is not null and length(trim(${table.discardedBy})) > 0 and ${table.publishedAt} is null and ${table.publishedBy} is null
+      )`,
+    ),
+  ],
+);
+
+export const scenarioRuns = pgTable(
+  "scenario_runs",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    scenarioId: uuid("scenario_id").notNull(),
+    sourceProjectRevision: bigint("source_project_revision", { mode: "bigint" }).notNull(),
+    sourceScenarioRevision: bigint("source_scenario_revision", { mode: "bigint" }).notNull(),
+    algorithmVersion: text("algorithm_version").notNull(),
+    inputHash: char("input_hash", { length: 64 }).notNull(),
+    inputSnapshot: jsonb("input_snapshot").notNull(),
+    output: jsonb().notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.scenarioId, table.id] }),
+    unique("scenario_runs_id_unique").on(table.id),
+    index("scenario_runs_scenario_created_idx").on(
+      table.tenantId,
+      table.projectId,
+      table.scenarioId,
+      table.createdAt,
+    ),
+    foreignKey({
+      name: "scenario_runs_scenario_fk",
+      columns: [table.tenantId, table.projectId, table.scenarioId],
+      foreignColumns: [scenarios.tenantId, scenarios.projectId, scenarios.id],
+    }).onDelete("restrict"),
+    check("scenario_runs_project_revision_non_negative", sql`${table.sourceProjectRevision} >= 0`),
+    check("scenario_runs_scenario_revision_positive", sql`${table.sourceScenarioRevision} > 0`),
+    check("scenario_runs_algorithm_version_not_blank", sql`length(trim(${table.algorithmVersion})) between 1 and 100`),
+    check("scenario_runs_input_hash_hex", sql`${table.inputHash} ~ '^[0-9a-f]{64}$'`),
+    check("scenario_runs_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+  ],
+);
+
+export const scenarioAuditEvents = pgTable(
+  "scenario_audit_events",
+  {
+    sequence: bigserial({ mode: "bigint" }).primaryKey(),
+    id: uuid().notNull().defaultRandom().unique(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    scenarioId: uuid("scenario_id").notNull(),
+    scenarioRevision: bigint("scenario_revision", { mode: "bigint" }).notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb().notNull(),
+    occurredAt: auditTimestamp("occurred_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("scenario_audit_events_scenario_sequence_idx").on(
+      table.tenantId,
+      table.projectId,
+      table.scenarioId,
+      table.sequence,
+    ),
+    foreignKey({
+      name: "scenario_audit_events_scenario_fk",
+      columns: [table.tenantId, table.projectId, table.scenarioId],
+      foreignColumns: [scenarios.tenantId, scenarios.projectId, scenarios.id],
+    }).onDelete("restrict"),
+    check("scenario_audit_events_revision_positive", sql`${table.scenarioRevision} > 0`),
+    check("scenario_audit_events_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+    check("scenario_audit_events_event_type_not_blank", sql`length(trim(${table.eventType})) > 0`),
+  ],
+);
+
 export const schema = {
   principals,
   tenants,
@@ -1127,4 +1248,7 @@ export const schema = {
   directActualCosts,
   auditEvents,
   commandReceipts,
+  scenarios,
+  scenarioRuns,
+  scenarioAuditEvents,
 };

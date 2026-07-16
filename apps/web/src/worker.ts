@@ -2,12 +2,14 @@ import {
   createProjectCommandAuthorizer,
   createProjectCommandService,
   createProjectQueryAuthorizer,
+  createScenarioMutationAuthorizer,
 } from "@earned-signal/application";
 import {
   createPersistenceDatabase,
   PostgresProjectAccessGrantResolver,
   PostgresProjectCommandUnitOfWork,
   ProjectPerformanceRepository,
+  ProjectScenarioRepository,
   ProjectWorkspaceRepository,
 } from "@earned-signal/persistence";
 import { Client } from "pg";
@@ -31,6 +33,8 @@ export async function openHyperdriveProjectSession(
     ),
     authorizer: createProjectCommandAuthorizer(grantResolver),
     queryAuthorizer: createProjectQueryAuthorizer(grantResolver),
+    scenarioAuthorizer: createScenarioMutationAuthorizer(grantResolver),
+    scenarios: new ProjectScenarioRepository(database),
     performance: new ProjectPerformanceRepository(database),
     workspace: new ProjectWorkspaceRepository(database),
     // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.

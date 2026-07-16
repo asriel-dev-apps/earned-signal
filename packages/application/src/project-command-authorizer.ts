@@ -38,6 +38,10 @@ export interface ProjectQueryAuthorizer {
   authorize(request: ProjectAccessGrantRequest): Promise<ProjectAccessGrant>;
 }
 
+export interface ScenarioMutationAuthorizer {
+  authorize(request: ProjectAccessGrantRequest): Promise<AuditActor>;
+}
+
 export class ProjectAccessDeniedError extends Error {
   constructor() {
     super("Project command is not permitted");
@@ -113,6 +117,26 @@ export function createProjectQueryAuthorizer(
       const grant = await resolver.resolve(request);
       if (grant === null) throw new ProjectAccessDeniedError();
       return grant;
+    },
+  };
+}
+
+export function createScenarioMutationAuthorizer(
+  resolver: ProjectAccessGrantResolver,
+): ScenarioMutationAuthorizer {
+  return {
+    async authorize(request) {
+      const grant = await resolver.resolve(request);
+      if (
+        grant === null ||
+        (grant.projectRole !== "OWNER" && grant.projectRole !== "EDITOR")
+      ) {
+        throw new ProjectAccessDeniedError();
+      }
+      if (grant.principalType === "AGENT") {
+        throw new AgentPlanApprovalRequiredError();
+      }
+      return { type: "HUMAN", id: grant.principalId };
     },
   };
 }
