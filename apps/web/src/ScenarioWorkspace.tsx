@@ -44,13 +44,14 @@ function describeChange(change: ScenarioPlanCommand, project: ProjectState): rea
   return [`Replace assignments for ${task?.wbs ?? change.taskId} ${task?.name ?? "Unknown task"} · ${valueLabel(change.assignments)}`];
 }
 
-export function ScenarioWorkspace({ project, baseline, analysis, projectRevision, client, onPublished }: {
+export function ScenarioWorkspace({ project, baseline, analysis, projectRevision, client, onPublished, initialScenarioId = null }: {
   readonly project: ProjectState;
   readonly baseline: ProjectState;
   readonly analysis: ProjectAnalysis;
   readonly projectRevision: string | null;
   readonly client: ProjectApiClient | undefined;
   readonly onPublished: () => Promise<void>;
+  readonly initialScenarioId?: string | null;
 }) {
   const previewChanges = useMemo<readonly ScenarioPlanCommand[]>(() => {
     const task = project.tasks[0];
@@ -71,11 +72,11 @@ export function ScenarioWorkspace({ project, baseline, analysis, projectRevision
     setLoadState("loading");
     const loaded = await client.scenarios();
     setScenarios(loaded);
-    const next = loaded[0] ?? null;
+    const next = loaded.find((scenario) => scenario.id === initialScenarioId) ?? loaded[0] ?? null;
     setSelectedId(next?.id ?? null);
     setChanges(next?.changes ?? []);
     setLoadState("loaded");
-  }, [client]);
+  }, [client, initialScenarioId]);
   useEffect(() => {
     if (client === undefined) { setChanges(previewChanges); return; }
     refresh().catch((error: unknown) => {

@@ -4,6 +4,7 @@ import {
   createProjectCommandAuthorizer,
   createProjectQueryAuthorizer,
   createScenarioMutationAuthorizer,
+  createStaffingProposalAuthorizer,
   ProjectAccessDeniedError,
   type ProjectAccessGrantResolver,
 } from "../src/index.js";
@@ -209,6 +210,73 @@ describe("ProjectCommandAuthorizer", () => {
     await expect(unprovisioned.authorize(request)).rejects.toBeInstanceOf(
       ProjectAccessDeniedError,
     );
+  });
+});
+
+describe("StaffingProposalAuthorizer", () => {
+  const request = {
+    tenantId: "00000000-0000-4000-8000-000000000001",
+    projectId: "10000000-0000-4000-8000-000000000001",
+  };
+
+  it("allows a human editor and a doubly-scoped agent to request a proposal", async () => {
+    const human = createStaffingProposalAuthorizer({
+      resolve: async () => ({
+        principalId: "human",
+        principalType: "HUMAN",
+        projectRole: "EDITOR",
+        allowedScopes: [],
+      }),
+    });
+    const agent = createStaffingProposalAuthorizer({
+      resolve: async () => ({
+        principalId: "agent",
+        principalType: "AGENT",
+        projectRole: "EDITOR",
+        allowedScopes: ["project:staffing:propose"],
+      }),
+    });
+
+    await expect(human.authorize({
+      ...request,
+      identity: { issuer: "https://identity.example.test/", subject: "human", scopes: [] },
+    })).resolves.toEqual({ type: "HUMAN", id: "human" });
+    await expect(agent.authorize({
+      ...request,
+      identity: {
+        issuer: "https://identity.example.test/",
+        subject: "agent",
+        scopes: ["project:staffing:propose"],
+      },
+    })).resolves.toEqual({ type: "AGENT", id: "agent" });
+  });
+
+  it("rejects a viewer or an agent missing either stored or token scope", async () => {
+    const viewer = createStaffingProposalAuthorizer({
+      resolve: async () => ({
+        principalId: "viewer",
+        principalType: "HUMAN",
+        projectRole: "VIEWER",
+        allowedScopes: [],
+      }),
+    });
+    const agent = createStaffingProposalAuthorizer({
+      resolve: async () => ({
+        principalId: "agent",
+        principalType: "AGENT",
+        projectRole: "EDITOR",
+        allowedScopes: ["project:staffing:propose"],
+      }),
+    });
+
+    await expect(viewer.authorize({
+      ...request,
+      identity: { issuer: "https://identity.example.test/", subject: "viewer", scopes: [] },
+    })).rejects.toBeInstanceOf(ProjectAccessDeniedError);
+    await expect(agent.authorize({
+      ...request,
+      identity: { issuer: "https://identity.example.test/", subject: "agent", scopes: [] },
+    })).rejects.toBeInstanceOf(ProjectAccessDeniedError);
   });
 });
 

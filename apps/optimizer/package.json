@@ -1,0 +1,26 @@
+{
+  "name": "@earned-signal/optimizer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "types:worker": "wrangler types worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "@earned-signal/application": "workspace:*",
+    "@earned-signal/domain": "workspace:*",
+    "@earned-signal/persistence": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.1.0",
+    "@types/pg": "8.20.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.111.0"
+  }
+}

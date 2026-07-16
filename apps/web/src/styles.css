@@ -1087,6 +1087,74 @@ h1 {
 .scenario-actions .primary-button, .scenario-create .primary-button { border-color: #1b6859; color: #fff; background: #1b6859; }
 .scenario-actions button:disabled, .scenario-create button:disabled { cursor: not-allowed; opacity: .45; }
 
+.staffing-workspace { display: grid; gap: 14px; }
+.staffing-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.staffing-heading h2, .staffing-unavailable h2 { margin: 4px 0; color: #173c32; font-size: 24px; }
+.staffing-heading p, .staffing-unavailable p { max-width: 760px; margin: 0; color: #71807a; line-height: 1.55; }
+.staffing-unavailable { display: grid; min-height: 360px; place-content: center; justify-items: center; border: 1px solid #dce2de; border-radius: 10px; background: #fff; padding: 32px; text-align: center; }
+.staffing-layout { display: grid; min-width: 0; grid-template-columns: 220px minmax(0, 1fr); gap: 13px; }
+.staffing-list, .staffing-form-card, .staffing-result, .staffing-empty { border: 1px solid #dce2de; border-radius: 9px; background: #fff; }
+.staffing-list { display: flex; min-height: 720px; flex-direction: column; gap: 6px; padding: 9px; }
+.staffing-list-heading { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; color: #31544a; font-size: 11px; }
+.staffing-list-heading span { border-radius: 99px; background: #edf3f0; padding: 3px 7px; }
+.staffing-list > button { border: 0; border-radius: 7px; color: #496059; background: transparent; padding: 11px; text-align: left; cursor: pointer; }
+.staffing-list > button.active { color: #17483f; background: #e8f2ee; }
+.staffing-list > button strong, .staffing-list > button span { display: block; }
+.staffing-list > button span { margin-top: 4px; color: #7f8c87; font-size: 9px; text-transform: uppercase; }
+.staffing-list > p { color: #73817c; padding: 12px; font-size: 11px; line-height: 1.5; }
+.staffing-content { display: grid; min-width: 0; gap: 13px; }
+.staffing-form-card > header, .staffing-result > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e0e6e2; padding: 14px 16px; }
+.staffing-form-card h3, .staffing-result h3 { margin: 3px 0; color: #24483e; font-size: 18px; }
+.staffing-result header p { margin: 3px 0 0; color: #788680; font-size: 10px; }
+.staffing-form-card > header input { min-width: 240px; }
+.staffing-form-card input, .staffing-form-card select { min-width: 0; border: 1px solid #d4ddd8; border-radius: 6px; background: #fff; padding: 7px 8px; color: #29443c; }
+.staffing-effort-table { overflow-x: auto; }
+.staffing-effort-header, .staffing-effort-row { display: grid; min-width: 760px; grid-template-columns: minmax(230px, 1fr) 145px 110px 170px; align-items: center; gap: 12px; border-bottom: 1px solid #e5eae7; padding: 9px 16px; }
+.staffing-effort-header { color: #7b8984; background: #f7f9f7; font: 9px "DM Mono", monospace; text-transform: uppercase; }
+.staffing-effort-row > span strong, .staffing-effort-row > span small { display: block; }
+.staffing-effort-row > span strong { color: #294b41; font-size: 11px; }
+.staffing-effort-row > span small { margin-top: 3px; color: #80908a; font-size: 9px; }
+.staffing-effort-row label { display: flex; align-items: center; gap: 5px; color: #6e7d78; font-size: 10px; }
+.staffing-effort-row input[type="number"] { width: 92px; }
+.staffing-confirm { font: 9px "DM Mono", monospace !important; }
+.staffing-constraints { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px 16px; }
+.staffing-constraints label { display: grid; color: #667872; font-size: 9px; gap: 5px; text-transform: uppercase; }
+.staffing-form-split { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(360px, 1.2fr); gap: 16px; border-top: 1px solid #e0e6e2; padding: 14px 16px; }
+.staffing-form-split h4, .staffing-verified h4, .staffing-ai h4, .staffing-diff h4, .staffing-infeasible h4 { margin: 0 0 9px; color: #2c4e44; font-size: 11px; }
+.staffing-objectives { display: grid; margin: 0; padding: 0; gap: 5px; list-style: none; }
+.staffing-objectives li { display: grid; grid-template-columns: 24px 1fr 28px 28px; align-items: center; border: 1px solid #e1e7e3; border-radius: 6px; padding: 6px; gap: 5px; color: #50645d; font-size: 10px; }
+.staffing-objectives li > span { display: grid; width: 20px; height: 20px; place-content: center; border-radius: 50%; color: #fff; background: #317261; }
+.staffing-objectives button, .staffing-candidates button { border: 1px solid #d4ddd8; border-radius: 5px; background: #fff; cursor: pointer; }
+.staffing-candidates > div { display: grid; grid-template-columns: 1.2fr 1fr .7fr .9fr 1fr auto; gap: 6px; }
+.staffing-candidates > p { display: flex; align-items: center; gap: 10px; margin: 7px 0 0; border-radius: 6px; background: #f3f7f5; padding: 6px 8px; color: #688078; font-size: 9px; }
+.staffing-candidates > p span { flex: 1; }
+.staffing-form-card > footer, .staffing-result > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #e0e6e2; padding: 11px 16px; color: #77857f; font-size: 10px; }
+.staffing-form-card button:disabled, .staffing-result button:disabled { cursor: not-allowed; opacity: .45; }
+.staffing-empty { display: grid; min-height: 220px; place-content: center; justify-items: center; color: #73817c; }
+.staffing-empty p { margin: 5px 0; }
+.staffing-status { border-radius: 99px; padding: 6px 10px; font: 9px "DM Mono", monospace; }
+.staffing-status--ready { color: #14604f; background: #dff2eb; }
+.staffing-status--infeasible, .staffing-status--failed { color: #a44731; background: #fde8df; }
+.staffing-status--requested, .staffing-status--running, .staffing-status--unknown { color: #816224; background: #fff0cf; }
+.staffing-status-grid, .staffing-verified > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #e0e6e2; }
+.staffing-status-grid article, .staffing-verified article { display: grid; border-right: 1px solid #e0e6e2; padding: 12px 14px; gap: 4px; }
+.staffing-status-grid span, .staffing-verified article span { color: #81908a; font: 8px "DM Mono", monospace; }
+.staffing-status-grid strong { overflow: hidden; color: #315047; font-size: 10px; text-overflow: ellipsis; }
+.staffing-verified { border-bottom: 1px solid #e0e6e2; }
+.staffing-verified > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
+.staffing-verified > header h4 { margin: 3px 0 0; }
+.staffing-verified > header > span { color: #176b5b; font-size: 9px; }
+.staffing-verified > div { grid-template-columns: repeat(6, minmax(0, 1fr)); border: 0; }
+.staffing-verified article strong { color: #173c32; font: 15px "DM Mono", monospace; }
+.staffing-ai { border-left: 4px solid #8068a8; background: #faf8fe; padding: 14px 16px; }
+.staffing-ai h4 { margin-top: 5px; }
+.staffing-ai ul, .staffing-diff ol, .staffing-infeasible ul { color: #667872; font-size: 10px; line-height: 1.6; }
+.staffing-ai small { color: #806f8d; }
+.staffing-diff, .staffing-infeasible, .staffing-pending { border-top: 1px solid #e0e6e2; padding: 14px 16px; }
+.staffing-diff ol { max-height: 180px; overflow: auto; font-family: "DM Mono", monospace; }
+.staffing-infeasible { color: #774c40; background: #fffaf7; }
+.staffing-infeasible p, .staffing-pending p { color: #71807a; font-size: 10px; }
+
 @media (max-width: 1250px) {
   .workspace-grid {
     grid-template-columns: minmax(650px, 1fr) 300px;
@@ -1125,6 +1193,12 @@ h1 {
   .scenario-list { min-height: 0; flex-direction: row; overflow-x: auto; }
   .scenario-list button { min-width: 170px; }
   .scenario-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .staffing-layout { grid-template-columns: minmax(0, 1fr); }
+  .staffing-list { min-height: 0; flex-direction: row; overflow-x: auto; }
+  .staffing-list-heading { min-width: 120px; }
+  .staffing-list > button { min-width: 180px; }
+  .staffing-form-split { grid-template-columns: minmax(0, 1fr); }
+  .staffing-verified > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
@@ -1147,4 +1221,8 @@ h1 {
   .scenario-metrics { grid-template-columns: minmax(0, 1fr); }
   .scenario-metric { border-right: 0; border-bottom: 1px solid #e0e6e2; }
   .scenario-actions div { flex-wrap: wrap; }
+  .staffing-heading, .staffing-form-card > header, .staffing-result > header, .staffing-form-card > footer, .staffing-result > footer { align-items: stretch; flex-direction: column; }
+  .staffing-form-card > header input { min-width: 0; width: 100%; }
+  .staffing-constraints, .staffing-status-grid, .staffing-verified > div { grid-template-columns: minmax(0, 1fr); }
+  .staffing-candidates > div { grid-template-columns: minmax(0, 1fr); }
 }

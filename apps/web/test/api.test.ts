@@ -3,6 +3,8 @@ import {
   createProjectCommandService,
   createProjectQueryAuthorizer,
   createScenarioMutationAuthorizer,
+  createStaffingProposalAuthorizer,
+  createStaffingProposalSubmissionService,
   type ProjectAccessGrant,
 } from "@earned-signal/application";
 import {
@@ -14,7 +16,9 @@ import {
   ProjectPerformanceRepository,
   ProjectRepository,
   ProjectScenarioRepository,
+  ProjectStaffingProposalRepository,
   ProjectWorkspaceRepository,
+  type StaffingProposalJson,
 } from "@earned-signal/persistence";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
@@ -27,6 +31,7 @@ import { createServer } from "node:net";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApiApp } from "../src/api.js";
+import { staffingProposalHash } from "../src/staffing-contract.js";
 
 describe("project command REST API", () => {
   const container = new PostgreSqlContainer("postgres:17.6-alpine");
@@ -36,6 +41,7 @@ describe("project command REST API", () => {
   let performanceRepository: ProjectPerformanceRepository;
   let workspaceRepository: ProjectWorkspaceRepository;
   let scenarioRepository: ProjectScenarioRepository;
+  let staffingProposalRepository: ProjectStaffingProposalRepository;
   let stopContainer: (() => Promise<void>) | undefined;
   let workerProcess: ChildProcess | undefined;
   let workerOrigin: string;
@@ -48,6 +54,17 @@ describe("project command REST API", () => {
   let multiAudienceAccessToken: string;
   const humanPrincipalId = "90000000-0000-4000-8000-000000000001";
   const agentPrincipalId = "90000000-0000-4000-8000-000000000002";
+
+  async function confirmedRemainingEffort() {
+    const workspace = await workspaceRepository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    if (workspace === null) throw new Error("Expected demo workspace");
+    return workspace.current.tasks.filter((task) => task.progressPercent < 100).map((task) => ({
+      taskId: task.id,
+      remainingEffortMinutes: Math.max(60, task.durationWorkingDays * 480),
+      maxParallelResources: 2,
+      provenance: "HUMAN_CONFIRMED" as const,
+    }));
+  }
 
   async function reservePort(): Promise<number> {
     return await new Promise((resolve, reject) => {
@@ -106,6 +123,7 @@ describe("project command REST API", () => {
     performanceRepository = new ProjectPerformanceRepository(database);
     workspaceRepository = new ProjectWorkspaceRepository(database);
     scenarioRepository = new ProjectScenarioRepository(database);
+    staffingProposalRepository = new ProjectStaffingProposalRepository(database);
     accessRepository = new ProjectAccessRepository(database);
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,
@@ -151,7 +169,7 @@ describe("project command REST API", () => {
     agentAccessToken = await signAccessToken(
       "progress-agent",
       "earned-signal-api",
-      "project:progress:write project:actuals:write",
+      "project:progress:write project:actuals:write project:staffing:propose",
     );
     const port = await reservePort();
     workerOrigin = `http://127.0.0.1:${port}`;
@@ -159,7 +177,7 @@ describe("project command REST API", () => {
     agentMcpAccessToken = await signAccessToken(
       "progress-agent",
       `${workerOrigin}/mcp`,
-      "project:progress:write project:actuals:write",
+      "project:progress:write project:actuals:write project:staffing:propose",
     );
     multiAudienceAccessToken = await signAccessToken("human-editor", [
       "earned-signal-api",
@@ -227,7 +245,7 @@ describe("project command REST API", () => {
         subject: "progress-agent",
         type: "AGENT",
         displayName: "Integration progress agent",
-        allowedScopes: ["project:progress:write", "project:actuals:write"],
+        allowedScopes: ["project:progress:write", "project:actuals:write", "project:staffing:propose"],
       },
       tenantId: demoProjectRecord.tenant.id,
       tenantRole: "MEMBER",
@@ -257,6 +275,10 @@ describe("project command REST API", () => {
       allowedScopes: [],
     },
     performance: Pick<ProjectPerformanceRepository, "calculate" | "refresh"> = performanceRepository,
+    dispatchStaffingProposal: (
+      environment: Env | undefined,
+      request: { readonly tenantId: string; readonly projectId: string; readonly proposalId: string },
+    ) => Promise<void> = async () => undefined,
   ) {
     return createApiApp({
       authenticate: async () => ({
@@ -271,7 +293,20 @@ describe("project command REST API", () => {
         authorizer: createProjectCommandAuthorizer({ resolve: async () => grant }),
         queryAuthorizer: createProjectQueryAuthorizer({ resolve: async () => grant }),
         scenarioAuthorizer: createScenarioMutationAuthorizer({ resolve: async () => grant }),
+        staffingSubmission: createStaffingProposalSubmissionService({
+          authorizer: createStaffingProposalAuthorizer({ resolve: async () => grant }),
+          workspace: workspaceRepository,
+          proposals: {
+            create: (request) => staffingProposalRepository.create({
+              ...request,
+              input: request.input as unknown as StaffingProposalJson,
+            }),
+          },
+          requestHasher: { hash: staffingProposalHash },
+          dispatch: (request) => dispatchStaffingProposal(undefined, request),
+        }),
         scenarios: scenarioRepository,
+        staffingProposals: staffingProposalRepository,
         performance,
         workspace: workspaceRepository,
         close: async () => undefined,
@@ -339,7 +374,103 @@ describe("project command REST API", () => {
     expect(specification.paths).toHaveProperty(
       "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/publish",
     );
+    expect(specification.paths).toHaveProperty(
+      "/api/tenants/{tenantId}/projects/{projectId}/staffing-proposals",
+    );
     expect(specification.components?.securitySchemes).toHaveProperty("OidcBearer");
+  });
+
+  it("accepts and idempotently replays a strict Staffing Proposal request", async () => {
+    const dispatch = vi.fn(async () => undefined);
+    const app = createTestApp(undefined, performanceRepository, dispatch);
+    const request = {
+      name: "Recover the delivery date",
+      expectedRevision: "1",
+      remainingEffort: await confirmedRemainingEffort(),
+      candidateResources: [],
+      constraints: {
+        version: "staffing-constraints-v1",
+        deadline: "2026-08-14",
+        maxPlannedLaborCostMinor: 5_000_000,
+        maxOvertimeMinutes: 0,
+        maxAssignmentChanges: 5,
+        maxScheduleChanges: 5,
+        maxCandidateResources: 0,
+        requireSkillCoverage: true,
+      },
+      objective: {
+        version: "staffing-objective-v1",
+        priorities: ["MINIMIZE_FINISH", "MINIMIZE_OVERTIME", "MINIMIZE_COST", "MINIMIZE_CHANGE"],
+      },
+    };
+    const url = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/staffing-proposals`;
+    const init = {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "staffing-recovery-1" },
+      body: JSON.stringify(request),
+    };
+
+    const accepted = await app.request(url, init);
+    expect(accepted.status).toBe(202);
+    expect(accepted.headers.get("cache-control")).toBe("no-store");
+    const first = await accepted.json<{ proposal: { id: string; status: string }; replayed: boolean }>();
+    expect(first).toMatchObject({ proposal: { status: "REQUESTED" }, replayed: false });
+    expect(dispatch).toHaveBeenCalledWith(undefined, {
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      proposalId: first.proposal.id,
+    });
+
+    const replay = await app.request(url, init);
+    await expect(replay.json()).resolves.toMatchObject({ proposal: { id: first.proposal.id }, replayed: true });
+    expect(dispatch).toHaveBeenCalledTimes(2);
+
+    const listed = await app.request(url);
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({ proposals: [{ id: first.proposal.id }] });
+    const loaded = await app.request(`${url}/${first.proposal.id}`);
+    expect(loaded.status).toBe(200);
+    await expect(loaded.json()).resolves.toMatchObject({ id: first.proposal.id, status: "REQUESTED" });
+
+    const stored = await staffingProposalRepository.load(
+      demoProjectRecord.tenant.id,
+      demoProjectRecord.project.id,
+      first.proposal.id,
+    );
+    expect(stored?.input).toMatchObject({
+      currentRevision: "1",
+      current: { id: demoProjectRecord.project.id },
+      remainingEffort: request.remainingEffort,
+      candidateResources: [],
+      constraints: request.constraints,
+      objective: request.objective,
+    });
+  });
+
+  it("rejects unknown Staffing Proposal fields and stale or conflicting requests", async () => {
+    const app = createTestApp();
+    const proposal = {
+      name: "Strict request",
+      expectedRevision: "1",
+      remainingEffort: await confirmedRemainingEffort(),
+      candidateResources: [],
+      constraints: { version: "staffing-constraints-v1", deadline: null, maxPlannedLaborCostMinor: null, maxOvertimeMinutes: null, maxAssignmentChanges: null, maxScheduleChanges: null, maxCandidateResources: 0, requireSkillCoverage: true },
+      objective: { version: "staffing-objective-v1", priorities: ["MINIMIZE_FINISH", "MINIMIZE_OVERTIME", "MINIMIZE_COST", "MINIMIZE_CHANGE"] },
+    };
+    const url = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/staffing-proposals`;
+    const post = (body: object, key: string) => app.request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": key },
+      body: JSON.stringify(body),
+    });
+    expect((await post({ ...proposal, unknown: true }, "strict-unknown")).status).toBe(400);
+    expect((await post({ ...proposal, expectedRevision: "99" }, "stale-proposal")).status).toBe(409);
+    expect((await post(proposal, "conflicting-proposal")).status).toBe(202);
+    const conflict = await post({ ...proposal, name: "Different request" }, "conflicting-proposal");
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({
+      error: { code: "STAFFING_PROPOSAL_IDEMPOTENCY_CONFLICT" },
+    });
   });
 
   it("reports command success when only the derived performance refresh fails", async () => {
@@ -947,7 +1078,7 @@ describe("project command REST API", () => {
     await expect(metadata.json()).resolves.toEqual({
       resource,
       authorization_servers: [oidcIssuer],
-      scopes_supported: ["project:progress:write", "project:actuals:write"],
+      scopes_supported: ["project:progress:write", "project:actuals:write", "project:staffing:propose"],
       bearer_methods_supported: ["header"],
       resource_name: "EarnedSignal project commands",
     });
@@ -1079,6 +1210,9 @@ describe("project command REST API", () => {
       await mcp.connect(transport as Transport);
       const tools = await mcp.listTools();
       expect(tools.tools.map((tool) => tool.name)).toEqual([
+        "request_staffing_proposal",
+        "list_staffing_proposals",
+        "get_staffing_proposal",
         "update_project_task",
         "add_project_task",
         "delete_project_task",
@@ -1088,6 +1222,27 @@ describe("project command REST API", () => {
         "replace_task_assignments",
       ]);
       expect(tools.tools.map((tool) => tool.annotations)).toEqual([
+        {
+          title: "Request staffing proposal",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "List staffing proposals",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+        {
+          title: "Get staffing proposal",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
         {
           title: "Update project task",
           readOnlyHint: false,

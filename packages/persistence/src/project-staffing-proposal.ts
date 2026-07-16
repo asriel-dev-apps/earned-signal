@@ -102,7 +102,7 @@ export class StaffingProposalStaleError extends Error {
 export class StaffingProposalTransitionError extends Error {
   constructor(
     readonly currentStatus: StaffingProposal["status"],
-    readonly requestedStatus: StaffingProposal["status"] | "LINKED",
+    readonly requestedStatus: StaffingProposal["status"],
   ) {
     super(`Staffing Proposal cannot transition from ${currentStatus} to ${requestedStatus}`);
     this.name = "StaffingProposalTransitionError";
@@ -123,12 +123,6 @@ export interface CreateStaffingProposalRequest {
   readonly idempotencyKey: string;
   readonly requestHash: string;
   readonly input: StaffingProposalJson;
-  readonly actor: StaffingProposalActor;
-}
-
-export interface LinkStaffingProposalScenarioRequest extends StaffingProposalIdentity {
-  readonly scenarioName: string;
-  readonly changes: readonly ScenarioPlanChange[];
   readonly actor: StaffingProposalActor;
 }
 
@@ -273,43 +267,6 @@ async function appendAudit(
   });
 }
 
-export async function linkStaffingProposalScenario(
-  transaction: StaffingProposalTransaction,
-  request: LinkStaffingProposalScenarioRequest,
-): Promise<StaffingProposal> {
-  assertActor(request.actor);
-  const projectRevision = await lockProject(transaction, request.tenantId, request.projectId);
-  const proposal = await lockProposal(transaction, request);
-  if (proposal.status !== "READY" || proposal.linkedScenarioId !== null) {
-    throw new StaffingProposalTransitionError(proposal.status, "LINKED");
-  }
-  if (proposal.baseProjectRevision !== projectRevision) {
-    throw new StaffingProposalStaleError(proposal.baseProjectRevision, projectRevision);
-  }
-  const scenario = await createScenarioInTransaction(transaction, {
-    tenantId: request.tenantId,
-    projectId: request.projectId,
-    name: request.scenarioName,
-    baseProjectRevision: proposal.baseProjectRevision,
-    changes: request.changes,
-    actor: request.actor,
-  });
-  const [updated] = await transaction.update(staffingProposals).set({
-    linkedScenarioId: scenario.id,
-    updatedAt: sql`now()`,
-  }).where(and(
-    eq(staffingProposals.tenantId, request.tenantId),
-    eq(staffingProposals.projectId, request.projectId),
-    eq(staffingProposals.id, request.proposalId),
-    eq(staffingProposals.status, "READY"),
-  )).returning();
-  if (updated === undefined) throw new StaffingProposalNotFoundError(request.proposalId);
-  await appendAudit(transaction, request, request.actor, "staffing_proposal.scenario_linked", {
-    scenarioId: scenario.id,
-  });
-  return asProposal(transaction, updated);
-}
-
 export class ProjectStaffingProposalRepository {
   constructor(private readonly database: NodePgDatabase<typeof schema>) {}
 
@@ -420,8 +377,89 @@ export class ProjectStaffingProposalRepository {
     });
   }
 
+  async completeReadyWithScenario(request: StaffingProposalIdentity & {
+    readonly algorithmVersion: string;
+    readonly output: StaffingProposalJson;
+    readonly scenarioName: string;
+    readonly changes: readonly ScenarioPlanChange[];
+    readonly actor: StaffingProposalActor;
+  }): Promise<{
+    readonly proposal: StaffingProposal;
+    readonly run: StaffingProposalRun;
+    readonly accepted: boolean;
+  }> {
+    assertActor(request.actor);
+    assertJson(request.output, "Staffing Proposal output");
+    const algorithmVersion = request.algorithmVersion.trim();
+    if (algorithmVersion.length === 0 || algorithmVersion.length > 100) {
+      throw new Error("Staffing Proposal algorithm version must contain 1 to 100 characters");
+    }
+    return this.database.transaction(async (transaction) => {
+      const projectRevision = await lockProject(transaction, request.tenantId, request.projectId);
+      const proposal = await lockProposal(transaction, request);
+      if (TERMINAL_STATUSES.has(proposal.status)) {
+        const run = await loadRun(transaction, proposal);
+        if (run === null) throw new Error(`Terminal Staffing Proposal ${proposal.id} has no Run`);
+        if (proposal.status === "READY" && proposal.linkedScenarioId === null) {
+          throw new Error(`READY Staffing Proposal ${proposal.id} has no linked Scenario`);
+        }
+        return { proposal: await asProposal(transaction, proposal), run, accepted: false } as const;
+      }
+      if (proposal.status !== "REQUESTED" && proposal.status !== "RUNNING") {
+        throw new StaffingProposalTransitionError(proposal.status, "READY");
+      }
+      if (proposal.baseProjectRevision !== projectRevision) {
+        throw new StaffingProposalStaleError(proposal.baseProjectRevision, projectRevision);
+      }
+      const [runRow] = await transaction.insert(staffingProposalRuns).values({
+        tenantId: request.tenantId,
+        projectId: request.projectId,
+        proposalId: request.proposalId,
+        status: "READY",
+        algorithmVersion,
+        output: request.output,
+        actorType: request.actor.type,
+        actorId: request.actor.id,
+      }).returning();
+      if (runRow === undefined) throw new Error("Staffing Proposal Run was not saved");
+      const scenario = await createScenarioInTransaction(transaction, {
+        tenantId: request.tenantId,
+        projectId: request.projectId,
+        name: request.scenarioName,
+        baseProjectRevision: proposal.baseProjectRevision,
+        changes: request.changes,
+        actor: request.actor,
+      });
+      const [updated] = await transaction.update(staffingProposals).set({
+        status: "READY",
+        latestRunId: runRow.id,
+        linkedScenarioId: scenario.id,
+        completedAt: sql`now()`,
+        updatedAt: sql`now()`,
+      }).where(and(
+        eq(staffingProposals.tenantId, request.tenantId),
+        eq(staffingProposals.projectId, request.projectId),
+        eq(staffingProposals.id, request.proposalId),
+        eq(staffingProposals.status, proposal.status),
+      )).returning();
+      if (updated === undefined) throw new StaffingProposalTransitionError(proposal.status, "READY");
+      await appendAudit(transaction, request, request.actor, "staffing_proposal.completed", {
+        status: "READY",
+        runId: runRow.id,
+      });
+      await appendAudit(transaction, request, request.actor, "staffing_proposal.scenario_linked", {
+        scenarioId: scenario.id,
+      });
+      return {
+        proposal: await asProposal(transaction, updated),
+        run: asRun(runRow),
+        accepted: true,
+      } as const;
+    });
+  }
+
   async complete(request: StaffingProposalIdentity & {
-    readonly status: StaffingProposalTerminalStatus;
+    readonly status: Exclude<StaffingProposalTerminalStatus, "READY">;
     readonly algorithmVersion: string;
     readonly output: StaffingProposalJson;
     readonly actor: StaffingProposalActor;
@@ -430,6 +468,9 @@ export class ProjectStaffingProposalRepository {
     readonly run: StaffingProposalRun;
     readonly accepted: boolean;
   }> {
+    if ((request.status as StaffingProposalTerminalStatus) === "READY") {
+      throw new Error("READY Staffing Proposals must use completeReadyWithScenario");
+    }
     assertActor(request.actor);
     assertJson(request.output, "Staffing Proposal output");
     const algorithmVersion = request.algorithmVersion.trim();
@@ -479,11 +520,6 @@ export class ProjectStaffingProposalRepository {
         accepted: true,
       } as const;
     });
-  }
-
-  async linkScenario(request: LinkStaffingProposalScenarioRequest): Promise<StaffingProposal> {
-    return this.database.transaction((transaction) =>
-      linkStaffingProposalScenario(transaction, request));
   }
 
   async listAuditEvents(

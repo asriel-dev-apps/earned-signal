@@ -69,7 +69,7 @@ export const principals = pgTable(
     check("principals_display_name_not_blank", sql`length(trim(${table.displayName})) > 0`),
     check(
       "principals_allowed_scopes_known",
-      sql`${table.allowedScopes} <@ array['project:progress:write', 'project:actuals:write']::text[]`,
+      sql`${table.allowedScopes} <@ array['project:progress:write', 'project:actuals:write', 'project:staffing:propose']::text[]`,
     ),
     check(
       "principals_human_scopes_empty",

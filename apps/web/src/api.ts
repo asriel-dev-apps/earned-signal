@@ -7,6 +7,7 @@ import {
   type ProjectState,
   ProjectNotFoundError,
   type ScenarioMutationAuthorizer,
+  type StaffingProposalSubmissionService,
   type ScenarioPlanCommand,
   ProjectCommandValidationError,
 } from "@earned-signal/application";
@@ -16,8 +17,11 @@ import {
   ScenarioRevisionConflictError,
   ScenarioRunRequiredError,
   ScenarioTerminalError,
+  StaffingProposalNotFoundError,
+  type StaffingProposal,
   type ProjectScenario,
   type ProjectScenarioRepository,
+  type ProjectStaffingProposalRepository,
   type ScenarioJson,
   type ScenarioPlanChange,
 } from "@earned-signal/persistence";
@@ -33,16 +37,23 @@ import {
 } from "./project-command-contract.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
 import { ScenarioResponseSchema, ScenarioResultSchema } from "./scenario-response-contract.js";
+import {
+  StaffingProposalCreateSchema,
+  StaffingProposalResponseSchema,
+  staffingProposalResponse,
+} from "./staffing-contract.js";
 
 export interface ProjectSession {
   readonly service: ProjectCommandService;
   readonly authorizer: ProjectCommandAuthorizer;
   readonly queryAuthorizer: ProjectQueryAuthorizer;
   readonly scenarioAuthorizer: ScenarioMutationAuthorizer;
+  readonly staffingSubmission: StaffingProposalSubmissionService<StaffingProposal>;
   readonly scenarios: Pick<
     ProjectScenarioRepository,
     "list" | "load" | "create" | "updateChanges" | "saveRun" | "discard"
   >;
+  readonly staffingProposals: Pick<ProjectStaffingProposalRepository, "list" | "load">;
   readonly performance: {
     calculate(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
     refresh(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
@@ -90,6 +101,60 @@ const ErrorResponseSchema = z
     }),
   })
   .openapi("ErrorResponse");
+
+const StaffingProposalParamsSchema = z.object({
+  tenantId: UuidSchema.openapi({ param: { name: "tenantId", in: "path" } }),
+  projectId: UuidSchema.openapi({ param: { name: "projectId", in: "path" } }),
+});
+
+const staffingProposalListRoute = createRoute({
+  method: "get",
+  path: "/api/tenants/{tenantId}/projects/{projectId}/staffing-proposals",
+  security: [{ OidcBearer: [] }],
+  request: { params: StaffingProposalParamsSchema },
+  responses: {
+    200: { description: "Project Staffing Proposals", content: { "application/json": { schema: z.object({ proposals: z.array(StaffingProposalResponseSchema) }) } } },
+    401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } },
+    403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+const staffingProposalCreateRoute = createRoute({
+  method: "post",
+  path: "/api/tenants/{tenantId}/projects/{projectId}/staffing-proposals",
+  security: [{ OidcBearer: [] }],
+  request: {
+    params: StaffingProposalParamsSchema,
+    headers: z.object({
+      "Idempotency-Key": z.string().trim().min(1).max(200).openapi({ param: { name: "Idempotency-Key", in: "header" } }),
+    }),
+    body: { required: true, content: { "application/json": { schema: StaffingProposalCreateSchema } } },
+  },
+  responses: {
+    202: { description: "Staffing Proposal accepted", content: { "application/json": { schema: z.object({ proposal: StaffingProposalResponseSchema, replayed: z.boolean() }) } } },
+    400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } },
+    401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } },
+    403: { description: "Proposal denied", content: { "application/json": { schema: ErrorResponseSchema } } },
+    409: { description: "Revision or idempotency conflict", content: { "application/json": { schema: ErrorResponseSchema } } },
+    413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } },
+    422: { description: "Proposal cannot be accepted", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
+
+const staffingProposalLoadRoute = createRoute({
+  method: "get",
+  path: "/api/tenants/{tenantId}/projects/{projectId}/staffing-proposals/{proposalId}",
+  security: [{ OidcBearer: [] }],
+  request: { params: StaffingProposalParamsSchema.extend({
+    proposalId: UuidSchema.openapi({ param: { name: "proposalId", in: "path" } }),
+  }) },
+  responses: {
+    200: { description: "Staffing Proposal", content: { "application/json": { schema: StaffingProposalResponseSchema } } },
+    401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } },
+    403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } },
+    404: { description: "Staffing Proposal not found", content: { "application/json": { schema: ErrorResponseSchema } } },
+  },
+});
 
 const EvmMetricsSchema = z.object({
   bac: z.number(),
@@ -541,6 +606,8 @@ export function createApiApp(dependencies: ApiDependencies) {
   for (const path of [
     "/api/tenants/:tenantId/projects/:projectId/scenarios",
     "/api/tenants/:tenantId/projects/:projectId/scenarios/*",
+    "/api/tenants/:tenantId/projects/:projectId/staffing-proposals",
+    "/api/tenants/:tenantId/projects/:projectId/staffing-proposals/*",
   ]) {
     app.use(path, bodyLimit({
       maxSize: 64 * 1024,
@@ -637,6 +704,56 @@ export function createApiApp(dependencies: ApiDependencies) {
         baseline: workspace.baseline === null ? null : projectStateResponse(workspace.baseline),
         baselineVersion: workspace.baselineVersion === null ? null : { ...workspace.baselineVersion },
       }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(staffingProposalListRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const proposals = await session.staffingProposals.list(tenantId, projectId);
+      return context.json({ proposals: proposals.map(staffingProposalResponse) }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(staffingProposalCreateRoute, async (context) => {
+    const { tenantId, projectId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const headers = context.req.valid("header");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const result = await session.staffingSubmission.submit({
+        identity,
+        tenantId,
+        projectId,
+        ...body,
+        idempotencyKey: headers["Idempotency-Key"],
+      });
+      return context.json({
+        proposal: staffingProposalResponse(result.proposal),
+        replayed: result.replayed,
+      }, 202);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(staffingProposalLoadRoute, async (context) => {
+    const { tenantId, projectId, proposalId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const proposal = await session.staffingProposals.load(tenantId, projectId, proposalId);
+      if (proposal === null) throw new StaffingProposalNotFoundError(proposalId);
+      return context.json(staffingProposalResponse(proposal), 200);
     } finally {
       await session.close();
     }

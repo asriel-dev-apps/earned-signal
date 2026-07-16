@@ -13,7 +13,10 @@ import {
   tenantMemberships,
 } from "./schema.js";
 
-export type AgentScope = "project:progress:write" | "project:actuals:write";
+export type AgentScope =
+  | "project:progress:write"
+  | "project:actuals:write"
+  | "project:staffing:propose";
 export type TenantRole = "OWNER" | "ADMIN" | "MEMBER";
 
 export interface ProjectAccessProvision {

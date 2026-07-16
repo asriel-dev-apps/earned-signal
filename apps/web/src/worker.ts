@@ -3,6 +3,8 @@ import {
   createProjectCommandService,
   createProjectQueryAuthorizer,
   createScenarioMutationAuthorizer,
+  createStaffingProposalAuthorizer,
+  createStaffingProposalSubmissionService,
 } from "@earned-signal/application";
 import {
   createPersistenceDatabase,
@@ -10,7 +12,9 @@ import {
   PostgresProjectCommandUnitOfWork,
   ProjectPerformanceRepository,
   ProjectScenarioRepository,
+  ProjectStaffingProposalRepository,
   ProjectWorkspaceRepository,
+  type StaffingProposalJson,
 } from "@earned-signal/persistence";
 import { Client } from "pg";
 import { createApiApp, type ProjectSession } from "./api.js";
@@ -19,6 +23,8 @@ import {
   createJoseOidcTokenVerifier,
   createOidcBearerAuthenticator,
 } from "./oidc-auth.js";
+import { ensureStaffingWorkflow } from "./workflow-dispatch.js";
+import { staffingProposalHash } from "./staffing-contract.js";
 
 export async function openHyperdriveProjectSession(
   environment: Env,
@@ -27,6 +33,8 @@ export async function openHyperdriveProjectSession(
   await client.connect();
   const database = createPersistenceDatabase(client);
   const grantResolver = new PostgresProjectAccessGrantResolver(database);
+  const staffingProposals = new ProjectStaffingProposalRepository(database);
+  const workspace = new ProjectWorkspaceRepository(database);
   return {
     service: createProjectCommandService(
       new PostgresProjectCommandUnitOfWork(database),
@@ -34,9 +42,22 @@ export async function openHyperdriveProjectSession(
     authorizer: createProjectCommandAuthorizer(grantResolver),
     queryAuthorizer: createProjectQueryAuthorizer(grantResolver),
     scenarioAuthorizer: createScenarioMutationAuthorizer(grantResolver),
+    staffingSubmission: createStaffingProposalSubmissionService({
+      authorizer: createStaffingProposalAuthorizer(grantResolver),
+      workspace,
+      proposals: {
+        create: (request) => staffingProposals.create({
+          ...request,
+          input: request.input as unknown as StaffingProposalJson,
+        }),
+      },
+      requestHasher: { hash: staffingProposalHash },
+      dispatch: (request) => ensureStaffingWorkflow(environment.STAFFING_WORKFLOW, request),
+    }),
     scenarios: new ProjectScenarioRepository(database),
+    staffingProposals,
     performance: new ProjectPerformanceRepository(database),
-    workspace: new ProjectWorkspaceRepository(database),
+    workspace,
     // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.
     close: async () => undefined,
   };

@@ -2,10 +2,10 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { calculateScenario, type ScenarioPlanCommand } from "@earned-signal/application";
+import { calculateScenario, type ScenarioPlanCommand, type StaffingProposalResult } from "@earned-signal/application";
 import { App } from "../src/App.js";
 import { baselineProject, initialProject } from "../src/demo-project.js";
-import { ProjectApiError, type ProjectApiClient, type ScenarioDocument, type WorkspaceDocument } from "../src/project-api-client.js";
+import { ProjectApiError, type ProjectApiClient, type ScenarioDocument, type StaffingProposalDocument, type WorkspaceDocument } from "../src/project-api-client.js";
 
 const scenarioTask = initialProject.tasks[0]!;
 const scenarioChanges: readonly ScenarioPlanCommand[] = [{
@@ -42,6 +42,54 @@ function completedRun(changes: readonly ScenarioPlanCommand[] = scenarioChanges)
   };
 }
 
+function staffingSolution(): StaffingProposalResult {
+  return {
+    status: "OPTIMAL",
+    problem: {
+      version: "staffing-problem-v1",
+      sourceProjectRevision: "7",
+      current: initialProject,
+      tasks: [],
+      candidateResources: [],
+      constraints: {
+        version: "staffing-constraints-v1", deadline: null, maxPlannedLaborCostMinor: null,
+        maxOvertimeMinutes: 0, maxAssignmentChanges: 1, maxScheduleChanges: 1,
+        maxCandidateResources: 0, requireSkillCoverage: true,
+      },
+      objective: { version: "staffing-objective-v1", priorities: ["MINIMIZE_FINISH", "MINIMIZE_OVERTIME", "MINIMIZE_COST", "MINIMIZE_CHANGE"] },
+    },
+    changes: scenarioChanges,
+    plan: { ...initialProject, tasks: initialProject.tasks.map((task) => task.id === scenarioTask.id ? { ...task, durationWorkingDays: task.durationWorkingDays + 2 } : task) },
+    metrics: {
+      finish: "2026-09-01", plannedLaborCostMinor: 4_200_000, overtimeMinutes: 0,
+      assignmentChanges: 0, scheduleChanges: 1, candidateResources: 0, skillGapTaskIds: [],
+      capacity: { resources: [], overallocatedResourceIds: [], skillGapActivityIds: [] },
+    },
+    explanation: { summary: "Staggering work protects the deadline.", details: ["No verified overtime is required."] },
+    diagnostics: [],
+    solverMetadata: {
+      solverVersion: "9.14.0", deterministicSeed: 20260716, workers: 1,
+      timeLimitSecondsPerStage: 5, deterministicTimeLimitPerStage: 1, objectives: [],
+    },
+  };
+}
+
+function staffingDocument(overrides: Partial<StaffingProposalDocument> = {}): StaffingProposalDocument {
+  return {
+    id: "00000000-0000-4000-8000-000000000066",
+    name: "Recovery staffing",
+    status: "REQUESTED",
+    baseProjectRevision: "7",
+    linkedScenarioId: null,
+    latestRun: null,
+    createdAt: "2026-07-16T00:00:00.000Z",
+    updatedAt: "2026-07-16T00:00:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    ...overrides,
+  };
+}
+
 function workspace(revision: string): WorkspaceDocument {
   return {
     revision,
@@ -67,13 +115,79 @@ function client(overrides: Partial<ProjectApiClient> = {}): ProjectApiClient {
     runScenario: vi.fn(async () => { throw new Error("not used"); }),
     discardScenario: vi.fn(async () => { throw new Error("not used"); }),
     publishScenario: vi.fn(async () => { throw new Error("not used"); }),
+    staffingProposals: vi.fn(async () => []),
+    loadStaffingProposal: vi.fn(async () => { throw new Error("not used"); }),
+    requestStaffingProposal: vi.fn(async () => { throw new Error("not used"); }),
     ...overrides,
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.location.hash = "";
+});
 
 describe("persisted project workspace", () => {
+  it("does not pretend that Staffing optimization is available in demo mode", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Staffing Proposals" }));
+
+    expect(await screen.findByText("Staffing Proposals require a connected project")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Request proposal" })).toBeNull();
+  });
+
+  it("requires explicit human confirmation for every remaining-effort suggestion", async () => {
+    const requestStaffingProposal = vi.fn<ProjectApiClient["requestStaffingProposal"]>(async () => ({
+      proposal: staffingDocument({ status: "REQUESTED" }), replayed: false,
+    }));
+    const api = client({ requestStaffingProposal });
+    render(<App client={api} />);
+    expect(await screen.findByText("Saved · revision 7")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Staffing Proposals" }));
+
+    const submit = await screen.findByRole("button", { name: "Request proposal" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    const confirmations = screen.getAllByRole("checkbox", { name: /Confirm .* remaining effort/ });
+    expect(confirmations.length).toBe(initialProject.tasks.filter((task) => task.progressPercent < 100).length);
+    confirmations.forEach((checkbox) => fireEvent.click(checkbox));
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(requestStaffingProposal).toHaveBeenCalledOnce());
+    expect(requestStaffingProposal.mock.calls[0]?.[0]).toMatchObject({
+      expectedRevision: "7",
+      remainingEffort: expect.arrayContaining([expect.objectContaining({
+        provenance: "HUMAN_CONFIRMED",
+        maxParallelResources: 2,
+      })]),
+    });
+  });
+
+  it("separates verified solver facts from AI prose and opens the exact linked Scenario", async () => {
+    const linked = scenarioDocument({ id: "00000000-0000-4000-8000-000000000077", name: "Linked staffing Scenario" });
+    const ready = staffingDocument({
+      status: "READY",
+      linkedScenarioId: linked.id,
+      latestRun: {
+        id: "00000000-0000-4000-8000-000000000088",
+        status: "READY",
+        algorithmVersion: "cp-sat-v1",
+        output: staffingSolution(),
+        createdAt: "2026-07-16T00:00:00.000Z",
+      },
+    });
+    const api = client({ staffingProposals: vi.fn(async () => [ready]), scenarios: vi.fn(async () => [scenarioDocument(), linked]) });
+    render(<App client={api} />);
+    expect(await screen.findByText("Saved · revision 7")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Staffing Proposals" }));
+
+    expect(await screen.findByText("Verified solver facts")).toBeTruthy();
+    expect(screen.getByText(/AI explanation · narrative only/i)).toBeTruthy();
+    expect(screen.getByText("Exact Scenario command diff")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review linked Scenario" }));
+
+    expect(await screen.findByText("Linked staffing Scenario")).toBeTruthy();
+  });
   it("shows an editable isolated Scenario preview without representing it as Current", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Scenarios" }));

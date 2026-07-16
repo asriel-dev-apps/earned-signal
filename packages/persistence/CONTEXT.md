@@ -16,7 +16,9 @@ PostgresProjectCommandUnitOfWork locks the tenant-scoped Project row and commits
 
 Scenarios are tenant/project-scoped plan-change branches pinned to a base Project revision. Draft edits increment only the Scenario revision and invalidate its latest Run; Scenario Runs and Scenario Audit Events are append-only. Published and discarded Scenarios are terminal. Scenario calculation and lifecycle operations never mutate Current or its Project revision; publishing into Current is a separate atomic Application use case.
 
-Staffing Proposals are tenant/project-scoped, idempotent optimization requests pinned to a base Project revision. Their JSON input is immutable, state transitions are one-way from requested through running to a first terminal result, and Proposal Runs and Proposal Audit Events are append-only. A ready Proposal can create and link one Scenario in the same transaction only while its base Project revision is current; Current and Baseline remain unchanged until the Scenario is published through the normal human approval boundary.
+Staffing Proposals are tenant/project-scoped, idempotent optimization requests pinned to a base Project revision. Their immutable JSON input contains the Current snapshot, human-confirmed effort, candidate Resources, constraint and objective contract versions, and fixed objective order. State transitions are one-way from requested through running to the first terminal result. A solved Proposal Run retains the Application result, including verified metrics and changes when feasible, diagnostics, explanation when feasible, and solver metadata; a host-failure Run instead records a stable failure code and message. Proposal Runs and Proposal Audit Events are append-only.
+
+READY completion uses one PostgreSQL transaction that locks the Project and Proposal, confirms the base Project revision is still current, appends the READY Proposal Run, creates the DRAFT Scenario with the exact verified changes, links it, and appends Proposal audit events. A generic terminal write is forbidden from producing READY, so a visible READY Proposal always has a linked Scenario. The Workflow persists the Scenario's deterministic calculation Run in a later retryable step; that later Run is not part of the READY-link transaction. Current and Baseline remain unchanged until the Scenario is published through the normal human approval boundary.
 
 ## Language
 
@@ -27,3 +29,4 @@ Staffing Proposals are tenant/project-scoped, idempotent optimization requests p
 - **Stored performance**: a reproducible derived cache of Period Buckets and EVM Snapshots; progress, worklogs, costs, and the approved Baseline remain authoritative.
 - **Scenario**: a versioned, isolated set of prospective plan changes based on one Project revision.
 - **Scenario Run**: an immutable calculation result tied to exact Project and Scenario revisions, input, algorithm version, and input hash.
+- **Staffing Proposal Run**: the immutable terminal result of one Proposal, including its algorithm version and JSON output. READY is valid only with a Scenario created and linked in the same transaction.

@@ -6,6 +6,7 @@ import {
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
+  StaffingProposalValidationError,
 } from "@earned-signal/application";
 import {
   ScenarioNotFoundError,
@@ -13,6 +14,9 @@ import {
   ScenarioRunRequiredError,
   ScenarioStaleError,
   ScenarioTerminalError,
+  StaffingProposalIdempotencyConflictError,
+  StaffingProposalNotFoundError,
+  StaffingProposalStaleError,
 } from "@earned-signal/persistence";
 
 export interface ProjectCommandErrorBody {
@@ -47,6 +51,23 @@ export function resolveProjectCommandError(
   }
   if (error instanceof ScenarioNotFoundError) {
     return { status: 404, error: { code: "SCENARIO_NOT_FOUND", message: error.message } };
+  }
+  if (error instanceof StaffingProposalNotFoundError) {
+    return { status: 404, error: { code: "STAFFING_PROPOSAL_NOT_FOUND", message: error.message } };
+  }
+  if (error instanceof StaffingProposalIdempotencyConflictError) {
+    return { status: 409, error: { code: "STAFFING_PROPOSAL_IDEMPOTENCY_CONFLICT", message: error.message } };
+  }
+  if (error instanceof StaffingProposalStaleError) {
+    return {
+      status: 409,
+      error: {
+        code: "STAFFING_PROPOSAL_STALE",
+        message: error.message,
+        expectedRevision: error.baseProjectRevision.toString(),
+        actualRevision: error.currentProjectRevision.toString(),
+      },
+    };
   }
   if (error instanceof ScenarioRevisionConflictError) {
     return {
@@ -98,6 +119,9 @@ export function resolveProjectCommandError(
     error instanceof ActualValueDecreaseError
   ) {
     return { status: 422, error: { code: "COMMAND_INVALID", message: error.message } };
+  }
+  if (error instanceof StaffingProposalValidationError) {
+    return { status: 422, error: { code: error.code, message: error.message } };
   }
   return null;
 }

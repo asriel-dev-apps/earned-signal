@@ -24,9 +24,10 @@ import { baselineProject, initialProject } from "./demo-project";
 import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 import { ScenarioWorkspace } from "./ScenarioWorkspace";
+import { StaffingWorkspace } from "./StaffingWorkspace";
 
 type ProjectMode = "current" | "baseline";
-type WorkspaceView = "wbs" | "performance" | "team" | "scenarios";
+type WorkspaceView = "wbs" | "performance" | "team" | "staffing" | "scenarios";
 
 interface TaskRow extends ProjectTask {
   readonly actualHours: number;
@@ -106,11 +107,12 @@ function formatDate(value: string): string {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
-function Icon({ name }: { readonly name: "grid" | "pulse" | "users" | "layers" | "settings" }) {
+function Icon({ name }: { readonly name: "grid" | "pulse" | "users" | "staffing" | "layers" | "settings" }) {
   const paths = {
     grid: "M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z",
     pulse: "M3 12h4l2-6 4 12 2-6h6",
     users: "M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7.5 4a4 4 0 0 1 4 4v2m-2-10a4 4 0 0 0 0-8",
+    staffing: "M4 18h16M6 14l3-3 3 2 5-6 2 2M6 6h4v4H6V6Z",
     layers: "m4 9 8-5 8 5-8 5-8-5Zm0 5 8 5 8-5",
     settings: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM19 12a7 7 0 0 0-.08-1l2-1.55-2-3.46-2.46 1A7.2 7.2 0 0 0 14.72 6L14.4 3h-4.8l-.32 3a7.2 7.2 0 0 0-1.74 1L5.08 6l-2 3.46L5.08 11A7 7 0 0 0 5 12c0 .34.03.67.08 1l-2 1.55 2 3.46 2.46-1a7.2 7.2 0 0 0 1.74 1l.32 3h4.8l.32-3a7.2 7.2 0 0 0 1.74-1l2.46 1 2-3.46-2-1.55c.05-.33.08-.66.08-1Z",
   } as const;
@@ -600,8 +602,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const saving = useRef(false);
   const [mode, setMode] = useState<ProjectMode>("current");
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>(() =>
-    window.location.hash === "#scenarios" ? "scenarios" : "wbs",
+    window.location.hash.startsWith("#scenarios") ? "scenarios" : window.location.hash === "#staffing" ? "staffing" : "wbs",
   );
+  const [initialScenarioId, setInitialScenarioId] = useState<string | null>(() => window.location.hash.startsWith("#scenarios/") ? window.location.hash.slice("#scenarios/".length) : null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [notice, setNotice] = useState<string | null>(null);
   const referenceBaseline = approvedBaseline ?? currentProject;
@@ -965,6 +968,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             <button className={`nav-button ${workspaceView === "scenarios" ? "nav-button--active" : ""}`} aria-label="Scenarios" onClick={() => { setMode("current"); setWorkspaceView("scenarios"); }}>
               <Icon name="layers" />
             </button>
+            <button className={`nav-button ${workspaceView === "staffing" ? "nav-button--active" : ""}`} aria-label="Staffing Proposals" onClick={() => { setMode("current"); setWorkspaceView("staffing"); }}>
+              <Icon name="staffing" />
+            </button>
           </nav>
           <button className="nav-button nav-settings" aria-label="Settings">
             <Icon name="settings" />
@@ -998,11 +1004,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             <div className="page-heading">
               <div>
                 <p className="breadcrumb">PROJECTS / CUSTOMER PORTAL LAUNCH</p>
-                <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : workspaceView === "team" ? "Team workload" : "Scenario planning"}</h1>
+                <h1>{workspaceView === "wbs" ? "Project control" : workspaceView === "performance" ? "Performance" : workspaceView === "team" ? "Team workload" : workspaceView === "staffing" ? "Staffing optimization" : "Scenario planning"}</h1>
               </div>
               <div className="heading-actions">
               <button className="publish-button" onClick={() => setShowBaselineDialog(true)} disabled={client === undefined || saveState !== "saved"}>Publish baseline</button>
-              <div className={`mode-switch ${workspaceView === "performance" ? "mode-switch--hidden" : ""}`} aria-label="Plan view">
+              <div className={`mode-switch ${workspaceView === "performance" || workspaceView === "staffing" ? "mode-switch--hidden" : ""}`} aria-label="Plan view">
                 <button
                   className={mode === "current" ? "active" : ""}
                   onClick={() => setMode("current")}
@@ -1054,7 +1060,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 {saveState === "error" ? <button className="primary-button" onClick={retryWorkspace}>Retry loading</button> : null}
               </section>
             ) : workspaceView === "scenarios" ? (
-              <ScenarioWorkspace project={currentProject} baseline={referenceBaseline} analysis={currentAnalysis} projectRevision={revision} client={client} onPublished={reloadAfterScenarioPublished} />
+              <ScenarioWorkspace project={currentProject} baseline={referenceBaseline} analysis={currentAnalysis} projectRevision={revision} client={client} onPublished={reloadAfterScenarioPublished} initialScenarioId={initialScenarioId} />
+            ) : workspaceView === "staffing" ? (
+              <StaffingWorkspace project={currentProject} projectRevision={revision} suggestedDeadline={currentAnalysis.projectFinish} client={client} onOpenScenario={(scenarioId) => { setInitialScenarioId(scenarioId); window.location.hash = `scenarios/${scenarioId}`; setWorkspaceView("scenarios"); }} />
             ) : workspaceView === "performance" ? (
               <PerformanceWorkspace project={currentProject} analysis={currentAnalysis} />
             ) : workspaceView === "team" ? (

@@ -1,4 +1,8 @@
-import type { AuthenticatedIdentity, ProjectCommand } from "@earned-signal/application";
+import {
+  type AuthenticatedIdentity,
+  type ProjectCommand,
+} from "@earned-signal/application";
+import { StaffingProposalNotFoundError } from "@earned-signal/persistence";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpHandler } from "agents/mcp";
 import { z } from "zod";
@@ -15,8 +19,17 @@ import {
 import type { ApiDependencies, ProjectSession } from "./api.js";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
+import {
+  StaffingProposalCreateSchema,
+  StaffingProposalResponseSchema,
+  staffingProposalResponse,
+} from "./staffing-contract.js";
 
-const MCP_SCOPES = ["project:progress:write", "project:actuals:write"] as const;
+const MCP_SCOPES = [
+  "project:progress:write",
+  "project:actuals:write",
+  "project:staffing:propose",
+] as const;
 const MAX_MCP_BODY_BYTES = 64 * 1024;
 
 const ProjectCommandContextShape = {
@@ -108,12 +121,129 @@ async function executeCommand(
   }
 }
 
+function mcpToolError(error: unknown) {
+  const resolution = resolveProjectCommandError(error);
+  if (resolution === null) {
+    console.error(JSON.stringify({
+      message: "Unhandled MCP tool error",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  return {
+    isError: true as const,
+    content: [{ type: "text" as const, text: JSON.stringify({
+      error: resolution?.error ?? { code: "INTERNAL_ERROR", message: "Internal server error" },
+    }) }],
+  };
+}
+
+async function requestStaffingProposal(
+  dependencies: ApiDependencies,
+  environment: Env,
+  identity: AuthenticatedIdentity,
+  input: z.infer<typeof StaffingProposalCreateSchema> & {
+    readonly tenantId: string;
+    readonly projectId: string;
+    readonly idempotencyKey: string;
+  },
+) {
+  let session: ProjectSession | undefined;
+  try {
+    const body = StaffingProposalCreateSchema.parse({
+      name: input.name,
+      expectedRevision: input.expectedRevision,
+      remainingEffort: input.remainingEffort,
+      candidateResources: input.candidateResources,
+      constraints: input.constraints,
+      objective: input.objective,
+    });
+    session = await dependencies.openProjectSession(environment);
+    const result = await session.staffingSubmission.submit({
+      identity,
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      ...body,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const output = { proposal: staffingProposalResponse(result.proposal), replayed: result.replayed };
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(output) }],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return mcpToolError(error);
+  } finally {
+    await session?.close();
+  }
+}
+
+async function readStaffingProposals(
+  dependencies: ApiDependencies,
+  environment: Env,
+  identity: AuthenticatedIdentity,
+  input: { readonly tenantId: string; readonly projectId: string; readonly proposalId?: string },
+) {
+  let session: ProjectSession | undefined;
+  try {
+    session = await dependencies.openProjectSession(environment);
+    await session.queryAuthorizer.authorize({ identity, tenantId: input.tenantId, projectId: input.projectId });
+    const output = input.proposalId === undefined
+      ? { proposals: (await session.staffingProposals.list(input.tenantId, input.projectId)).map(staffingProposalResponse) }
+      : staffingProposalResponse(
+        (await session.staffingProposals.load(input.tenantId, input.projectId, input.proposalId))
+          ?? (() => { throw new StaffingProposalNotFoundError(input.proposalId!); })(),
+      );
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(output) }],
+      structuredContent: output,
+    };
+  } catch (error) {
+    return mcpToolError(error);
+  } finally {
+    await session?.close();
+  }
+}
+
 function createServer(
   dependencies: ApiDependencies,
   environment: Env,
   identity: AuthenticatedIdentity,
 ): McpServer {
   const server = new McpServer({ name: "EarnedSignal project commands", version: "0.1.0" });
+  server.registerTool(
+    "request_staffing_proposal",
+    {
+      description: "Request a constraint-based staffing proposal. The result remains a draft Scenario until a human publishes it.",
+      annotations: { title: "Request staffing proposal", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        tenantId: UuidSchema,
+        projectId: UuidSchema,
+        idempotencyKey: z.string().trim().min(1).max(200),
+        ...StaffingProposalCreateSchema.shape,
+      },
+    },
+    async (input) => requestStaffingProposal(dependencies, environment, identity, input),
+  );
+  server.registerTool(
+    "list_staffing_proposals",
+    {
+      description: "List staffing proposals for one project.",
+      annotations: { title: "List staffing proposals", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { tenantId: UuidSchema, projectId: UuidSchema },
+      outputSchema: { proposals: z.array(StaffingProposalResponseSchema) },
+    },
+    async (input) => readStaffingProposals(dependencies, environment, identity, input),
+  );
+  server.registerTool(
+    "get_staffing_proposal",
+    {
+      description: "Get one staffing proposal, including its solver result and linked draft Scenario.",
+      annotations: { title: "Get staffing proposal", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { tenantId: UuidSchema, projectId: UuidSchema, proposalId: UuidSchema },
+      outputSchema: StaffingProposalResponseSchema.shape,
+    },
+    async (input) => readStaffingProposals(dependencies, environment, identity, input),
+  );
   server.registerTool(
     "update_project_task",
     {

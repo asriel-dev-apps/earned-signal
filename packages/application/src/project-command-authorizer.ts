@@ -42,6 +42,10 @@ export interface ScenarioMutationAuthorizer {
   authorize(request: ProjectAccessGrantRequest): Promise<AuditActor>;
 }
 
+export interface StaffingProposalAuthorizer {
+  authorize(request: ProjectAccessGrantRequest): Promise<AuditActor>;
+}
+
 export class ProjectAccessDeniedError extends Error {
   constructor() {
     super("Project command is not permitted");
@@ -137,6 +141,29 @@ export function createScenarioMutationAuthorizer(
         throw new AgentPlanApprovalRequiredError();
       }
       return { type: "HUMAN", id: grant.principalId };
+    },
+  };
+}
+
+export function createStaffingProposalAuthorizer(
+  resolver: ProjectAccessGrantResolver,
+): StaffingProposalAuthorizer {
+  return {
+    async authorize(request) {
+      const grant = await resolver.resolve(request);
+      if (
+        grant === null ||
+        (grant.projectRole !== "OWNER" && grant.projectRole !== "EDITOR")
+      ) {
+        throw new ProjectAccessDeniedError();
+      }
+      if (grant.principalType === "AGENT") {
+        const scope = "project:staffing:propose";
+        if (!grant.allowedScopes.includes(scope) || !request.identity.scopes.includes(scope)) {
+          throw new ProjectAccessDeniedError();
+        }
+      }
+      return { type: grant.principalType, id: grant.principalId };
     },
   };
 }

@@ -19,5 +19,13 @@
       "binding": "HYPERDRIVE",
       "id": "00000000000000000000000000000000"
     }
+  ],
+  "workflows": [
+    {
+      "binding": "STAFFING_WORKFLOW",
+      "name": "earned-signal-staffing-proposals",
+      "class_name": "StaffingProposalWorkflow",
+      "script_name": "earned-signal-optimizer"
+    }
   ]
 }

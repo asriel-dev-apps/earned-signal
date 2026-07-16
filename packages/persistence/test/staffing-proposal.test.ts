@@ -4,9 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createPersistenceDatabase,
   demoProjectRecord,
-  linkStaffingProposalScenario,
   migratePersistenceDatabase,
   ProjectRepository,
+  ProjectScenarioRepository,
   ProjectStaffingProposalRepository,
   StaffingProposalIdempotencyConflictError,
   StaffingProposalStaleError,
@@ -148,13 +148,14 @@ describe("ProjectStaffingProposalRepository", () => {
     expect(running).toMatchObject({ status: "RUNNING" });
     expect(running.startedAt).not.toBeNull();
 
-    const first = await repository.complete({
+    const first = await repository.completeReadyWithScenario({
       tenantId: created.tenantId,
       projectId: created.projectId,
       proposalId: created.id,
-      status: "READY",
       algorithmVersion: "cp-sat-v1",
       output: { assignments: [{ taskId: "task-1", resourceId: "resource-1" }] },
+      scenarioName: "Recover delivery candidate",
+      changes: [],
       actor: { type: "SYSTEM", id: "staffing-workflow" },
     });
     expect(first).toMatchObject({
@@ -184,57 +185,140 @@ describe("ProjectStaffingProposalRepository", () => {
         { eventType: "staffing_proposal.created" },
         { eventType: "staffing_proposal.running" },
         { eventType: "staffing_proposal.completed", payload: { status: "READY", runId: first.run.id } },
+        { eventType: "staffing_proposal.scenario_linked", payload: { scenarioId: first.proposal.linkedScenarioId } },
       ]);
   });
 
-  it("creates and links a Scenario atomically, and rolls the whole link back on failure", async () => {
-    const completed = await repository.complete({
-      tenantId: demoProjectRecord.tenant.id,
-      projectId: demoProjectRecord.project.id,
-      proposalId: (await createProposal()).proposal.id,
-      status: "READY",
+  it("completes a READY Proposal with its same-revision DRAFT Scenario already linked", async () => {
+    const created = (await createProposal()).proposal;
+    const request = {
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      algorithmVersion: "cp-sat-v1",
+      output: { changes: [] },
+      scenarioName: "Approved staffing candidate",
+      changes: [] as const,
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    } as const;
+
+    const completed = await repository.completeReadyWithScenario(request);
+
+    expect(completed).toMatchObject({
+      accepted: true,
+      proposal: { status: "READY", linkedScenarioId: expect.any(String) },
+      run: { status: "READY", algorithmVersion: "cp-sat-v1" },
+    });
+    const scenario = await new ProjectScenarioRepository(database).load(
+      created.tenantId,
+      created.projectId,
+      completed.proposal.linkedScenarioId!,
+    );
+    expect(scenario).toMatchObject({
+      status: "DRAFT",
+      baseProjectRevision: created.baseProjectRevision,
+      changes: [],
+    });
+    await expect(repository.completeReadyWithScenario(request)).resolves.toEqual({
+      proposal: completed.proposal,
+      run: completed.run,
+      accepted: false,
+    });
+    await expect(new ProjectScenarioRepository(database).list(created.tenantId, created.projectId))
+      .resolves.toEqual([scenario]);
+  });
+
+  it("does not expose READY completion without an atomically linked Scenario", async () => {
+    const created = (await createProposal()).proposal;
+
+    await expect(repository.complete({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      status: "READY" as never,
       algorithmVersion: "cp-sat-v1",
       output: { changes: [] },
       actor: { type: "SYSTEM", id: "staffing-workflow" },
-    });
-    const request = {
-      tenantId: completed.proposal.tenantId,
-      projectId: completed.proposal.projectId,
-      proposalId: completed.proposal.id,
-      scenarioName: "Approved staffing candidate",
-      changes: [] as const,
-      actor,
-    };
+    })).rejects.toThrow("completeReadyWithScenario");
+    await expect(repository.load(created.tenantId, created.projectId, created.id))
+      .resolves.toMatchObject({ status: "REQUESTED", latestRun: null, linkedScenarioId: null });
+  });
 
-    await expect(database.transaction(async (transaction) => {
-      await linkStaffingProposalScenario(transaction, request);
-      throw new Error("abort approval handoff");
-    })).rejects.toThrow("abort approval handoff");
+  it("rolls back the READY Run when its Scenario cannot be created", async () => {
+    const created = (await createProposal()).proposal;
+
+    await expect(repository.completeReadyWithScenario({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      algorithmVersion: "cp-sat-v1",
+      output: { changes: [] },
+      scenarioName: " ",
+      changes: [],
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    })).rejects.toThrow("Scenario name");
     await expect(repository.load(
-      request.tenantId,
-      request.projectId,
-      request.proposalId,
-    )).resolves.toMatchObject({ linkedScenarioId: null });
-    const rolledBackScenarios = await client.query<{ count: string }>(
-      "select count(*)::text as count from scenarios where tenant_id = $1 and project_id = $2",
-      [request.tenantId, request.projectId],
-    );
-    expect(rolledBackScenarios.rows).toEqual([{ count: "0" }]);
+      created.tenantId,
+      created.projectId,
+      created.id,
+    )).resolves.toMatchObject({ status: "REQUESTED", latestRun: null, linkedScenarioId: null });
+    await expect(new ProjectScenarioRepository(database).list(created.tenantId, created.projectId))
+      .resolves.toEqual([]);
     await expect(repository.listAuditEvents(
-      request.tenantId,
-      request.projectId,
-      request.proposalId,
-    )).resolves.not.toContainEqual(expect.objectContaining({
-      eventType: "staffing_proposal.scenario_linked",
-    }));
+      created.tenantId,
+      created.projectId,
+      created.id,
+    )).resolves.toMatchObject([{ eventType: "staffing_proposal.created" }]);
+  });
 
-    const linked = await repository.linkScenario(request);
-    expect(linked.linkedScenarioId).not.toBeNull();
-    const scenarioRows = await client.query<{ base_project_revision: string }>(
-      "select base_project_revision::text from scenarios where id = $1",
-      [linked.linkedScenarioId],
-    );
-    expect(scenarioRows.rows).toEqual([{ base_project_revision: "1" }]);
+  it("can terminalize a RUNNING Proposal after READY persistence detects a stale Project", async () => {
+    const created = (await createProposal()).proposal;
+    await repository.markRunning({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    });
+    await client.query("update projects set revision = 2 where id = $1", [created.projectId]);
+
+    await expect(repository.completeReadyWithScenario({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      algorithmVersion: "cp-sat-v1",
+      output: { changes: [] },
+      scenarioName: "Stale candidate",
+      changes: [],
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    })).rejects.toBeInstanceOf(StaffingProposalStaleError);
+
+    const failed = await repository.complete({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      status: "FAILED",
+      algorithmVersion: "cp-sat-v1",
+      output: {
+        code: "PROJECT_REVISION_STALE",
+        message: "Staffing Proposal became stale before its result was saved",
+      },
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    });
+
+    expect(failed).toMatchObject({
+      accepted: true,
+      proposal: { status: "FAILED", linkedScenarioId: null },
+      run: { status: "FAILED", output: { code: "PROJECT_REVISION_STALE" } },
+    });
+    await expect(repository.complete({
+      tenantId: created.tenantId,
+      projectId: created.projectId,
+      proposalId: created.id,
+      status: "FAILED",
+      algorithmVersion: "cp-sat-v1",
+      output: { code: "PROJECT_REVISION_STALE" },
+      actor: { type: "SYSTEM", id: "staffing-workflow" },
+    })).resolves.toEqual({ proposal: failed.proposal, run: failed.run, accepted: false });
   });
 
   it("keeps proposal inputs, runs, and audit events immutable in PostgreSQL", async () => {

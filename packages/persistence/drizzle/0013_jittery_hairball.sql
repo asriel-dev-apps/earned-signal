@@ -1,0 +1,2 @@
+ALTER TABLE "principals" DROP CONSTRAINT "principals_allowed_scopes_known";--> statement-breakpoint
+ALTER TABLE "principals" ADD CONSTRAINT "principals_allowed_scopes_known" CHECK ("principals"."allowed_scopes" <@ array['project:progress:write', 'project:actuals:write', 'project:staffing:propose']::text[]);
