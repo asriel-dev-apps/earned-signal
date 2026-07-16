@@ -1,11 +1,14 @@
 import {
   calculateScenario,
+  toForecastProblemV1,
+  ForecastValidationError,
   type AuthenticatedIdentity,
   type ProjectCommandAuthorizer,
   type ProjectCommandService,
   type ProjectQueryAuthorizer,
   type ProjectState,
   ProjectNotFoundError,
+  ProjectVersionConflictError,
   type ScenarioMutationAuthorizer,
   type StaffingProposalSubmissionService,
   type ScenarioPlanCommand,
@@ -17,11 +20,16 @@ import {
   ScenarioRevisionConflictError,
   ScenarioRunRequiredError,
   ScenarioTerminalError,
+  ForecastRunIdempotencyConflictError,
+  ForecastRunNotFoundError,
+  ForecastRunStaleError,
   StaffingProposalNotFoundError,
   type StaffingProposal,
   type ProjectScenario,
   type ProjectScenarioRepository,
   type ProjectStaffingProposalRepository,
+  type ProjectForecastRunRepository,
+  type ForecastRun,
   type ScenarioJson,
   type ScenarioPlanChange,
 } from "@earned-signal/persistence";
@@ -42,6 +50,7 @@ import {
   StaffingProposalResponseSchema,
   staffingProposalResponse,
 } from "./staffing-contract.js";
+import { ForecastResultSchema, ForecastRunCreateSchema } from "./forecast-contract.js";
 
 export interface ProjectSession {
   readonly service: ProjectCommandService;
@@ -54,6 +63,7 @@ export interface ProjectSession {
     "list" | "load" | "create" | "updateChanges" | "saveRun" | "discard"
   >;
   readonly staffingProposals: Pick<ProjectStaffingProposalRepository, "list" | "load">;
+  readonly forecastRuns: Pick<ProjectForecastRunRepository, "create" | "list" | "load">;
   readonly performance: {
     calculate(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
     refresh(tenantId: string, projectId: string): Promise<readonly EvmSnapshot[]>;
@@ -291,6 +301,40 @@ const ScenarioPublishSchema = z.object({
   expectedScenarioRevision: RevisionSchema,
 });
 
+const ForecastRunParamsSchema = ScenarioIdentityParamsSchema;
+const ForecastRunIdentityParamsSchema = ForecastRunParamsSchema.extend({
+  forecastRunId: UuidSchema.openapi({ param: { name: "forecastRunId", in: "path" } }),
+});
+const ForecastRunFailureSchema = z.object({ code: z.string(), message: z.string() }).nullable();
+const ForecastRunResponseSchema = z.object({
+  id: UuidSchema,
+  status: z.enum(["REQUESTED", "RUNNING", "READY", "FAILED"]),
+  sourceProjectRevision: RevisionSchema,
+  sourceScenarioRevision: RevisionSchema,
+  targetDate: z.iso.date(),
+  result: ForecastResultSchema.nullable(),
+  failure: ForecastRunFailureSchema,
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+}).openapi("ForecastRun");
+const forecastRunListRoute = createRoute({
+  method: "get", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/forecast-runs",
+  security: [{ OidcBearer: [] }], request: { params: ForecastRunParamsSchema },
+  responses: { 200: { description: "Scenario Forecast Runs", content: { "application/json": { schema: z.object({ runs: z.array(ForecastRunResponseSchema) }) } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const forecastRunCreateRoute = createRoute({
+  method: "post", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/forecast-runs",
+  security: [{ OidcBearer: [] }],
+  request: { params: ForecastRunParamsSchema, headers: z.object({ "Idempotency-Key": z.string().trim().min(1).max(200).openapi({ param: { name: "Idempotency-Key", in: "header" } }) }), body: { required: true, content: { "application/json": { schema: ForecastRunCreateSchema } } } },
+  responses: { 202: { description: "Forecast Run queued", content: { "application/json": { schema: z.object({ run: ForecastRunResponseSchema, replayed: z.boolean() }) } } }, 400: { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 409: { description: "Revision or idempotency conflict", content: { "application/json": { schema: ErrorResponseSchema } } }, 413: { description: "Body too large", content: { "application/json": { schema: ErrorResponseSchema } } }, 422: { description: "Forecast input invalid", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+const forecastRunLoadRoute = createRoute({
+  method: "get", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios/{scenarioId}/forecast-runs/{forecastRunId}",
+  security: [{ OidcBearer: [] }], request: { params: ForecastRunIdentityParamsSchema },
+  responses: { 200: { description: "Forecast Run", content: { "application/json": { schema: ForecastRunResponseSchema } } }, 401: { description: "Authentication required", content: { "application/json": { schema: ErrorResponseSchema } } }, 403: { description: "Project access denied", content: { "application/json": { schema: ErrorResponseSchema } } }, 404: { description: "Forecast Run not found", content: { "application/json": { schema: ErrorResponseSchema } } } },
+});
+
 const scenarioListRoute = createRoute({
   method: "get", path: "/api/tenants/{tenantId}/projects/{projectId}/scenarios",
   security: [{ OidcBearer: [] }], request: { params: ScenarioParamsSchema },
@@ -510,6 +554,40 @@ function scenarioResponse(scenario: ProjectScenario) {
   });
 }
 
+function forecastRunResponse(run: ForecastRun) {
+  const ready = run.latestResult?.status === "READY"
+    ? ForecastResultSchema.parse(run.latestResult.output)
+    : null;
+  let failure: { code: string; message: string } | null = null;
+  let targetDate = "";
+  if (typeof run.input === "object" && run.input !== null && !Array.isArray(run.input)) {
+    const record = run.input as { readonly [key: string]: import("@earned-signal/persistence").ForecastJson };
+    if (typeof record.targetFinishDate === "string") targetDate = record.targetFinishDate;
+  }
+  if (run.latestResult?.status === "FAILED") {
+    const output = run.latestResult.output;
+    if (typeof output === "object" && output !== null && !Array.isArray(output)) {
+      const record = output as { readonly [key: string]: import("@earned-signal/persistence").ForecastJson };
+      const code = record.code;
+      const message = record.message;
+      if (typeof code === "string" && typeof message === "string") failure = { code, message };
+    }
+    failure ??= { code: "SIMULATION_FAILED", message: "The Forecast simulation failed" };
+  }
+  return ForecastRunResponseSchema.parse({
+    id: run.id,
+    status: run.status,
+    sourceProjectRevision: run.sourceProjectRevision.toString(),
+    sourceScenarioRevision: run.sourceScenarioRevision.toString(),
+    targetDate,
+    result: ready,
+    failure,
+    createdAt: new Date(run.createdAt).toISOString(),
+    startedAt: run.startedAt === null ? null : new Date(run.startedAt).toISOString(),
+    completedAt: run.completedAt === null ? null : new Date(run.completedAt).toISOString(),
+  });
+}
+
 const commandRoute = createRoute({
   method: "post",
   path: "/api/tenants/{tenantId}/projects/{projectId}/commands",
@@ -608,6 +686,8 @@ export function createApiApp(dependencies: ApiDependencies) {
     "/api/tenants/:tenantId/projects/:projectId/scenarios/*",
     "/api/tenants/:tenantId/projects/:projectId/staffing-proposals",
     "/api/tenants/:tenantId/projects/:projectId/staffing-proposals/*",
+    "/api/tenants/:tenantId/projects/:projectId/scenarios/:scenarioId/forecast-runs",
+    "/api/tenants/:tenantId/projects/:projectId/scenarios/:scenarioId/forecast-runs/*",
   ]) {
     app.use(path, bodyLimit({
       maxSize: 64 * 1024,
@@ -767,6 +847,92 @@ export function createApiApp(dependencies: ApiDependencies) {
       await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
       const scenarios = await session.scenarios.list(tenantId, projectId);
       return context.json({ scenarios: scenarios.map(scenarioResponse) }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(forecastRunListRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const scenario = await session.scenarios.load(tenantId, projectId, scenarioId);
+      if (scenario === null) throw new ScenarioNotFoundError(scenarioId);
+      const runs = await session.forecastRuns.list(tenantId, projectId, scenarioId);
+      return context.json({ runs: runs.map(forecastRunResponse) }, 200);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(forecastRunCreateRoute, async (context) => {
+    const { tenantId, projectId, scenarioId } = context.req.valid("param");
+    const body = context.req.valid("json");
+    const headers = context.req.valid("header");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      const actor = await session.scenarioAuthorizer.authorize({ identity, tenantId, projectId });
+      const [workspace, scenario] = await Promise.all([
+        session.workspace.load(tenantId, projectId),
+        session.scenarios.load(tenantId, projectId, scenarioId),
+      ]);
+      if (workspace === null) throw new ProjectNotFoundError(projectId);
+      if (scenario === null) throw new ScenarioNotFoundError(scenarioId);
+      const expectedProjectRevision = BigInt(body.expectedRevision);
+      const expectedScenarioRevision = BigInt(body.expectedScenarioRevision);
+      if (workspace.revision !== expectedProjectRevision) {
+        throw new ProjectVersionConflictError(expectedProjectRevision, workspace.revision);
+      }
+      if (scenario.revision !== expectedScenarioRevision) {
+        throw new ScenarioRevisionConflictError(expectedScenarioRevision, scenario.revision);
+      }
+      if (scenario.status !== "DRAFT") throw new ScenarioTerminalError(scenario.status);
+      const problem = toForecastProblemV1({
+        contractVersion: "forecast.v1",
+        current: workspace.current,
+        scenarioChanges: parseStoredScenarioChanges(scenario.changes),
+        estimates: body.estimates,
+        correlationGroups: body.correlationGroups,
+        seed: body.seed,
+        stopping: body.stopping,
+        targetDate: body.targetDate,
+      }, workspace.revision);
+      const input = scenarioJson(problem, "Forecast input");
+      const result = await session.forecastRuns.create({
+        tenantId,
+        projectId,
+        scenarioId,
+        sourceProjectRevision: workspace.revision,
+        sourceScenarioRevision: scenario.revision,
+        idempotencyKey: headers["Idempotency-Key"],
+        requestHash: await sha256(input),
+        input,
+        actor,
+      });
+      if (result.run.status === "REQUESTED" || result.run.status === "RUNNING") {
+        await context.env.FORECAST_QUEUE.send(
+          { tenantId, projectId, runId: result.run.id },
+          { contentType: "json" },
+        );
+      }
+      return context.json({ run: forecastRunResponse(result.run), replayed: result.replayed }, 202);
+    } finally {
+      await session.close();
+    }
+  });
+
+  app.openapi(forecastRunLoadRoute, async (context) => {
+    const { tenantId, projectId, scenarioId, forecastRunId } = context.req.valid("param");
+    const identity = await dependencies.authenticate(context.req.raw, context.env);
+    const session = await dependencies.openProjectSession(context.env);
+    try {
+      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const run = await session.forecastRuns.load(tenantId, projectId, scenarioId, forecastRunId);
+      if (run === null) throw new ForecastRunNotFoundError(forecastRunId);
+      return context.json(forecastRunResponse(run), 200);
     } finally {
       await session.close();
     }
@@ -944,6 +1110,18 @@ export function createApiApp(dependencies: ApiDependencies) {
     if (error instanceof AuthenticationRequiredError) {
       context.header("WWW-Authenticate", "Bearer");
       return context.json({ error: { code: "AUTHENTICATION_REQUIRED", message: error.message } }, 401);
+    }
+    if (error instanceof ForecastRunNotFoundError) {
+      return context.json({ error: { code: "FORECAST_RUN_NOT_FOUND", message: error.message } }, 404);
+    }
+    if (error instanceof ForecastRunIdempotencyConflictError) {
+      return context.json({ error: { code: "IDEMPOTENCY_CONFLICT", message: error.message } }, 409);
+    }
+    if (error instanceof ForecastRunStaleError) {
+      return context.json({ error: { code: "FORECAST_RUN_STALE", message: error.message, expectedRevision: error.sourceProjectRevision.toString(), actualRevision: error.currentProjectRevision.toString() } }, 409);
+    }
+    if (error instanceof ForecastValidationError) {
+      return context.json({ error: { code: "FORECAST_INVALID", message: error.message } }, 422);
     }
     const resolution = resolveProjectCommandError(error);
     if (resolution !== null) {

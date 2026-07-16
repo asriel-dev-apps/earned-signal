@@ -27,5 +27,13 @@
       "class_name": "StaffingProposalWorkflow",
       "script_name": "earned-signal-optimizer"
     }
-  ]
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "FORECAST_QUEUE",
+        "queue": "earned-signal-forecast-runs"
+      }
+    ]
+  }
 }

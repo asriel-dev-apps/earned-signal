@@ -4,3 +4,4 @@ export * from "./project-state.js";
 export * from "./scenario.js";
 export * from "./staffing.js";
 export * from "./staffing-submission.js";
+export * from "./forecast.js";

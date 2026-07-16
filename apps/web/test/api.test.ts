@@ -14,6 +14,7 @@ import {
   PostgresProjectCommandUnitOfWork,
   ProjectAccessRepository,
   ProjectPerformanceRepository,
+  ProjectForecastRunRepository,
   ProjectRepository,
   ProjectScenarioRepository,
   ProjectStaffingProposalRepository,
@@ -42,6 +43,7 @@ describe("project command REST API", () => {
   let workspaceRepository: ProjectWorkspaceRepository;
   let scenarioRepository: ProjectScenarioRepository;
   let staffingProposalRepository: ProjectStaffingProposalRepository;
+  let forecastRunRepository: ProjectForecastRunRepository;
   let stopContainer: (() => Promise<void>) | undefined;
   let workerProcess: ChildProcess | undefined;
   let workerOrigin: string;
@@ -124,6 +126,7 @@ describe("project command REST API", () => {
     workspaceRepository = new ProjectWorkspaceRepository(database);
     scenarioRepository = new ProjectScenarioRepository(database);
     staffingProposalRepository = new ProjectStaffingProposalRepository(database);
+    forecastRunRepository = new ProjectForecastRunRepository(database);
     accessRepository = new ProjectAccessRepository(database);
     const { publicKey, privateKey } = await generateKeyPair("RS256", {
       extractable: true,
@@ -307,6 +310,7 @@ describe("project command REST API", () => {
         }),
         scenarios: scenarioRepository,
         staffingProposals: staffingProposalRepository,
+        forecastRuns: forecastRunRepository,
         performance,
         workspace: workspaceRepository,
         close: async () => undefined,
@@ -698,6 +702,101 @@ describe("project command REST API", () => {
       { headers: { authorization: `Bearer ${humanAccessToken}` } },
     );
     expect(crossTenant.status).toBe(403);
+  });
+
+  it.each([
+    { principalType: "HUMAN" as const, projectRole: "VIEWER" as const, code: "PROJECT_ACCESS_DENIED" },
+    { principalType: "AGENT" as const, projectRole: "EDITOR" as const, code: "AGENT_APPROVAL_REQUIRED" },
+  ])("rejects $principalType $projectRole Forecast Run creation to prevent compute abuse", async ({ principalType, projectRole, code }) => {
+    const scenario = await scenarioRepository.create({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      name: "Authorized simulation boundary",
+      baseProjectRevision: 1n,
+      changes: [],
+      actor: { type: "HUMAN", id: "setup-user" },
+    });
+    const app = createTestApp({
+      principalId: "limited-user",
+      principalType,
+      projectRole,
+      allowedScopes: [],
+    });
+    const workspace = await workspaceRepository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    if (workspace === null) throw new Error("Expected demo workspace");
+    const estimates = workspace.current.tasks.filter((task) => task.progressPercent < 100).map((task) => ({
+      taskId: task.id,
+      optimisticMinutes: 60,
+      mostLikelyMinutes: 120,
+      pessimisticMinutes: 180,
+      provenance: "HUMAN_CONFIRMED",
+    }));
+    const response = await app.request(
+      `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios/${scenario.id}/forecast-runs`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": `forecast-${principalType.toLowerCase()}` },
+        body: JSON.stringify({
+          expectedRevision: "1",
+          expectedScenarioRevision: "1",
+          estimates,
+          correlationGroups: [],
+          seed: 20_260_717,
+          stopping: { minIterations: 1_000, maxIterations: 2_000, checkEvery: 1_000, quantileToleranceBasisPoints: 50, stableChecks: 1 },
+          targetDate: "2026-12-31",
+        }),
+      },
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: { code } });
+  });
+
+  it("creates, queues, replays, lists, and loads a revision-pinned Forecast Run", async () => {
+    const scenario = await scenarioRepository.create({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      name: "Monte Carlo draft",
+      baseProjectRevision: 1n,
+      changes: [],
+      actor: { type: "HUMAN", id: "setup-user" },
+    });
+    const workspace = await workspaceRepository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    if (workspace === null) throw new Error("Expected demo workspace");
+    const estimates = workspace.current.tasks.filter((task) => task.progressPercent < 100).map((task) => ({
+      taskId: task.id, optimisticMinutes: 60, mostLikelyMinutes: 120, pessimisticMinutes: 180,
+      provenance: "HUMAN_CONFIRMED",
+    }));
+    const send = vi.fn(async () => ({ metadata: { metrics: { backlogCount: 1, backlogBytes: 128 } } }));
+    const queue: Queue = {
+      send,
+      sendBatch: vi.fn(async () => ({ metadata: { metrics: { backlogCount: 1, backlogBytes: 128 } } })),
+      metrics: vi.fn(async () => ({ backlogCount: 1, backlogBytes: 128 })),
+    };
+    const environment = { FORECAST_QUEUE: queue } as Env;
+    const app = createTestApp();
+    const base = `/api/tenants/${demoProjectRecord.tenant.id}/projects/${demoProjectRecord.project.id}/scenarios/${scenario.id}/forecast-runs`;
+    const request = {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "forecast-run-1" },
+      body: JSON.stringify({
+        expectedRevision: "1", expectedScenarioRevision: "1", estimates, correlationGroups: [], seed: 20_260_717,
+        stopping: { minIterations: 1_000, maxIterations: 2_000, checkEvery: 1_000, quantileToleranceBasisPoints: 50, stableChecks: 1 },
+        targetDate: "2026-12-31",
+      }),
+    };
+    const createdResponse = await app.request(base, request, environment);
+    expect(createdResponse.status).toBe(202);
+    const created = await createdResponse.json<{ run: { id: string; status: string; targetDate: string }; replayed: boolean }>();
+    expect(created).toMatchObject({ run: { status: "REQUESTED", targetDate: "2026-12-31" }, replayed: false });
+    expect(send).toHaveBeenCalledWith({ tenantId: demoProjectRecord.tenant.id, projectId: demoProjectRecord.project.id, runId: created.run.id }, { contentType: "json" });
+
+    const replay = await app.request(base, request, environment);
+    await expect(replay.json()).resolves.toMatchObject({ run: { id: created.run.id }, replayed: true });
+    expect(send).toHaveBeenCalledTimes(2);
+    const listed = await app.request(base, undefined, environment);
+    await expect(listed.json()).resolves.toMatchObject({ runs: [{ id: created.run.id }] });
+    const loaded = await app.request(`${base}/${created.run.id}`, undefined, environment);
+    await expect(loaded.json()).resolves.toMatchObject({ id: created.run.id, sourceProjectRevision: "1", sourceScenarioRevision: "1" });
   });
 
   it("rejects a Scenario body larger than 64 KiB before JSON buffering", async () => {

@@ -46,6 +46,12 @@ export const staffingProposalStatus = pgEnum("staffing_proposal_status", [
   "UNKNOWN",
   "FAILED",
 ]);
+export const forecastRunStatus = pgEnum("forecast_run_status", [
+  "REQUESTED",
+  "RUNNING",
+  "READY",
+  "FAILED",
+]);
 
 const auditTimestamp = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "string", precision: 6 });
@@ -1369,6 +1375,112 @@ export const staffingProposalAuditEvents = pgTable(
   ],
 );
 
+export const forecastRuns = pgTable(
+  "forecast_runs",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    scenarioId: uuid("scenario_id").notNull(),
+    status: forecastRunStatus().notNull().default("REQUESTED"),
+    sourceProjectRevision: bigint("source_project_revision", { mode: "bigint" }).notNull(),
+    sourceScenarioRevision: bigint("source_scenario_revision", { mode: "bigint" }).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: char("request_hash", { length: 64 }).notNull(),
+    input: jsonb().notNull(),
+    latestResultId: uuid("latest_result_id"),
+    createdByType: auditActorType("created_by_type").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+    startedAt: auditTimestamp("started_at"),
+    completedAt: auditTimestamp("completed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.scenarioId, table.id] }),
+    unique("forecast_runs_id_unique").on(table.id),
+    unique("forecast_runs_scenario_idempotency_unique").on(table.tenantId, table.projectId, table.scenarioId, table.idempotencyKey),
+    index("forecast_runs_scenario_status_idx").on(table.tenantId, table.projectId, table.scenarioId, table.status, table.createdAt),
+    foreignKey({
+      name: "forecast_runs_scenario_fk",
+      columns: [table.tenantId, table.projectId, table.scenarioId],
+      foreignColumns: [scenarios.tenantId, scenarios.projectId, scenarios.id],
+    }).onDelete("restrict"),
+    check("forecast_runs_project_revision_non_negative", sql`${table.sourceProjectRevision} >= 0`),
+    check("forecast_runs_scenario_revision_positive", sql`${table.sourceScenarioRevision} > 0`),
+    check("forecast_runs_idempotency_key_length", sql`length(trim(${table.idempotencyKey})) between 1 and 200`),
+    check("forecast_runs_request_hash_hex", sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check("forecast_runs_created_by_not_blank", sql`length(trim(${table.createdBy})) > 0`),
+    check(
+      "forecast_runs_status_metadata_consistent",
+      sql`(
+        ${table.status} = 'REQUESTED' and ${table.startedAt} is null and ${table.completedAt} is null and ${table.latestResultId} is null
+      ) or (
+        ${table.status} = 'RUNNING' and ${table.startedAt} is not null and ${table.completedAt} is null and ${table.latestResultId} is null
+      ) or (
+        ${table.status} in ('READY', 'FAILED') and ${table.startedAt} is not null and ${table.completedAt} is not null and ${table.latestResultId} is not null
+      )`,
+    ),
+  ],
+);
+
+export const forecastRunResults = pgTable(
+  "forecast_run_results",
+  {
+    id: uuid().notNull().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    scenarioId: uuid("scenario_id").notNull(),
+    forecastRunId: uuid("forecast_run_id").notNull(),
+    status: forecastRunStatus().notNull(),
+    algorithmVersion: text("algorithm_version").notNull(),
+    output: jsonb().notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.scenarioId, table.forecastRunId, table.id] }),
+    unique("forecast_run_results_id_unique").on(table.id),
+    unique("forecast_run_results_run_unique").on(table.tenantId, table.projectId, table.scenarioId, table.forecastRunId),
+    foreignKey({
+      name: "forecast_run_results_run_fk",
+      columns: [table.tenantId, table.projectId, table.scenarioId, table.forecastRunId],
+      foreignColumns: [forecastRuns.tenantId, forecastRuns.projectId, forecastRuns.scenarioId, forecastRuns.id],
+    }).onDelete("restrict"),
+    check("forecast_run_results_terminal_status", sql`${table.status} in ('READY', 'FAILED')`),
+    check("forecast_run_results_algorithm_version_not_blank", sql`length(trim(${table.algorithmVersion})) between 1 and 100`),
+    check("forecast_run_results_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+  ],
+);
+
+export const forecastRunAuditEvents = pgTable(
+  "forecast_run_audit_events",
+  {
+    sequence: bigserial({ mode: "bigint" }).primaryKey(),
+    id: uuid().notNull().defaultRandom().unique(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    scenarioId: uuid("scenario_id").notNull(),
+    forecastRunId: uuid("forecast_run_id").notNull(),
+    actorType: auditActorType("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb().notNull(),
+    occurredAt: auditTimestamp("occurred_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("forecast_run_audit_events_run_sequence_idx").on(table.tenantId, table.projectId, table.scenarioId, table.forecastRunId, table.sequence),
+    foreignKey({
+      name: "forecast_run_audit_events_run_fk",
+      columns: [table.tenantId, table.projectId, table.scenarioId, table.forecastRunId],
+      foreignColumns: [forecastRuns.tenantId, forecastRuns.projectId, forecastRuns.scenarioId, forecastRuns.id],
+    }).onDelete("restrict"),
+    check("forecast_run_audit_events_actor_id_not_blank", sql`length(trim(${table.actorId})) > 0`),
+    check("forecast_run_audit_events_event_type_not_blank", sql`length(trim(${table.eventType})) > 0`),
+  ],
+);
+
 export const schema = {
   principals,
   tenants,
@@ -1403,4 +1515,7 @@ export const schema = {
   staffingProposals,
   staffingProposalRuns,
   staffingProposalAuditEvents,
+  forecastRuns,
+  forecastRunResults,
+  forecastRunAuditEvents,
 };

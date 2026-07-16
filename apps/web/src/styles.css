@@ -1169,6 +1169,41 @@ h1 {
   }
 }
 
+.forecast-panel { margin: 24px 0; padding: 22px; border: 1px solid #d8e1e8; border-radius: 16px; background: linear-gradient(145deg, #f8fbfd 0%, #f1f7f7 100%); }
+.forecast-heading, .forecast-run-row, .forecast-result-meta { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.forecast-heading h3 { margin: 4px 0; font-size: 22px; }
+.forecast-heading p { margin: 0; max-width: 720px; color: #52636e; }
+.forecast-revisions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.forecast-revisions span { padding: 7px 10px; border-radius: 999px; background: #e4efef; color: #3b5558; font-size: 12px; }
+.forecast-revisions strong { margin-left: 4px; color: #17383b; }
+.forecast-message { margin-top: 14px; padding: 10px 12px; border-radius: 9px; background: #e5f1ec; color: #245140; }
+.forecast-estimates-wrap { margin-top: 18px; overflow-x: auto; }
+.forecast-estimates { width: 100%; min-width: 720px; border-collapse: collapse; }
+.forecast-estimates th { padding: 9px 8px; border-bottom: 1px solid #cbd8dd; color: #64757f; font-size: 11px; letter-spacing: .05em; text-align: left; text-transform: uppercase; }
+.forecast-estimates td { padding: 8px; border-bottom: 1px solid #e0e7ea; }
+.forecast-estimates input { width: 100%; min-width: 110px; }
+.forecast-controls { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 10px; margin-top: 18px; }
+.forecast-controls label { display: grid; gap: 5px; color: #5e6e77; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.forecast-controls input { width: 100%; }
+.forecast-confirmation { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #41545e; font-size: 12px; font-weight: 700; }
+.forecast-confirmation input { width: auto; }
+.forecast-correlation-toggle > label { display: flex; align-items: center; gap: 6px; }
+.forecast-correlation-toggle > label input { width: auto; }
+.forecast-run-row { margin-top: 18px; padding-top: 16px; border-top: 1px solid #d7e1e5; }
+.forecast-run-row > div { display: grid; gap: 3px; }
+.forecast-run-row span { color: #697982; font-size: 12px; }
+.forecast-error { display: flex; gap: 8px; margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: #fff0ed; color: #913f35; }
+.forecast-results { margin-top: 18px; }
+.forecast-result-meta { justify-content: flex-start; flex-wrap: wrap; margin: 12px 0; color: #5f7079; font-size: 12px; }
+.forecast-result-meta span { padding-right: 14px; border-right: 1px solid #cfdadd; }
+.forecast-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.forecast-chart { margin: 0; padding: 12px; border: 1px solid #d8e2e6; border-radius: 11px; background: #fff; }
+.forecast-chart figcaption { margin-bottom: 6px; color: #334d50; font-size: 13px; font-weight: 700; }
+.forecast-chart svg { display: block; width: 100%; height: auto; }
+.forecast-chart rect { fill: #2e7d77; }
+.forecast-chart line { stroke: #9badb2; stroke-width: 1; }
+.forecast-chart-range { display: flex; justify-content: space-between; gap: 10px; color: #64757f; font-size: 11px; }
+
 @media (max-width: 900px) {
   body { min-width: 0; padding-bottom: 58px; }
   .app-shell { display: block; }
@@ -1199,6 +1234,8 @@ h1 {
   .staffing-list > button { min-width: 180px; }
   .staffing-form-split { grid-template-columns: minmax(0, 1fr); }
   .staffing-verified > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .forecast-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .forecast-charts { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 560px) {
@@ -1225,4 +1262,6 @@ h1 {
   .staffing-form-card > header input { min-width: 0; width: 100%; }
   .staffing-constraints, .staffing-status-grid, .staffing-verified > div { grid-template-columns: minmax(0, 1fr); }
   .staffing-candidates > div { grid-template-columns: minmax(0, 1fr); }
+  .forecast-heading, .forecast-run-row { align-items: stretch; flex-direction: column; }
+  .forecast-revisions { justify-content: flex-start; }
 }

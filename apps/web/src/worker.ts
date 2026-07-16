@@ -11,6 +11,7 @@ import {
   PostgresProjectAccessGrantResolver,
   PostgresProjectCommandUnitOfWork,
   ProjectPerformanceRepository,
+  ProjectForecastRunRepository,
   ProjectScenarioRepository,
   ProjectStaffingProposalRepository,
   ProjectWorkspaceRepository,
@@ -56,6 +57,7 @@ export async function openHyperdriveProjectSession(
     }),
     scenarios: new ProjectScenarioRepository(database),
     staffingProposals,
+    forecastRuns: new ProjectForecastRunRepository(database),
     performance: new ProjectPerformanceRepository(database),
     workspace,
     // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.

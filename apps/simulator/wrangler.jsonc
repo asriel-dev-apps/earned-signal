@@ -1,0 +1,58 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "earned-signal-simulator",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-07-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "earned-signal-forecast-runs",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "dead_letter_queue": "earned-signal-forecast-runs-dlq"
+      },
+      {
+        "queue": "earned-signal-forecast-runs-dlq",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 100,
+        "retry_delay": 300
+      }
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "ForecastSimulatorContainer",
+      "image": "../../services/forecast-simulator/Dockerfile",
+      "max_instances": 2,
+      "instance_type": "basic"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FORECAST_SIMULATOR",
+        "class_name": "ForecastSimulatorContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ForecastSimulatorContainer"]
+    }
+  ]
+}

@@ -179,6 +179,19 @@ function validateProject(project: ProjectState): void {
   applyProjectCommand(project, { type: "baseline.publish", label: "Scenario validation" });
 }
 
+export function applyScenarioPlanChanges(
+  current: ProjectState,
+  changes: readonly ScenarioPlanCommand[],
+): ProjectState {
+  validateProject(current);
+  let plan = current;
+  for (const command of changes) {
+    validateScenarioCommand(command);
+    plan = applyProjectCommand(plan, command);
+  }
+  return plan;
+}
+
 export function calculateScenario(input: ScenarioInput): ScenarioResult {
   validateProject(input.current);
   validateProject(input.baseline);
@@ -186,11 +199,7 @@ export function calculateScenario(input: ScenarioInput): ScenarioResult {
     throw new Error("Scenario Current and Baseline must belong to the same project");
   }
 
-  let plan = input.current;
-  for (const command of input.changes) {
-    validateScenarioCommand(command);
-    plan = applyProjectCommand(plan, command);
-  }
+  const plan = applyScenarioPlanChanges(input.current, input.changes);
 
   const scheduleFactor = effectiveFactor(input.trend.spi);
   const costFactor = effectiveFactor(input.trend.cpi);

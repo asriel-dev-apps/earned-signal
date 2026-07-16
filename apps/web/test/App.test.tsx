@@ -118,6 +118,9 @@ function client(overrides: Partial<ProjectApiClient> = {}): ProjectApiClient {
     staffingProposals: vi.fn(async () => []),
     loadStaffingProposal: vi.fn(async () => { throw new Error("not used"); }),
     requestStaffingProposal: vi.fn(async () => { throw new Error("not used"); }),
+    forecastRuns: vi.fn(async () => []),
+    loadForecastRun: vi.fn(async () => { throw new Error("not used"); }),
+    requestForecastRun: vi.fn(async () => { throw new Error("not used"); }),
     ...overrides,
   };
 }

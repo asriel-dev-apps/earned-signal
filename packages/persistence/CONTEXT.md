@@ -20,6 +20,8 @@ Staffing Proposals are tenant/project-scoped, idempotent optimization requests p
 
 READY completion uses one PostgreSQL transaction that locks the Project and Proposal, confirms the base Project revision is still current, appends the READY Proposal Run, creates the DRAFT Scenario with the exact verified changes, links it, and appends Proposal audit events. A generic terminal write is forbidden from producing READY, so a visible READY Proposal always has a linked Scenario. The Workflow persists the Scenario's deterministic calculation Run in a later retryable step; that later Run is not part of the READY-link transaction. Current and Baseline remain unchanged until the Scenario is published through the normal human approval boundary.
 
+Forecast Runs are tenant/Project/Scenario-scoped Monte Carlo requests pinned to exact Project and Scenario revisions. The request JSON, canonical SHA-256 hash, and per-Scenario idempotency key are immutable. A Run moves from requested through running to the first READY or FAILED result. The terminal result and audit stream are append-only, and Queue redelivery replays the existing start or terminal result instead of appending duplicates. Non-terminal transitions lock and recheck both source revisions; terminal replay remains readable after the Scenario changes. Forecast Runs are stored separately from deterministic Scenario Runs and cannot satisfy the Scenario publication guard.
+
 ## Language
 
 - **Current resource plan**: the mutable Resources, Skills, and Assignments attached to the Current project state.
@@ -30,3 +32,4 @@ READY completion uses one PostgreSQL transaction that locks the Project and Prop
 - **Scenario**: a versioned, isolated set of prospective plan changes based on one Project revision.
 - **Scenario Run**: an immutable calculation result tied to exact Project and Scenario revisions, input, algorithm version, and input hash.
 - **Staffing Proposal Run**: the immutable terminal result of one Proposal, including its algorithm version and JSON output. READY is valid only with a Scenario created and linked in the same transaction.
+- **Forecast Run result**: the single append-only READY or FAILED Monte Carlo result associated with a revision-pinned Forecast Run.

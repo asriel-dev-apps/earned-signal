@@ -24,3 +24,4 @@ export * from "./project-performance.js";
 export * from "./project-workspace.js";
 export * from "./project-scenario.js";
 export * from "./project-staffing-proposal.js";
+export * from "./project-forecast-run.js";
