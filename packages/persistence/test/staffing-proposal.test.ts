@@ -215,6 +215,18 @@ describe("ProjectStaffingProposalRepository", () => {
       request.projectId,
       request.proposalId,
     )).resolves.toMatchObject({ linkedScenarioId: null });
+    const rolledBackScenarios = await client.query<{ count: string }>(
+      "select count(*)::text as count from scenarios where tenant_id = $1 and project_id = $2",
+      [request.tenantId, request.projectId],
+    );
+    expect(rolledBackScenarios.rows).toEqual([{ count: "0" }]);
+    await expect(repository.listAuditEvents(
+      request.tenantId,
+      request.projectId,
+      request.proposalId,
+    )).resolves.not.toContainEqual(expect.objectContaining({
+      eventType: "staffing_proposal.scenario_linked",
+    }));
 
     const linked = await repository.linkScenario(request);
     expect(linked.linkedScenarioId).not.toBeNull();
@@ -238,6 +250,12 @@ describe("ProjectStaffingProposalRepository", () => {
 
     await expect(client.query(
       "update staffing_proposals set input = '{}' where id = $1",
+      [completed.proposal.id],
+    )).rejects.toMatchObject({ code: "55000" });
+    await expect(client.query(
+      `update staffing_proposals
+       set status = 'RUNNING', latest_run_id = null, completed_at = null, started_at = now()
+       where id = $1`,
       [completed.proposal.id],
     )).rejects.toMatchObject({ code: "55000" });
     await expect(client.query(
