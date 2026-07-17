@@ -46,6 +46,7 @@ export interface ScheduledActivity {
   readonly lateFinish: string;
   readonly totalFloatWorkingDays: number;
   readonly critical: boolean;
+  readonly drivingDependencies: readonly ScheduleDependency[];
   readonly constraintViolation?: ScheduleConstraintInput;
 }
 
@@ -375,26 +376,26 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
 
   const ordered = topologicalOrder(input.activities, byId);
   const early = new Map<string, DateRange>();
+  const drivingDependencies = new Map<string, readonly ScheduleDependency[]>();
 
   for (const activity of ordered) {
     const calendar = calendarFor(activity);
     let start = moveToWorkingDay(projectStart, 1, calendar);
+    const dependencyBounds: { readonly dependency: ScheduleDependency; readonly start: Date }[] = [];
     for (const dependency of activity.dependencies) {
       const predecessor = early.get(dependency.predecessorId);
       if (predecessor === undefined) {
         throw new Error(`Predecessor was not scheduled: ${dependency.predecessorId}`);
       }
       const type = dependency.type ?? "FS";
+      let dependencyStart: Date;
       if (type === "FS" || type === "SS") {
         const anchor = type === "FS" ? predecessor.finish : predecessor.start;
         const offset = dependency.lagWorkingDays + (type === "FS" ? 1 : 0);
-        start = laterDate(
-          start,
-          moveToWorkingDay(
-            addWorkingDays(anchor, offset, defaultCalendar),
-            1,
-            calendar,
-          ),
+        dependencyStart = moveToWorkingDay(
+          addWorkingDays(anchor, offset, defaultCalendar),
+          1,
+          calendar,
         );
       } else {
         const anchor = type === "FF" ? predecessor.finish : predecessor.start;
@@ -403,11 +404,14 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
           1,
           calendar,
         );
-        start = laterDate(
-          start,
-          addWorkingDays(requiredFinish, -(activity.durationWorkingDays - 1), calendar),
+        dependencyStart = addWorkingDays(
+          requiredFinish,
+          -(activity.durationWorkingDays - 1),
+          calendar,
         );
       }
+      dependencyBounds.push({ dependency, start: dependencyStart });
+      start = laterDate(start, dependencyStart);
     }
     const constraint = activity.constraint;
     if (constraint?.type === "START_NO_EARLIER_THAN" || constraint?.type === "MUST_START_ON") {
@@ -431,6 +435,12 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
         addWorkingDays(requestedFinish, -(activity.durationWorkingDays - 1), calendar),
       );
     }
+    drivingDependencies.set(
+      activity.id,
+      dependencyBounds
+        .filter((bound) => bound.start.getTime() === start.getTime())
+        .map((bound) => bound.dependency),
+    );
     early.set(activity.id, {
       start,
       finish: addWorkingDays(start, activity.durationWorkingDays - 1, calendar),
@@ -538,6 +548,7 @@ export function calculateSchedule(input: ScheduleInput): ScheduleResult {
         lateFinish: formatDate(lateRange.finish),
         totalFloatWorkingDays,
         critical: totalFloatWorkingDays <= 0,
+        drivingDependencies: drivingDependencies.get(activity.id) ?? [],
         ...(violatesConstraint ? { constraintViolation: constraint } : {}),
       };
     }),

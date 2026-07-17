@@ -131,11 +131,18 @@ afterEach(() => {
 });
 
 describe("persisted project workspace", () => {
-  it("shows task EVM beside a dated Gantt and keeps planning details optional", async () => {
+  it("shows task identity, BAC, dependency blocking, EVM, and a dated Gantt", async () => {
     render(<App />);
 
     expect(await screen.findByLabelText(/Gantt timeline .* through/)).toBeTruthy();
     expect(screen.getAllByLabelText(/through .* complete/).length).toBe(initialProject.tasks.length);
+    expect(screen.getByRole("columnheader", { name: "Task ID" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "WBS" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "BAC" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Blocked by" })).toBeTruthy();
+    expect(screen.getByLabelText("Critical path blocking relationships")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /A1.*A2.*FS/ }));
+    expect(screen.getByRole("heading", { name: "Approve experience flows" })).toBeTruthy();
     const details = screen.getByRole("button", { name: "Show details" });
     fireEvent.click(details);
     expect(screen.getByRole("button", { name: "Hide details" })).toBeTruthy();

@@ -437,6 +437,69 @@ h1 {
   background: #1b6859;
 }
 
+.critical-path-ribbon {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #e1e6e3;
+  background: #fff9f6;
+  padding: 7px 14px 7px 17px;
+}
+
+.critical-path-ribbon > div:first-child {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.critical-path-ribbon > div:first-child span {
+  color: #bc6549;
+  font: 8px "DM Mono", monospace;
+  letter-spacing: .08em;
+}
+
+.critical-path-ribbon > div:first-child strong {
+  color: #6f4d43;
+  font-size: 10px;
+}
+
+.critical-path-links {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.critical-path-links button {
+  display: flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #edc6ba;
+  border-radius: 7px;
+  color: #804b3c;
+  background: #fff;
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.critical-path-links button:hover {
+  border-color: #d87352;
+  background: #fff4ef;
+}
+
+.critical-path-links button small {
+  border-radius: 4px;
+  color: #a05a45;
+  background: #fbe9e3;
+  padding: 2px 4px;
+  font: 8px "DM Mono", monospace;
+}
+
 .primary-button span {
   margin-right: 4px;
   font-size: 14px;
@@ -488,6 +551,16 @@ h1 {
 .ag-cell.task-name-cell {
   color: #203d34;
   font-weight: 550;
+}
+
+.ag-cell.task-id-cell {
+  color: #176b5b;
+  font: 700 10px "DM Mono", monospace;
+}
+
+.ag-cell.dependency-cell {
+  color: #6f5b55;
+  font: 9px "DM Mono", monospace;
 }
 
 .ag-row.critical-row::before {
@@ -1333,6 +1406,7 @@ h1 {
   .toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
   .workspace-grid, .grid-panel { display: block; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
   .grid-wrap { width: 100%; max-width: 100%; overflow: hidden; }
+  .critical-path-ribbon { align-items: stretch; flex-direction: column; }
   .grid-footer span:not(.gantt-hint) { display: none; }
   .grid-footer .gantt-hint { margin-left: 0; }
   .trend-card, .variance-card { padding: 15px; }

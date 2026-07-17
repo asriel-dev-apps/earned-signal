@@ -14,6 +14,7 @@ import {
 } from "ag-grid-community";
 import { AgGridProvider, AgGridReact } from "ag-grid-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ScheduleDependency } from "@earned-signal/domain";
 import {
   applyProjectCommand,
   type ProjectCommand,
@@ -25,7 +26,13 @@ import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 import { ScenarioWorkspace } from "./ScenarioWorkspace";
 import { StaffingWorkspace } from "./StaffingWorkspace";
-import { buildGanttScale, ganttPosition, type GanttScale } from "./gantt";
+import {
+  buildGanttScale,
+  criticalDependencyEdges,
+  ganttPosition,
+  type CriticalDependencyEdge,
+  type GanttScale,
+} from "./gantt";
 
 type ProjectMode = "current" | "baseline";
 type WorkspaceView = "wbs" | "performance" | "team" | "staffing" | "scenarios";
@@ -40,12 +47,45 @@ interface TaskRow extends ProjectTask {
   readonly earlyFinish: string;
   readonly totalFloatWorkingDays: number;
   readonly critical: boolean;
+  readonly drivingDependencies: readonly ScheduleDependency[];
+  readonly bac: number;
+  readonly blockedByText: string;
   readonly pv: number;
   readonly ev: number;
   readonly ac: number;
   readonly sv: number;
   readonly cv: number;
   readonly constraintViolation?: NonNullable<ProjectTask["constraint"]>;
+}
+
+function CriticalPathRibbon({ rows, edges, onSelect }: {
+  readonly rows: readonly TaskRow[];
+  readonly edges: readonly CriticalDependencyEdge[];
+  readonly onSelect: (taskId: string) => void;
+}) {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const criticalCount = rows.filter((row) => row.critical).length;
+  return (
+    <div className="critical-path-ribbon" aria-label="Critical path blocking relationships">
+      <div><span>CRITICAL PATH</span><strong>{criticalCount} tasks · {edges.length} blocking links</strong></div>
+      <div className="critical-path-links">
+        {edges.length === 0 ? <span>No critical blocking links</span> : edges.map((edge) => {
+          const predecessor = byId.get(edge.predecessorId);
+          const successor = byId.get(edge.successorId);
+          const lag = edge.lagWorkingDays === 0 ? "" : `+${edge.lagWorkingDays}`;
+          return (
+            <button
+              key={`${edge.predecessorId}-${edge.successorId}-${edge.type}-${edge.lagWorkingDays}`}
+              onClick={() => onSelect(edge.successorId)}
+              title={`${predecessor?.name ?? edge.predecessorId} blocks ${successor?.name ?? edge.successorId}`}
+            >
+              <strong>{edge.predecessorId}</strong><span>→</span><strong>{edge.successorId}</strong><small>{edge.type}{lag}</small>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function GanttHeader({ scale }: { readonly scale: GanttScale }) {
@@ -712,6 +752,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       const varianceById = new Map(
         analysis.performanceHistory.at(-1)?.wbsVariances.map((variance) => [variance.id, variance]) ?? [],
       );
+      const baselineBudgetById = new Map(referenceBaseline.tasks.map((task) => [task.id, task.budget]));
       return displayedProject.tasks.map((task) => {
         const scheduled = analysis.scheduleById.get(task.id);
         if (scheduled === undefined) {
@@ -725,6 +766,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           constraintText: formatConstraint(task),
           assignmentsText: formatAssignments(task.id, displayedProject),
           requiredSkillsText: task.requiredSkillIds.join(", "),
+          bac: baselineBudgetById.get(task.id) ?? 0,
+          blockedByText: formatDependencies(task),
           pv: variance?.pv ?? 0,
           ev: variance?.ev ?? 0,
           ac: variance?.ac ?? task.actualCost,
@@ -734,7 +777,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         };
       });
     },
-    [analysis, displayedProject],
+    [analysis, displayedProject, referenceBaseline.tasks],
   );
 
   const executeCommand = useCallback((command: ProjectCommand): boolean => {
@@ -825,14 +868,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [displayedProject.statusDate, rows],
   );
   const editable = mode === "current" && (saveState === "preview" || saveState === "saved");
+  const criticalEdges = useMemo(() => criticalDependencyEdges(rows), [rows]);
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
-      { field: "wbs", headerName: "WBS", pinned: "left", width: 82, editable, cellClass: "editable-cell" },
+      { field: "id", headerName: "Task ID", pinned: "left", width: 92, tooltipField: "id", cellClass: "calculated-cell task-id-cell" },
+      { field: "wbs", headerName: "WBS", pinned: "left", width: 66, editable, cellClass: "editable-cell" },
       {
         field: "name",
         headerName: "Work package",
         pinned: "left",
-        minWidth: 210,
+        minWidth: 190,
         flex: 1,
         editable,
         cellClass: "editable-cell task-name-cell",
@@ -841,15 +886,17 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       {
         field: "durationWorkingDays",
         headerName: "Days",
-        width: 76,
+        width: 62,
         editable,
         cellClass: "editable-cell numeric-cell",
       },
-      { field: "pv", headerName: "PV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
-      { field: "ev", headerName: "EV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
-      { field: "ac", headerName: "AC", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
-      { field: "sv", headerName: "SV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
-      { field: "cv", headerName: "CV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
+      { field: "blockedByText", headerName: "Blocked by", width: 140, tooltipField: "blockedByText", valueFormatter: ({ value }) => value === "" ? "—" : String(value), cellClass: "calculated-cell dependency-cell" },
+      { field: "bac", headerName: "BAC", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "pv", headerName: "PV", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "ev", headerName: "EV", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "ac", headerName: "AC", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "sv", headerName: "SV", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
+      { field: "cv", headerName: "CV", width: 80, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
       {
         field: "wbsParentId",
         headerName: "Parent",
@@ -1202,6 +1249,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                     </button>
                   </div>
                 </div>
+                <CriticalPathRibbon rows={rows} edges={criticalEdges} onSelect={setSelectedTaskId} />
                 <div className="grid-wrap">
                   <AgGridReact<TaskRow>
                     theme={gridTheme}

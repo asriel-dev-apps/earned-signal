@@ -200,6 +200,7 @@ describe("calculateSchedule", () => {
           lateFinish: "2026-07-17",
           totalFloatWorkingDays: 0,
           critical: true,
+          drivingDependencies: [],
         },
         {
           id: "B",
@@ -209,6 +210,7 @@ describe("calculateSchedule", () => {
           lateFinish: "2026-07-24",
           totalFloatWorkingDays: 0,
           critical: true,
+          drivingDependencies: [{ predecessorId: "A", lagWorkingDays: 0 }],
         },
         {
           id: "C",
@@ -218,9 +220,36 @@ describe("calculateSchedule", () => {
           lateFinish: "2026-07-24",
           totalFloatWorkingDays: 1,
           critical: false,
+          drivingDependencies: [{ predecessorId: "A", lagWorkingDays: 1 }],
         },
       ],
     });
+  });
+
+  it("reports only dependencies that drive an activity's early start", () => {
+    const schedule = calculateSchedule({
+      projectStart: "2026-07-13",
+      activities: [
+        { id: "A", durationWorkingDays: 5, dependencies: [] },
+        {
+          id: "B",
+          durationWorkingDays: 5,
+          dependencies: [{ predecessorId: "A", type: "FS", lagWorkingDays: 0 }],
+        },
+        {
+          id: "C",
+          durationWorkingDays: 1,
+          dependencies: [
+            { predecessorId: "A", type: "SS", lagWorkingDays: 0 },
+            { predecessorId: "B", type: "FS", lagWorkingDays: 0 },
+          ],
+        },
+      ],
+    });
+
+    expect(schedule.activities.find((activity) => activity.id === "C")?.drivingDependencies).toEqual([
+      { predecessorId: "B", type: "FS", lagWorkingDays: 0 },
+    ]);
   });
 
   it("reports every activity trapped in a dependency cycle", () => {

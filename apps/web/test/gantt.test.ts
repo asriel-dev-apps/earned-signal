@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGanttScale, ganttPosition } from "../src/gantt";
+import { buildGanttScale, criticalDependencyEdges, ganttPosition } from "../src/gantt";
 
 describe("WBS Gantt scale", () => {
   it("covers every activity and exposes evenly distributed date ticks", () => {
@@ -20,5 +20,22 @@ describe("WBS Gantt scale", () => {
 
     expect(ganttPosition("2026-07-01", "2026-07-05", scale)).toEqual({ left: 0, width: 50 });
     expect(ganttPosition("2026-07-06", "2026-07-10", scale)).toEqual({ left: 50, width: 50 });
+  });
+
+  it("keeps only driving dependency edges whose endpoints are both critical", () => {
+    const edges = criticalDependencyEdges([
+      { id: "A1", critical: true, drivingDependencies: [] },
+      { id: "A2", critical: true, drivingDependencies: [{ predecessorId: "A1", type: "FS", lagWorkingDays: 0 }] },
+      { id: "A3", critical: false, drivingDependencies: [{ predecessorId: "A1", type: "FS", lagWorkingDays: 0 }] },
+      { id: "A4", critical: true, drivingDependencies: [
+        { predecessorId: "A2", type: "FS", lagWorkingDays: 0 },
+        { predecessorId: "A3", type: "SS", lagWorkingDays: 2 },
+      ] },
+    ]);
+
+    expect(edges).toEqual([
+      { predecessorId: "A1", successorId: "A2", type: "FS", lagWorkingDays: 0 },
+      { predecessorId: "A2", successorId: "A4", type: "FS", lagWorkingDays: 0 },
+    ]);
   });
 });

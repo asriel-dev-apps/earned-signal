@@ -12,6 +12,23 @@ interface DateRange {
   readonly finish: string;
 }
 
+interface DependencyNode {
+  readonly id: string;
+  readonly critical: boolean;
+  readonly drivingDependencies: readonly {
+    readonly predecessorId: string;
+    readonly type?: "FS" | "SS" | "FF" | "SF";
+    readonly lagWorkingDays: number;
+  }[];
+}
+
+export interface CriticalDependencyEdge {
+  readonly predecessorId: string;
+  readonly successorId: string;
+  readonly type: "FS" | "SS" | "FF" | "SF";
+  readonly lagWorkingDays: number;
+}
+
 function dateValue(value: string): number {
   const time = new Date(`${value}T00:00:00.000Z`).getTime();
   if (!Number.isFinite(time)) throw new Error(`Invalid Gantt date: ${value}`);
@@ -55,4 +72,21 @@ export function ganttPosition(
     left: (leftDays / scale.dayCount) * 100,
     width: (durationDays / scale.dayCount) * 100,
   };
+}
+
+export function criticalDependencyEdges(
+  tasks: readonly DependencyNode[],
+): readonly CriticalDependencyEdge[] {
+  const criticalIds = new Set(tasks.filter((task) => task.critical).map((task) => task.id));
+  return tasks.flatMap((task) => {
+    if (!criticalIds.has(task.id)) return [];
+    return task.drivingDependencies
+      .filter((dependency) => criticalIds.has(dependency.predecessorId))
+      .map((dependency) => ({
+        predecessorId: dependency.predecessorId,
+        successorId: task.id,
+        type: dependency.type ?? "FS",
+        lagWorkingDays: dependency.lagWorkingDays,
+      }));
+  });
 }
