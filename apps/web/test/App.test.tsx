@@ -131,6 +131,16 @@ afterEach(() => {
 });
 
 describe("persisted project workspace", () => {
+  it("shows task EVM beside a dated Gantt and keeps planning details optional", async () => {
+    render(<App />);
+
+    expect(await screen.findByLabelText(/Gantt timeline .* through/)).toBeTruthy();
+    expect(screen.getAllByLabelText(/through .* complete/).length).toBe(initialProject.tasks.length);
+    const details = screen.getByRole("button", { name: "Show details" });
+    fireEvent.click(details);
+    expect(screen.getByRole("button", { name: "Hide details" })).toBeTruthy();
+  });
+
   it("does not pretend that Staffing optimization is available in demo mode", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Staffing Proposals" }));

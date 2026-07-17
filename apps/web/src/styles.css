@@ -365,7 +365,7 @@ h1 {
   display: grid;
   min-height: 510px;
   gap: 13px;
-  grid-template-columns: minmax(680px, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .grid-panel,
@@ -379,6 +379,7 @@ h1 {
 
 .grid-panel {
   display: flex;
+  min-height: 510px;
   min-width: 0;
   flex-direction: column;
 }
@@ -516,6 +517,88 @@ h1 {
   color: #1b6859;
   font-family: "DM Mono", monospace;
   font-size: 10px;
+}
+
+.ag-cell.variance-cell--risk {
+  color: #b65c41;
+  background: #fff7f3;
+}
+
+.gantt-header {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  align-content: center;
+  gap: 2px;
+}
+
+.gantt-header > strong {
+  color: #64736d;
+  font-size: 10px;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.gantt-header > div {
+  display: flex;
+  justify-content: space-between;
+  color: #8b9792;
+  font: 8px "DM Mono", monospace;
+}
+
+.ag-cell.gantt-column {
+  padding: 0;
+  background: #fbfcfb;
+}
+
+.gantt-cell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.gantt-gridline,
+.gantt-status {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: #e5eae7;
+}
+
+.gantt-status {
+  z-index: 2;
+  width: 2px;
+  background: #d38348;
+  opacity: .7;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 12px;
+  height: 18px;
+  min-width: 4px;
+  overflow: hidden;
+  border: 1px solid #72a99a;
+  border-radius: 4px;
+  background: #d9ebe5;
+}
+
+.gantt-bar > i {
+  display: block;
+  height: 100%;
+  background: #2f7f6d;
+  opacity: .82;
+}
+
+.gantt-bar--critical {
+  border-color: #d87352;
+  background: #f5dcd3;
+}
+
+.gantt-bar--critical > i {
+  background: #c86041;
 }
 
 .team-workload {
@@ -852,7 +935,7 @@ h1 {
   display: grid;
   min-width: 0;
   gap: 13px;
-  grid-template-rows: 1.25fr 0.75fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .performance-card,
@@ -1157,7 +1240,7 @@ h1 {
 
 @media (max-width: 1250px) {
   .workspace-grid {
-    grid-template-columns: minmax(650px, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .metric-card {
@@ -1250,6 +1333,8 @@ h1 {
   .toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
   .workspace-grid, .grid-panel { display: block; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
   .grid-wrap { width: 100%; max-width: 100%; overflow: hidden; }
+  .grid-footer span:not(.gantt-hint) { display: none; }
+  .grid-footer .gantt-hint { margin-left: 0; }
   .trend-card, .variance-card { padding: 15px; }
   .trend-card header, .variance-card header { flex-direction: column; }
   .scenario-heading, .scenario-actions { align-items: stretch; flex-direction: column; }

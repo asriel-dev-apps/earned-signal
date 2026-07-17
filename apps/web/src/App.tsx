@@ -25,6 +25,7 @@ import { analyzeProject, type ProjectAnalysis } from "./project-analysis";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 import { ScenarioWorkspace } from "./ScenarioWorkspace";
 import { StaffingWorkspace } from "./StaffingWorkspace";
+import { buildGanttScale, ganttPosition, type GanttScale } from "./gantt";
 
 type ProjectMode = "current" | "baseline";
 type WorkspaceView = "wbs" | "performance" | "team" | "staffing" | "scenarios";
@@ -39,7 +40,47 @@ interface TaskRow extends ProjectTask {
   readonly earlyFinish: string;
   readonly totalFloatWorkingDays: number;
   readonly critical: boolean;
+  readonly pv: number;
+  readonly ev: number;
+  readonly ac: number;
+  readonly sv: number;
+  readonly cv: number;
   readonly constraintViolation?: NonNullable<ProjectTask["constraint"]>;
+}
+
+function GanttHeader({ scale }: { readonly scale: GanttScale }) {
+  return (
+    <div className="gantt-header" aria-label={`Gantt timeline ${scale.start} through ${scale.finish}`}>
+      <strong>Gantt</strong>
+      <div>{scale.ticks.map((tick) => <span key={tick}>{tick.slice(5).replace("-", "/")}</span>)}</div>
+    </div>
+  );
+}
+
+function GanttCell({ row, scale, statusDate }: {
+  readonly row: TaskRow;
+  readonly scale: GanttScale;
+  readonly statusDate: string;
+}) {
+  const bar = ganttPosition(row.earlyStart, row.earlyFinish, scale);
+  const status = statusDate >= scale.start && statusDate <= scale.finish
+    ? ganttPosition(statusDate, statusDate, scale).left
+    : null;
+  return (
+    <div className="gantt-cell" aria-label={`${row.name}: ${row.earlyStart} through ${row.earlyFinish}, ${row.progressPercent}% complete`}>
+      {scale.ticks.slice(1, -1).map((tick) => (
+        <i className="gantt-gridline" key={tick} style={{ left: `${ganttPosition(tick, tick, scale).left}%` }} />
+      ))}
+      {status === null ? null : <i className="gantt-status" style={{ left: `${status}%` }} />}
+      <span
+        className={`gantt-bar ${row.critical ? "gantt-bar--critical" : ""}`}
+        style={{ left: `${bar.left}%`, width: `${bar.width}%` }}
+        title={`${row.earlyStart} – ${row.earlyFinish}`}
+      >
+        <i style={{ width: `${row.progressPercent}%` }} />
+      </span>
+    </div>
+  );
 }
 
 const gridTheme = themeQuartz.withParams({
@@ -606,6 +647,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   );
   const [initialScenarioId, setInitialScenarioId] = useState<string | null>(() => window.location.hash.startsWith("#scenarios/") ? window.location.hash.slice("#scenarios/".length) : null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
+  const [showPlanningFields, setShowPlanningFields] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const referenceBaseline = approvedBaseline ?? currentProject;
   const displayedProject = mode === "baseline" ? referenceBaseline : currentProject;
@@ -666,12 +708,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return () => { active = false; };
   }, [client, reloadWorkspace]);
   const rows = useMemo<readonly TaskRow[]>(
-    () =>
-      displayedProject.tasks.map((task) => {
+    () => {
+      const varianceById = new Map(
+        analysis.performanceHistory.at(-1)?.wbsVariances.map((variance) => [variance.id, variance]) ?? [],
+      );
+      return displayedProject.tasks.map((task) => {
         const scheduled = analysis.scheduleById.get(task.id);
         if (scheduled === undefined) {
           throw new Error(`Task ${task.id} has no schedule result`);
         }
+        const variance = varianceById.get(task.id);
         return {
           ...task,
           actualHours: task.actualMinutes / 60,
@@ -679,9 +725,15 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           constraintText: formatConstraint(task),
           assignmentsText: formatAssignments(task.id, displayedProject),
           requiredSkillsText: task.requiredSkillIds.join(", "),
+          pv: variance?.pv ?? 0,
+          ev: variance?.ev ?? 0,
+          ac: variance?.ac ?? task.actualCost,
+          sv: variance?.sv ?? 0,
+          cv: variance?.cv ?? -task.actualCost,
           ...scheduled,
         };
-      }),
+      });
+    },
     [analysis, displayedProject],
   );
 
@@ -766,23 +818,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     () => displayedProject.calendars.map((calendar) => calendar.id),
     [displayedProject.calendars],
   );
+  const ganttScale = useMemo(
+    () => buildGanttScale(rows.length === 0
+      ? [{ start: displayedProject.statusDate, finish: displayedProject.statusDate }]
+      : rows.map((row) => ({ start: row.earlyStart, finish: row.earlyFinish }))),
+    [displayedProject.statusDate, rows],
+  );
   const editable = mode === "current" && (saveState === "preview" || saveState === "saved");
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
       { field: "wbs", headerName: "WBS", pinned: "left", width: 82, editable, cellClass: "editable-cell" },
-      {
-        field: "wbsParentId",
-        headerName: "Parent",
-        width: 112,
-        editable,
-        cellEditor: "agSelectCellEditor",
-        cellEditorParams: { values: wbsParentValues },
-        valueFormatter: ({ value }) => {
-          const group = displayedProject.wbsGroups.find((candidate) => candidate.id === value);
-          return group === undefined ? "Root" : `${group.code} ${group.name}`;
-        },
-        cellClass: "editable-cell hierarchy-cell",
-      },
       {
         field: "name",
         headerName: "Work package",
@@ -793,12 +838,39 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         cellClass: "editable-cell task-name-cell",
         valueFormatter: ({ value }) => `↳ ${String(value ?? "")}`,
       },
-      { field: "owner", headerName: "Owner", width: 132, editable, cellClass: "editable-cell" },
+      {
+        field: "durationWorkingDays",
+        headerName: "Days",
+        width: 76,
+        editable,
+        cellClass: "editable-cell numeric-cell",
+      },
+      { field: "pv", headerName: "PV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "ev", headerName: "EV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "ac", headerName: "AC", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: "calculated-cell numeric-cell" },
+      { field: "sv", headerName: "SV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
+      { field: "cv", headerName: "CV", width: 82, valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0), cellClass: ({ value }) => `calculated-cell numeric-cell ${typeof value === "number" && value < 0 ? "variance-cell--risk" : ""}` },
+      {
+        field: "wbsParentId",
+        headerName: "Parent",
+        width: 112,
+        editable,
+        cellEditor: "agSelectCellEditor",
+        cellEditorParams: { values: wbsParentValues },
+        hide: !showPlanningFields,
+        valueFormatter: ({ value }) => {
+          const group = displayedProject.wbsGroups.find((candidate) => candidate.id === value);
+          return group === undefined ? "Root" : `${group.code} ${group.name}`;
+        },
+        cellClass: "editable-cell hierarchy-cell",
+      },
+      { field: "owner", headerName: "Owner", width: 132, editable, hide: !showPlanningFields, cellClass: "editable-cell" },
       {
         field: "assignmentsText",
         headerName: "Assignments",
         width: 170,
         editable,
+        hide: !showPlanningFields,
         cellClass: "editable-cell assignment-cell",
         valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
       },
@@ -807,21 +879,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Required skills",
         width: 145,
         editable,
+        hide: !showPlanningFields,
         cellClass: "editable-cell",
         valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
-      },
-      {
-        field: "durationWorkingDays",
-        headerName: "Days",
-        width: 76,
-        editable,
-        cellClass: "editable-cell numeric-cell",
       },
       {
         field: "dependenciesText",
         headerName: "Dependencies",
         width: 190,
         editable,
+        hide: !showPlanningFields,
         cellClass: "editable-cell",
         valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
       },
@@ -830,6 +897,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Calendar",
         width: 142,
         editable,
+        hide: !showPlanningFields,
         cellEditor: "agSelectCellEditor",
         cellEditorParams: { values: calendarValues },
         valueFormatter: ({ value }) =>
@@ -841,6 +909,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Constraint",
         width: 170,
         editable,
+        hide: !showPlanningFields,
         cellClass: "editable-cell constraint-cell",
         valueFormatter: ({ value }) => (value === "" ? "—" : String(value)),
       },
@@ -848,6 +917,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         field: "earlyFinish",
         headerName: "Forecast finish",
         width: 116,
+        hide: !showPlanningFields,
         valueFormatter: ({ value }) => (typeof value === "string" ? formatDate(value) : "—"),
         cellClass: "calculated-cell",
       },
@@ -856,6 +926,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Budget",
         width: 112,
         editable,
+        hide: !showPlanningFields,
         valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0),
         cellClass: "editable-cell numeric-cell",
       },
@@ -864,6 +935,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Progress",
         width: 98,
         editable,
+        hide: !showPlanningFields,
         valueFormatter: ({ value }) => `${String(value)}%`,
         cellClass: "editable-cell numeric-cell",
       },
@@ -872,6 +944,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Actual cost",
         width: 118,
         editable,
+        hide: !showPlanningFields,
         valueFormatter: ({ value }) => formatCurrency(typeof value === "number" ? value : 0),
         cellClass: "editable-cell numeric-cell",
       },
@@ -880,11 +953,24 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         headerName: "Actual hours",
         width: 104,
         editable,
+        hide: !showPlanningFields,
         valueFormatter: ({ value }) => `${String(value)} h`,
         cellClass: "editable-cell numeric-cell",
       },
+      {
+        colId: "gantt",
+        headerName: "Gantt",
+        minWidth: 380,
+        width: 460,
+        sortable: false,
+        resizable: true,
+        suppressHeaderMenuButton: true,
+        headerComponent: () => <GanttHeader scale={ganttScale} />,
+        cellRenderer: ({ data }: { readonly data?: TaskRow }) => data === undefined ? null : <GanttCell row={data} scale={ganttScale} statusDate={displayedProject.statusDate} />,
+        cellClass: "gantt-column",
+      },
     ],
-    [calendarValues, displayedProject.calendars, displayedProject.wbsGroups, editable, wbsParentValues],
+    [calendarValues, displayedProject.calendars, displayedProject.statusDate, displayedProject.wbsGroups, editable, ganttScale, showPlanningFields, wbsParentValues],
   );
 
   const selectedTask = displayedProject.tasks.find((task) => task.id === selectedTaskId) ?? null;
@@ -1105,6 +1191,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   </div>
                   <div className="toolbar-actions">
                     {mode === "baseline" ? <span className="readonly-pill">Read only</span> : null}
+                    <button onClick={() => setShowPlanningFields((visible) => !visible)}>
+                      {showPlanningFields ? "Hide details" : "Show details"}
+                    </button>
                     <button onClick={deleteTask} disabled={!editable || selectedTaskId === null}>
                       Delete
                     </button>
@@ -1138,7 +1227,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 <footer className="grid-footer">
                   <span><i className="editable-key" /> Editable input</span>
                   <span><i className="calculated-key" /> Calculated by scheduling engine</span>
-                  <span>Double-click or press Enter to edit</span>
+                  <span className="gantt-hint">Scroll horizontally for EVM &amp; Gantt · double-click or press Enter to edit</span>
                 </footer>
               </section>
 
