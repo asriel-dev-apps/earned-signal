@@ -9,7 +9,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi==0.139.2",
   "pydantic==2.11.7",
-  "uvicorn==0.35.0",
+  "uvicorn==0.51.0",
 ]
 
 [project.optional-dependencies]
