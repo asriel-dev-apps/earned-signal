@@ -13,9 +13,20 @@ import { handleForecastBatch, PermanentForecastMessageError, type ForecastQueueM
 import { callForecastSimulator, ForecastSimulatorHttpError, parseForecastProblem } from "./solver-contract.js";
 
 const SYSTEM_ACTOR: ForecastActor = { type: "SYSTEM", id: "forecast-simulator" };
-const FORECAST_QUEUE = "earned-signal-forecast-runs";
-const FORECAST_DLQ = "earned-signal-forecast-runs-dlq";
 const MAX_DELIVERY_ATTEMPTS = 6;
+
+export function forecastQueueKind(
+  queue: string,
+  expectedQueue: string,
+  expectedDlq: string,
+): "PRIMARY" | "DLQ" {
+  if (expectedQueue.length === 0 || expectedDlq.length === 0 || expectedQueue === expectedDlq) {
+    throw new Error("Forecast Queue configuration is invalid");
+  }
+  if (queue === expectedQueue) return "PRIMARY";
+  if (queue === expectedDlq) return "DLQ";
+  throw new Error(`Unexpected Forecast Queue ${queue}`);
+}
 
 interface ForecastRunStore {
   load(tenantId: string, projectId: string, scenarioId: string, forecastRunId: string): Promise<ForecastRun | null>;
@@ -95,6 +106,11 @@ export function createForecastExhaustionProcessor(ports: Pick<ForecastProcessorP
 }
 
 export async function processForecastBatch(batch: MessageBatch<unknown>, environment: Env): Promise<void> {
+  const queueKind = forecastQueueKind(
+    batch.queue,
+    environment.EXPECTED_FORECAST_QUEUE,
+    environment.EXPECTED_FORECAST_DLQ,
+  );
   const client = new Client({ connectionString: environment.HYPERDRIVE.connectionString });
   await client.connect();
   try {
@@ -107,11 +123,10 @@ export async function processForecastBatch(batch: MessageBatch<unknown>, environ
       return result.rows[0]?.scenario_id ?? null;
     };
     const exhaust = createForecastExhaustionProcessor({ runs, scenarioId });
-    if (batch.queue === FORECAST_DLQ) {
+    if (queueKind === "DLQ") {
       await handleForecastBatch(batch, exhaust);
       return;
     }
-    if (batch.queue !== FORECAST_QUEUE) throw new Error(`Unexpected Forecast Queue ${batch.queue}`);
     const process = createForecastMessageProcessor({
       runs,
       scenarioId,

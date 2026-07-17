@@ -501,10 +501,13 @@ describe("project command REST API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ revision: "2" });
     expect((await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id))?.project.revision).toBe(2n);
-    expect(log).toHaveBeenCalledWith(
-      "Project command committed, but the derived performance cache could not be refreshed",
-      refreshError,
-    );
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+      event: "performance_refresh_failed",
+      requestId: "unknown",
+      errorName: "Error",
+    });
+    expect(String(log.mock.calls[0]?.[0])).not.toContain(refreshError.message);
     log.mockRestore();
   });
 
@@ -522,6 +525,16 @@ describe("project command REST API", () => {
       baseline: { id: demoProjectRecord.project.id },
       baselineVersion: { version: 1 },
     });
+  });
+
+  it("serves static assets through the Worker security boundary", async () => {
+    const response = await fetch(`${workerOrigin}/`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/u);
+    await expect(response.text()).resolves.toContain("EarnedSignal integration asset");
   });
 
   it("creates, edits, runs, and atomically publishes a Scenario through workerd", async () => {

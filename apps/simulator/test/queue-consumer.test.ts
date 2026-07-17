@@ -1,7 +1,11 @@
 import type { ForecastJson, ForecastRun } from "@earned-signal/persistence";
 import { ForecastRunStaleError } from "@earned-signal/persistence";
 import { describe, expect, it, vi } from "vitest";
-import { createForecastExhaustionProcessor, createForecastMessageProcessor } from "../src/queue-consumer.js";
+import {
+  createForecastExhaustionProcessor,
+  createForecastMessageProcessor,
+  forecastQueueKind,
+} from "../src/queue-consumer.js";
 import { ForecastSimulatorHttpError } from "../src/solver-contract.js";
 
 const body = {
@@ -42,6 +46,15 @@ function ports(overrides: Partial<{
 }
 
 describe("Forecast Queue consumer", () => {
+  it("classifies environment-specific primary and dead-letter queues and rejects drift", () => {
+    expect(forecastQueueKind("staging-runs", "staging-runs", "staging-runs-dlq")).toBe("PRIMARY");
+    expect(forecastQueueKind("staging-runs-dlq", "staging-runs", "staging-runs-dlq")).toBe("DLQ");
+    expect(() => forecastQueueKind("production-runs", "staging-runs", "staging-runs-dlq"))
+      .toThrow("Unexpected Forecast Queue production-runs");
+    expect(() => forecastQueueKind("same", "same", "same"))
+      .toThrow("Forecast Queue configuration is invalid");
+  });
+
   it("stores a READY result after the idempotent RUNNING transition", async () => {
     const fixture = ports();
     await fixture.processor(body);

@@ -7,5 +7,7 @@
 - [Persistence context](packages/persistence/CONTEXT.md): PostgreSQL schema, migrations, and Repository adapters.
 - [Staffing solver service](services/staffing-solver/README.md): bounded Python/OR-Tools CP-SAT model and versioned HTTP contract.
 - [Forecast simulator service](services/forecast-simulator/README.md): seeded Python Monte Carlo engine and strict `forecast.v1` HTTP contract.
+- [Operations runbooks](docs/operations/README.md): staging-first release, recovery, monitoring, asynchronous incident, and go-live procedures.
+- [Security operations](docs/security/README.md): identity/secret rotation and privacy/data-lifecycle requirements.
 
 System-wide product rules live in `docs/mvp-spec.md`. Long-running implementation state lives in the GitHub wayfinder map; session recovery state lives in `docs/agents/HANDOFF.md` once created.

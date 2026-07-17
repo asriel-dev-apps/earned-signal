@@ -8,6 +8,18 @@ export default tseslint.config(
   eslint.configs.recommended,
   tseslint.configs.recommended,
   {
+    files: ["**/*.mjs"],
+    languageOptions: {
+      globals: {
+        AbortSignal: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.ts", "**/*.tsx"],
     languageOptions: {
       parserOptions: {

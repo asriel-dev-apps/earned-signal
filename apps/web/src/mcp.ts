@@ -18,6 +18,7 @@ import {
 } from "./project-command-contract.js";
 import type { ApiDependencies, ProjectSession } from "./api.js";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
+import { errorName } from "./edge-security.js";
 import { resolveProjectCommandError } from "./project-command-error.js";
 import {
   StaffingProposalCreateSchema,
@@ -96,8 +97,8 @@ async function executeCommand(
     if (resolution === null) {
       console.error(
         JSON.stringify({
-          message: "Unhandled MCP tool error",
-          error: error instanceof Error ? error.message : String(error),
+          event: "mcp_tool_unhandled_error",
+          errorName: errorName(error),
         }),
       );
     }
@@ -125,8 +126,8 @@ function mcpToolError(error: unknown) {
   const resolution = resolveProjectCommandError(error);
   if (resolution === null) {
     console.error(JSON.stringify({
-      message: "Unhandled MCP tool error",
-      error: error instanceof Error ? error.message : String(error),
+      event: "mcp_tool_unhandled_error",
+      errorName: errorName(error),
     }));
   }
   return {

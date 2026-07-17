@@ -1,0 +1,148 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Highest environment to deploy after staging succeeds
+        required: true
+        type: choice
+        default: staging
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    name: Deploy staging
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    concurrency:
+      group: earned-signal-staging-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_ENV: staging
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      HYPERDRIVE_ID: ${{ vars.STAGING_HYPERDRIVE_ID }}
+      OTHER_HYPERDRIVE_ID: ${{ vars.PRODUCTION_HYPERDRIVE_ID }}
+      OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+      OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
+      MCP_RESOURCE_URL: ${{ vars.MCP_RESOURCE_URL }}
+      PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      COMPUTE_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_COMPUTE_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_COMPUTE_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_COMPUTE_RATE_LIMIT_NAMESPACE_ID }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      EXPECTED_DATABASE_HOST: ${{ vars.DATABASE_HOST }}
+      EXPECTED_DATABASE_NAME: ${{ vars.DATABASE_NAME }}
+      EARNED_SIGNAL_BASE_URL: ${{ vars.BASE_URL }}
+      BACKUP_RESTORE_EVIDENCE_URL: ${{ vars.BACKUP_RESTORE_EVIDENCE_URL }}
+      BACKUP_RESTORE_VERIFIED_AT: ${{ vars.BACKUP_RESTORE_VERIFIED_AT }}
+      MONITORING_EVIDENCE_URL: ${{ vars.MONITORING_EVIDENCE_URL }}
+      ALERT_DRILL_VERIFIED_AT: ${{ vars.ALERT_DRILL_VERIFIED_AT }}
+      RELEASE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.12.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm types:worker --check
+      - name: Materialize and verify staging configuration
+        run: |
+          node .github/scripts/materialize-deploy-config.mjs
+          EARNED_SIGNAL_ENV=staging node scripts/verify-beta-readiness.mjs
+          node .github/scripts/verify-operations-evidence.mjs
+      - name: Apply database migrations once
+        run: pnpm --dir packages/persistence db:migrate
+      - name: Deploy asynchronous workers
+        run: |
+          pnpm --dir apps/optimizer exec wrangler deploy --env staging --strict --containers-rollout gradual --tag "$RELEASE_TAG"
+          pnpm --dir apps/simulator exec wrangler deploy --env staging --strict --containers-rollout gradual --tag "$RELEASE_TAG"
+      - name: Build and deploy web worker with static assets
+        run: |
+          pnpm --dir apps/web build --mode staging
+          node .github/scripts/verify-web-build.mjs
+          pnpm --dir apps/web exec wrangler deploy --strict --tag "$RELEASE_TAG"
+      - name: Run read-only staging smoke test
+        run: node scripts/beta-smoke.mjs
+
+  production:
+    name: Deploy production
+    if: ${{ inputs.target == 'production' && github.ref == 'refs/heads/main' }}
+    needs: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: earned-signal-production-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_ENV: production
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      HYPERDRIVE_ID: ${{ vars.PRODUCTION_HYPERDRIVE_ID }}
+      OTHER_HYPERDRIVE_ID: ${{ vars.STAGING_HYPERDRIVE_ID }}
+      OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+      OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      OIDC_JWKS_URL: ${{ vars.OIDC_JWKS_URL }}
+      MCP_RESOURCE_URL: ${{ vars.MCP_RESOURCE_URL }}
+      PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      COMPUTE_RATE_LIMIT_NAMESPACE_ID: ${{ vars.PRODUCTION_COMPUTE_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_PRE_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_AUTH_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_AUTH_RATE_LIMIT_NAMESPACE_ID }}
+      OTHER_COMPUTE_RATE_LIMIT_NAMESPACE_ID: ${{ vars.STAGING_COMPUTE_RATE_LIMIT_NAMESPACE_ID }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      EXPECTED_DATABASE_HOST: ${{ vars.DATABASE_HOST }}
+      EXPECTED_DATABASE_NAME: ${{ vars.DATABASE_NAME }}
+      EARNED_SIGNAL_BASE_URL: ${{ vars.BASE_URL }}
+      BACKUP_RESTORE_EVIDENCE_URL: ${{ vars.BACKUP_RESTORE_EVIDENCE_URL }}
+      BACKUP_RESTORE_VERIFIED_AT: ${{ vars.BACKUP_RESTORE_VERIFIED_AT }}
+      MONITORING_EVIDENCE_URL: ${{ vars.MONITORING_EVIDENCE_URL }}
+      ALERT_DRILL_VERIFIED_AT: ${{ vars.ALERT_DRILL_VERIFIED_AT }}
+      RELEASE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.12.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize and verify production configuration
+        run: |
+          node .github/scripts/materialize-deploy-config.mjs
+          EARNED_SIGNAL_ENV=production node scripts/verify-beta-readiness.mjs
+          node .github/scripts/verify-operations-evidence.mjs
+      - name: Apply database migrations once
+        run: pnpm --dir packages/persistence db:migrate
+      - name: Deploy asynchronous workers
+        run: |
+          pnpm --dir apps/optimizer exec wrangler deploy --env production --strict --containers-rollout gradual --tag "$RELEASE_TAG"
+          pnpm --dir apps/simulator exec wrangler deploy --env production --strict --containers-rollout gradual --tag "$RELEASE_TAG"
+      - name: Build and deploy web worker with static assets
+        run: |
+          pnpm --dir apps/web build --mode production
+          node .github/scripts/verify-web-build.mjs
+          pnpm --dir apps/web exec wrangler deploy --strict --tag "$RELEASE_TAG"
+      - name: Run read-only production smoke test
+        run: node scripts/beta-smoke.mjs

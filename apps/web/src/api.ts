@@ -51,6 +51,7 @@ import {
   staffingProposalResponse,
 } from "./staffing-contract.js";
 import { ForecastResultSchema, ForecastRunCreateSchema } from "./forecast-contract.js";
+import { errorName, rateLimitedResponse, RequestRateLimitedError } from "./edge-security.js";
 
 export interface ProjectSession {
   readonly service: ProjectCommandService;
@@ -735,7 +736,11 @@ export function createApiApp(dependencies: ApiDependencies) {
       try {
         await session.performance.refresh(tenantId, projectId);
       } catch (error) {
-        console.error("Project command committed, but the derived performance cache could not be refreshed", error);
+        console.error(JSON.stringify({
+          event: "performance_refresh_failed",
+          requestId: context.req.header("x-request-id") ?? "unknown",
+          errorName: errorName(error),
+        }));
       }
       context.header("ETag", `"${result.revision}"`);
       context.header("Cache-Control", "no-store");
@@ -1090,7 +1095,11 @@ export function createApiApp(dependencies: ApiDependencies) {
       try {
         await session.performance.refresh(tenantId, projectId);
       } catch (error) {
-        console.error("Scenario published, but the derived performance cache could not be refreshed", error);
+        console.error(JSON.stringify({
+          event: "performance_refresh_failed",
+          requestId: context.req.header("x-request-id") ?? "unknown",
+          errorName: errorName(error),
+        }));
       }
       context.header("ETag", `"${result.revision}"`);
       return context.json({
@@ -1107,6 +1116,7 @@ export function createApiApp(dependencies: ApiDependencies) {
   });
 
   app.onError((error, context) => {
+    if (error instanceof RequestRateLimitedError) return rateLimitedResponse();
     if (error instanceof AuthenticationRequiredError) {
       context.header("WWW-Authenticate", "Bearer");
       return context.json({ error: { code: "AUTHENTICATION_REQUIRED", message: error.message } }, 401);
@@ -1129,8 +1139,9 @@ export function createApiApp(dependencies: ApiDependencies) {
     }
     console.error(
       JSON.stringify({
-        message: "Unhandled API error",
-        error: error instanceof Error ? error.message : String(error),
+        event: "api_unhandled_error",
+        requestId: context.req.header("x-request-id") ?? "unknown",
+        errorName: errorName(error),
       }),
     );
     return context.json(

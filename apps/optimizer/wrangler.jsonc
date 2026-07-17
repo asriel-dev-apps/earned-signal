@@ -1,22 +1,18 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "earned-signal-optimizer",
+  "name": "earned-signal-optimizer-local",
   "main": "./src/index.ts",
-  "compatibility_date": "2026-07-15",
+  "compatibility_date": "2026-07-17",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
   },
   "hyperdrive": [
-    {
-      "binding": "HYPERDRIVE",
-      "id": "00000000000000000000000000000000"
-    }
+    { "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" }
   ],
-  "ai": {
-    "binding": "AI"
-  },
+  "ai": { "binding": "AI" },
   "containers": [
     {
       "class_name": "StaffingSolverContainer",
@@ -27,23 +23,83 @@
   ],
   "durable_objects": {
     "bindings": [
-      {
-        "name": "STAFFING_SOLVER",
-        "class_name": "StaffingSolverContainer"
-      }
+      { "name": "STAFFING_SOLVER", "class_name": "StaffingSolverContainer" }
     ]
   },
   "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["StaffingSolverContainer"]
-    }
+    { "tag": "v1", "new_sqlite_classes": ["StaffingSolverContainer"] }
   ],
   "workflows": [
     {
       "binding": "STAFFING_WORKFLOW",
-      "name": "earned-signal-staffing-proposals",
+      "name": "earned-signal-local-staffing-proposals",
       "class_name": "StaffingProposalWorkflow"
     }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "earned-signal-optimizer-staging",
+      "observability": {
+        "enabled": true,
+        "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
+        "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+      },
+      "hyperdrive": [
+        { "binding": "HYPERDRIVE", "id": "11111111111111111111111111111111" }
+      ],
+      "ai": { "binding": "AI" },
+      "containers": [
+        {
+          "class_name": "StaffingSolverContainer",
+          "image": "../../services/staffing-solver/Dockerfile",
+          "max_instances": 2,
+          "instance_type": "basic"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "STAFFING_SOLVER", "class_name": "StaffingSolverContainer" }
+        ]
+      },
+      "workflows": [
+        {
+          "binding": "STAFFING_WORKFLOW",
+          "name": "earned-signal-staging-staffing-proposals",
+          "class_name": "StaffingProposalWorkflow"
+        }
+      ]
+    },
+    "production": {
+      "name": "earned-signal-optimizer-production",
+      "observability": {
+        "enabled": true,
+        "logs": { "enabled": true, "head_sampling_rate": 0.1, "invocation_logs": true },
+        "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+      },
+      "hyperdrive": [
+        { "binding": "HYPERDRIVE", "id": "22222222222222222222222222222222" }
+      ],
+      "ai": { "binding": "AI" },
+      "containers": [
+        {
+          "class_name": "StaffingSolverContainer",
+          "image": "../../services/staffing-solver/Dockerfile",
+          "max_instances": 2,
+          "instance_type": "basic"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "STAFFING_SOLVER", "class_name": "StaffingSolverContainer" }
+        ]
+      },
+      "workflows": [
+        {
+          "binding": "STAFFING_WORKFLOW",
+          "name": "earned-signal-production-staffing-proposals",
+          "class_name": "StaffingProposalWorkflow"
+        }
+      ]
+    }
+  }
 }

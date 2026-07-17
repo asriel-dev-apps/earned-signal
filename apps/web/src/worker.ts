@@ -26,6 +26,20 @@ import {
 } from "./oidc-auth.js";
 import { ensureStaffingWorkflow } from "./workflow-dispatch.js";
 import { staffingProposalHash } from "./staffing-contract.js";
+import {
+  bodyTooLargeResponse,
+  boundedRequest,
+  enforceAuthenticatedLimits,
+  enforcePreAuthenticationLimit,
+  internalErrorResponse,
+  rateLimitedResponse,
+  requestId,
+  RequestRateLimitedError,
+  routeKey,
+  secureResponse,
+  withRequestId,
+  writeHttpRequestLog,
+} from "./edge-security.js";
 
 export async function openHyperdriveProjectSession(
   environment: Env,
@@ -66,29 +80,69 @@ export async function openHyperdriveProjectSession(
 }
 
 const authenticator = createOidcBearerAuthenticator(createJoseOidcTokenVerifier());
-const app = createApiApp({
-  authenticate: (request, environment) =>
-    authenticator.authenticate(request, {
+const authenticateForAudience = (audience: (environment: Env) => string) =>
+  async (request: Request, environment: Env) => {
+    const identity = await authenticator.authenticate(request, {
       issuer: environment.OIDC_ISSUER,
-      audience: environment.OIDC_AUDIENCE,
+      audience: audience(environment),
       jwksUrl: environment.OIDC_JWKS_URL,
-    }),
+    });
+    await enforceAuthenticatedLimits(
+      environment.AUTH_RATE_LIMIT,
+      environment.COMPUTE_RATE_LIMIT,
+      request,
+      identity,
+    );
+    return identity;
+  };
+
+const app = createApiApp({
+  authenticate: authenticateForAudience((environment) => environment.OIDC_AUDIENCE),
   openProjectSession: openHyperdriveProjectSession,
 });
 
 const mcp = createProjectMcpHandler({
-  authenticate: (request, environment) =>
-    authenticator.authenticate(request, {
-      issuer: environment.OIDC_ISSUER,
-      audience: environment.MCP_RESOURCE_URL,
-      jwksUrl: environment.OIDC_JWKS_URL,
-    }),
+  authenticate: authenticateForAudience((environment) => environment.MCP_RESOURCE_URL),
   openProjectSession: openHyperdriveProjectSession,
 });
 
 export default {
   async fetch(request, environment, context) {
-    const mcpResponse = await mcp(request, environment, context);
-    return mcpResponse ?? app.fetch(request, environment, context);
+    const id = requestId();
+    const startedAt = Date.now();
+    const route = routeKey(request);
+    let response: Response;
+    let failure: unknown;
+    try {
+      await enforcePreAuthenticationLimit(environment.PRE_AUTH_RATE_LIMIT, request);
+      const bounded = await boundedRequest(request);
+      if (bounded === null) {
+        response = bodyTooLargeResponse();
+      } else {
+        const correlated = withRequestId(bounded, id);
+        const pathname = new URL(correlated.url).pathname;
+        if (pathname.startsWith("/api/") || pathname.startsWith("/.well-known/") || pathname === "/mcp") {
+          const mcpResponse = await mcp(correlated, environment, context);
+          response = mcpResponse ?? await app.fetch(correlated, environment, context);
+        } else {
+          response = await environment.ASSETS.fetch(correlated);
+        }
+      }
+    } catch (error) {
+      failure = error;
+      response = error instanceof RequestRateLimitedError
+        ? rateLimitedResponse()
+        : internalErrorResponse();
+    }
+    const secured = secureResponse(request, response, id, environment.OIDC_ISSUER);
+    writeHttpRequestLog({
+      requestId: id,
+      method: request.method,
+      route,
+      status: secured.status,
+      durationMs: Date.now() - startedAt,
+      ...(failure === undefined ? {} : { error: failure }),
+    });
+    return secured;
   },
 } satisfies ExportedHandler<Env>;
