@@ -3,13 +3,16 @@ import {
   ClientSideRowModelModule,
   ColumnAutoSizeModule,
   NumberEditorModule,
+  RowApiModule,
   RowSelectionModule,
   RowStyleModule,
+  ScrollApiModule,
   SelectEditorModule,
   TextEditorModule,
   themeQuartz,
   type CellValueChangedEvent,
   type ColDef,
+  type RowDataUpdatedEvent,
   type SelectionChangedEvent,
 } from "ag-grid-community";
 import { AgGridProvider, AgGridReact } from "ag-grid-react";
@@ -150,6 +153,8 @@ const gridModules = [
   NumberEditorModule,
   SelectEditorModule,
   RowSelectionModule,
+  RowApiModule,
+  ScrollApiModule,
   CellStyleModule,
   RowStyleModule,
 ];
@@ -689,6 +694,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("A4");
   const [showPlanningFields, setShowPlanningFields] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null);
+  const [pendingRevealTaskId, setPendingRevealTaskId] = useState<string | null>(null);
   const referenceBaseline = approvedBaseline ?? currentProject;
   const displayedProject = mode === "baseline" ? referenceBaseline : currentProject;
   const currentAnalysis = useMemo(() => {
@@ -869,6 +876,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   );
   const editable = mode === "current" && (saveState === "preview" || saveState === "saved");
   const criticalEdges = useMemo(() => criticalDependencyEdges(rows), [rows]);
+  const revealPendingTask = useCallback((event: RowDataUpdatedEvent<TaskRow>) => {
+    if (pendingRevealTaskId === null) return;
+    const node = event.api.getRowNode(pendingRevealTaskId);
+    if (node === undefined) return;
+    event.api.ensureNodeVisible(node, "middle");
+    node.setSelected(true);
+    setPendingRevealTaskId(null);
+  }, [pendingRevealTaskId]);
   const columnDefs = useMemo<ColDef<TaskRow>[]>(
     () => [
       { field: "id", headerName: "Task ID", pinned: "left", width: 92, tooltipField: "id", cellClass: "calculated-cell task-id-cell" },
@@ -1054,6 +1069,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     };
     if (executeCommand({ type: "task.add", task })) {
       setSelectedTaskId(task.id);
+      if (client === undefined) setRecentlyAddedTaskId(task.id);
+      setPendingRevealTaskId(task.id);
     }
   };
 
@@ -1249,6 +1266,12 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                     </button>
                   </div>
                 </div>
+                {recentlyAddedTaskId === null ? null : (
+                  <div className="task-add-confirmation" role="status" aria-live="polite">
+                    <strong>{recentlyAddedTaskId} added</strong>
+                    <span>The added row is selected below. Preview changes reset when this page reloads.</span>
+                  </div>
+                )}
                 <CriticalPathRibbon rows={rows} edges={criticalEdges} onSelect={setSelectedTaskId} />
                 <div className="grid-wrap">
                   <AgGridReact<TaskRow>
@@ -1257,6 +1280,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                     columnDefs={columnDefs}
                     defaultColDef={{ sortable: true, resizable: true, suppressHeaderMenuButton: true }}
                     getRowId={({ data }) => data.id}
+                    onRowDataUpdated={revealPendingTask}
                     rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: true }}
                     onSelectionChanged={(event: SelectionChangedEvent<TaskRow>) => {
                       setSelectedTaskId(event.api.getSelectedRows()[0]?.id ?? null);

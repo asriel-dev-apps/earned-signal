@@ -148,6 +148,17 @@ describe("persisted project workspace", () => {
     expect(screen.getByRole("button", { name: "Hide details" })).toBeTruthy();
   });
 
+  it("confirms a preview task addition where a mobile user can see it", async () => {
+    render(<App />);
+    expect(await screen.findByText(/9 work packages/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Add work package/ }));
+
+    expect(screen.getByText(/10 work packages/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("A10 added");
+    await waitFor(() => expect(screen.getByRole("row", { name: /A10/ }).getAttribute("aria-selected")).toBe("true"));
+  });
+
   it("does not pretend that Staffing optimization is available in demo mode", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Staffing Proposals" }));

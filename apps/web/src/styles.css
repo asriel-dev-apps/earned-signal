@@ -437,6 +437,21 @@ h1 {
   background: #1b6859;
 }
 
+.task-add-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #b9ddd4;
+  color: #245f53;
+  background: #edf8f5;
+  padding: 8px 17px;
+  font-size: 10px;
+}
+
+.task-add-confirmation strong {
+  white-space: nowrap;
+}
+
 .critical-path-ribbon {
   display: flex;
   min-height: 54px;
@@ -521,7 +536,22 @@ h1 {
 
 .grid-wrap {
   min-height: 0;
+  position: relative;
   flex: 1;
+}
+
+.grid-wrap > div {
+  position: absolute;
+  inset: 0;
+}
+
+.grid-wrap .ag-styled-root {
+  display: block;
+  height: 100%;
+}
+
+.grid-wrap .ag-root-wrapper {
+  height: 100%;
 }
 
 .ag-root-wrapper {
@@ -1404,7 +1434,11 @@ h1 {
   .publish-button { width: 100%; }
   .grid-toolbar > div:first-child > span { display: none; }
   .toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
-  .workspace-grid, .grid-panel { display: block; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
+  .toolbar-actions button { min-height: 44px; }
+  .toolbar-actions .primary-button { flex: 1 0 100%; font-size: 12px; }
+  .task-add-confirmation { align-items: flex-start; flex-direction: column; font-size: 11px; }
+  .workspace-grid { display: block; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
+  .grid-panel { display: flex; width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
   .grid-wrap { width: 100%; max-width: 100%; overflow: hidden; }
   .critical-path-ribbon { align-items: stretch; flex-direction: column; }
   .grid-footer span:not(.gantt-hint) { display: none; }
