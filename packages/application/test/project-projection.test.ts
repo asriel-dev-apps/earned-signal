@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { projectWbsGrid, type ProjectState, type ProjectTask } from "../src/index.js";
+import {
+  projectionRoleForProjectRole,
+  projectWbsGrid,
+  projectWorkspaceView,
+  type ProjectState,
+  type ProjectTask,
+} from "../src/index.js";
 
 function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): ProjectTask {
   return {
@@ -93,10 +99,46 @@ describe("projectWbsGrid", () => {
     });
   });
 
-  it("orders rows by sortOrder and keeps the ⑦ role seam a no-op", () => {
+  it("orders rows by sortOrder and never leaks a member-sensitive column to any role", () => {
     const privileged = projectWbsGrid(project, { role: "PRIVILEGED" });
     const general = projectWbsGrid(project, { role: "GENERAL" });
     expect(privileged.rows.map((row) => row.id)).toEqual(["task-1", "task-2"]);
+    // The grid surfaces no privileged-only member field, so the general grid is
+    // structurally identical to the privileged grid — and neither row carries
+    // dailyCapacityMinutes.
     expect(general.rows).toEqual(privileged.rows);
+    for (const row of general.rows) {
+      expect("dailyCapacityMinutes" in row).toBe(false);
+    }
+  });
+});
+
+describe("projectionRoleForProjectRole", () => {
+  it("maps OWNER and EDITOR to PRIVILEGED", () => {
+    expect(projectionRoleForProjectRole("OWNER")).toBe("PRIVILEGED");
+    expect(projectionRoleForProjectRole("EDITOR")).toBe("PRIVILEGED");
+  });
+
+  it("maps VIEWER to GENERAL", () => {
+    expect(projectionRoleForProjectRole("VIEWER")).toBe("GENERAL");
+  });
+});
+
+describe("projectWorkspaceView", () => {
+  it("keeps the sensitive member capacity for the PRIVILEGED role", () => {
+    const view = projectWorkspaceView(project, "PRIVILEGED");
+    const member = view.members[0]!;
+    expect("dailyCapacityMinutes" in member).toBe(true);
+    expect((member as { dailyCapacityMinutes?: number }).dailyCapacityMinutes).toBe(480);
+  });
+
+  it("removes the member capacity key for the GENERAL role (absent, not null)", () => {
+    const view = projectWorkspaceView(project, "GENERAL");
+    const member = view.members[0]!;
+    // Basis 6: the key is absent from the structure, not present-and-null.
+    expect("dailyCapacityMinutes" in member).toBe(false);
+    expect(Object.keys(member)).toEqual(["id", "name", "calendarId"]);
+    // The non-sensitive fields survive.
+    expect(member).toMatchObject({ id: "member-1", name: "Member 01", calendarId: "standard" });
   });
 });

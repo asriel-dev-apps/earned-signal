@@ -1,11 +1,13 @@
 import {
+  projectionRoleForProjectRole,
   projectWbsGrid,
+  projectWorkspaceView,
   type AuthenticatedIdentity,
   type ProjectCommandAuthorizer,
   type ProjectCommandService,
-  type ProjectionRole,
   type ProjectQueryAuthorizer,
   type ProjectState,
+  type ProjectStateView,
   type WbsGridProjection,
 } from "@earned-signal/application";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
@@ -66,11 +68,14 @@ const CalendarSchema = z.object({
   nonWorkingDates: z.array(z.iso.date()),
 });
 
+// dailyCapacityMinutes is a privileged-only field: the general read model omits
+// the key entirely (⑦ / ADR 0011 D18), so the response contract marks it
+// optional rather than nullable.
 const MemberResponseSchema = z.object({
   id: UuidSchema,
   name: z.string(),
   calendarId: z.string(),
-  dailyCapacityMinutes: z.number().int(),
+  dailyCapacityMinutes: z.number().int().optional(),
 });
 
 const DependencyResponseSchema = z.object({
@@ -172,7 +177,7 @@ const WbsGridResponseSchema = z
   })
   .openapi("ProjectWbsGridResponse");
 
-function projectStateResponse(project: ProjectState): z.infer<typeof ProjectStateResponseSchema> {
+function projectStateResponse(project: ProjectStateView): z.infer<typeof ProjectStateResponseSchema> {
   return {
     id: project.id,
     name: project.name,
@@ -186,6 +191,8 @@ function projectStateResponse(project: ProjectState): z.infer<typeof ProjectStat
       workingWeekdays: [...calendar.workingWeekdays],
       nonWorkingDates: [...calendar.nonWorkingDates],
     })),
+    // Spread keeps the general member absent of dailyCapacityMinutes: the view
+    // has already removed the key, so it never reaches the JSON response.
     members: project.members.map((member) => ({ ...member })),
     tasks: project.tasks.map((task) => ({
       ...task,
@@ -274,12 +281,6 @@ const commandRoute = createRoute({
   },
 });
 
-function projectionRole(projectRole: "OWNER" | "EDITOR" | "VIEWER"): ProjectionRole {
-  // ⑦ role seam: VIEWER maps to the GENERAL projection role. Field filtering is
-  // implemented in ⑦; the projection is a no-op filter in step ②.
-  return projectRole === "VIEWER" ? "GENERAL" : "PRIVILEGED";
-}
-
 export function createApiApp(dependencies: ApiDependencies) {
   const app = new OpenAPIHono<{ Bindings: Env }>({
     defaultHook: (result, context) => {
@@ -366,16 +367,20 @@ export function createApiApp(dependencies: ApiDependencies) {
     const identity = await dependencies.authenticate(context.req.raw, context.env);
     const session = await dependencies.openProjectSession(context.env);
     try {
-      await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
+      const grant = await session.queryAuthorizer.authorize({ identity, tenantId, projectId });
       const workspace = await session.workspace.load(tenantId, projectId);
       if (workspace === null) {
         return context.json({ error: { code: "PROJECT_NOT_FOUND", message: "Project was not found" } }, 404);
       }
       context.header("Cache-Control", "no-store");
       context.header("ETag", `"${workspace.revision}"`);
+      const view = projectWorkspaceView(
+        workspace.current,
+        projectionRoleForProjectRole(grant.projectRole),
+      );
       return context.json({
         revision: workspace.revision.toString(),
-        current: projectStateResponse(workspace.current),
+        current: projectStateResponse(view),
       }, 200);
     } finally {
       await session.close();
@@ -395,7 +400,7 @@ export function createApiApp(dependencies: ApiDependencies) {
       context.header("Cache-Control", "no-store");
       context.header("ETag", `"${workspace.revision}"`);
       const projection = projectWbsGrid(workspace.current, {
-        role: projectionRole(grant.projectRole),
+        role: projectionRoleForProjectRole(grant.projectRole),
       });
       return context.json(wbsGridResponse(projection), 200);
     } finally {

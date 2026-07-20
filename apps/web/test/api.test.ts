@@ -99,12 +99,46 @@ describe("project REST API", () => {
     expect(body.rollup).toHaveProperty("spi");
   });
 
-  it("keeps the ⑦ role seam a no-op for the GENERAL (VIEWER) role in step ②", async () => {
+  it("serves the WBS grid to the GENERAL (VIEWER) role without a member-sensitive column", async () => {
     const { app, project } = fakeApp({ projectRole: "VIEWER" });
     const response = await app.request(`${BASE}/wbs-grid`, {}, env);
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { rows: unknown[] };
+    const body = (await response.json()) as { rows: Record<string, unknown>[] };
     expect(body.rows).toHaveLength(project!.tasks.length);
+    for (const row of body.rows) {
+      expect(row).not.toHaveProperty("dailyCapacityMinutes");
+    }
+  });
+
+  it("omits member capacity from the workspace load for the GENERAL (VIEWER) role", async () => {
+    const { app } = fakeApp({ projectRole: "VIEWER" });
+    const response = await app.request(BASE, {}, env);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      current: { members: Record<string, unknown>[] };
+    };
+    expect(body.current.members.length).toBeGreaterThan(0);
+    for (const member of body.current.members) {
+      // Basis 6: the sensitive key is absent from the API response itself, not
+      // hidden client-side.
+      expect("dailyCapacityMinutes" in member).toBe(false);
+    }
+  });
+
+  it("keeps member capacity in the workspace load for a PRIVILEGED role", async () => {
+    for (const projectRole of ["OWNER", "EDITOR"] as const) {
+      const { app } = fakeApp({ projectRole });
+      const response = await app.request(BASE, {}, env);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        current: { members: Record<string, unknown>[] };
+      };
+      expect(body.current.members.length).toBeGreaterThan(0);
+      for (const member of body.current.members) {
+        expect("dailyCapacityMinutes" in member).toBe(true);
+        expect(typeof member.dailyCapacityMinutes).toBe("number");
+      }
+    }
   });
 
   it("executes a revisioned task.update command", async () => {

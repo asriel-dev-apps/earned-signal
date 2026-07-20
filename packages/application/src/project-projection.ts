@@ -3,15 +3,62 @@ import {
   type EffortRollup,
   type TaskStatus,
 } from "@earned-signal/domain";
-import { leafTaskIds, type ProjectState } from "./project-state.js";
+import type { ProjectRole } from "./project-command-authorizer.js";
+import { leafTaskIds, type ProjectMember, type ProjectState } from "./project-state.js";
 
 /**
- * Viewer role for the WBS-grid projection. The projection is the single choke
- * point where ⑦ strips role-sensitive fields (member capacity, and the Phase-2
- * rate) for the general role. The seam is placed here; the filtering itself is
- * implemented in ⑦ and is a no-op in step ②.
+ * Viewer role for the API read models. This module is the single choke point
+ * where ⑦ strips role-sensitive member fields (per-resource capacity today; the
+ * Phase-2 rate/productivity) for the general role, so no route ever hand-rolls
+ * the projection. PRIVILEGED sees every field; GENERAL sees the non-sensitive
+ * projection (ADR 0011 Decision 7 / D18: projected out at the API boundary, not
+ * merely hidden in the UI).
  */
 export type ProjectionRole = "PRIVILEGED" | "GENERAL";
+
+/**
+ * Map the persisted project role to the read-model projection role. OWNER and
+ * EDITOR are PRIVILEGED; every other role (VIEWER) is GENERAL. Pure so the role
+ * decision is unit-testable in isolation from HTTP and auth wiring.
+ */
+export function projectionRoleForProjectRole(projectRole: ProjectRole): ProjectionRole {
+  return projectRole === "OWNER" || projectRole === "EDITOR" ? "PRIVILEGED" : "GENERAL";
+}
+
+/**
+ * Member as the GENERAL read model sees it: the sensitive per-resource capacity
+ * (and future rate/productivity) is absent from the type, so it cannot be
+ * emitted downstream. PRIVILEGED keeps the full {@link ProjectMember}.
+ */
+export type GeneralProjectMember = Omit<ProjectMember, "dailyCapacityMinutes">;
+export type ProjectMemberView = ProjectMember | GeneralProjectMember;
+
+/** Project read model with members narrowed to whatever the role may read. */
+export interface ProjectStateView extends Omit<ProjectState, "members"> {
+  readonly members: readonly ProjectMemberView[];
+}
+
+/**
+ * Drop the privileged-only member fields, keeping the key absent (not null) so
+ * `"dailyCapacityMinutes" in member` is false in the general read model. The one
+ * place that enumerates the general-visible member fields.
+ */
+function stripSensitiveMemberFields(member: ProjectMember): GeneralProjectMember {
+  return { id: member.id, name: member.name, calendarId: member.calendarId };
+}
+
+/**
+ * Role-scoped project read model for the workspace-load endpoint. GENERAL gets a
+ * member projection with the sensitive capacity removed at the structure level;
+ * PRIVILEGED gets the project unchanged.
+ */
+export function projectWorkspaceView(
+  project: ProjectState,
+  role: ProjectionRole,
+): ProjectStateView {
+  if (role === "PRIVILEGED") return project;
+  return { ...project, members: project.members.map(stripSensitiveMemberFields) };
+}
 
 export interface WbsGridTaskRow {
   readonly id: string;
@@ -66,7 +113,13 @@ export function projectWbsGrid(
   options: WbsGridProjectionOptions = {},
 ): WbsGridProjection {
   const role = options.role ?? "PRIVILEGED";
-  const memberNameById = new Map(project.members.map((member) => [member.id, member.name]));
+  // ⑦ role projection: member data reaches the grid only through the role-scoped
+  // read model (the single choke point), so a general grid can never carry a
+  // privileged-only member field — today the grid surfaces the non-sensitive
+  // assignee name only, and any future rate/productivity column stays absent for
+  // GENERAL by construction.
+  const scopedMembers = projectWorkspaceView(project, role).members;
+  const memberNameById = new Map(scopedMembers.map((member) => [member.id, member.name]));
 
   const leaves = leafTaskIds(project.tasks);
   const effort = calculateEffortEvm({
@@ -126,10 +179,6 @@ export function projectWbsGrid(
       };
     })
     .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
-
-  // ⑦ role seam: the GENERAL role will strip role-sensitive fields (member
-  // capacity, Phase-2 rate) from the projection here. Not filtered in step ②.
-  void role;
 
   return {
     projectId: project.id,
