@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  applyEffortSchedule,
   applyProjectCommand,
   projectWbsGrid,
   type ProjectCommand,
@@ -72,7 +71,7 @@ function statefulFakeClient(seed: ProjectState): {
 }
 
 describe("App WBS grid", () => {
-  it("renders the 23 meta headers, the rollup, and virtualized task rows", async () => {
+  it("renders the meta headers, the rollup, and virtualized task rows", async () => {
     const { client } = fakeClient();
     render(<App client={client} />);
 
@@ -147,55 +146,6 @@ describe("App WBS grid", () => {
     );
   });
 
-  it("persists a proration-weight (Wt) edit through executeCommand as task.update", async () => {
-    // A generated child carries a proration weight; editing it re-splits the parent
-    // effort. Build a state with generated children (parent effort 2400 min) so a Wt
-    // cell is populated, then drive an inline edit on the first weighted child.
-    const base = createDemoProject({ parentCount: 1, subtasksPerParent: 0, memberCount: 1 });
-    const parentId = base.tasks[0]!.id;
-    const withEffort = applyProjectCommand(base, {
-      type: "task.update",
-      taskId: parentId,
-      changes: { plannedEffortMinutes: 2_400 },
-    });
-    const withChildren = applyEffortSchedule(
-      applyProjectCommand(withEffort, {
-        type: "task.generateSubtasks",
-        parentTaskId: parentId,
-        templateId: "standard-build",
-      }),
-    );
-    const childGrid = projectWbsGrid(withChildren);
-    const child = childGrid.rows.find((row) => row.prorationWeightBp !== null)!;
-    const execute = vi.fn(async () => ({ revision: "10", replayed: false }));
-    const client: ProjectApiClient = {
-      load: async () => ({ revision: "9", current: withChildren }),
-      grid: async () => childGrid,
-      execute,
-    };
-    render(<App client={client} />);
-    await waitFor(() => {
-      expect(document.querySelector('[data-col="prorationWeightBp"]')).not.toBeNull();
-      expect(screen.getByTestId("save-state").textContent).toBe("saved");
-    });
-
-    // Row 0 is the parent (weight blank); the first non-blank Wt cell is a child.
-    const cell = Array.from(document.querySelectorAll('[data-col="prorationWeightBp"]')).find(
-      (node) => (node.textContent ?? "").trim() !== "",
-    ) as HTMLElement;
-    expect(cell).toBeTruthy();
-    fireEvent.doubleClick(cell);
-    const editor = cell.querySelector("input.cell-editor") as HTMLInputElement;
-    expect(editor).not.toBeNull();
-    fireEvent.change(editor, { target: { value: "4000" } });
-    fireEvent.blur(editor);
-
-    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    expect(execute).toHaveBeenCalledWith(
-      { type: "task.update", taskId: child.id, changes: { prorationWeightBp: 4_000 } },
-      "9",
-    );
-  });
 });
 
 describe("App add task (flat mode)", () => {

@@ -61,7 +61,6 @@ type ColKind =
   | "text"
   | "assignee"
   | "hours"
-  | "weight"
   | "progress"
   | "date"
   | "derivedNum"
@@ -92,13 +91,10 @@ const META: readonly MetaColumn[] = [
   { id: "name", header: "タスク・サブタスク", width: 240, pinned: true, editable: true, kind: "text", field: "name" },
   { id: "assignee", header: "担当", width: 120, pinned: true, editable: true, kind: "assignee", field: "assigneeMemberId" },
   { id: "product", header: "プロダクト", width: 108, pinned: false, editable: true, kind: "text", field: "product" },
-  { id: "reviewRef", header: "レビュー管理No", width: 116, pinned: false, editable: true, kind: "text", field: "reviewRef" },
-  { id: "changeRef", header: "変更管理", width: 96, pinned: false, editable: true, kind: "text", field: "changeRef" },
   { id: "note", header: "備考", width: 140, pinned: false, editable: true, kind: "text", field: "note" },
   { id: "contract", header: "契約", width: 96, pinned: false, editable: true, kind: "text", field: "contract" },
   { id: "plannedEffortDays", header: "工数(人日)", width: 92, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedEffortMinutes", header: "工数(人時)", width: 92, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes" },
-  { id: "prorationWeightBp", header: "重み", width: 72, pinned: false, editable: true, kind: "weight", field: "prorationWeightBp" },
   { id: "plannedEffortHours", header: "計画工数(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedEarnedHours", header: "計画進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedProgress", header: "進捗率(計画)", width: 96, pinned: false, editable: false, kind: "derivedPercent" },
@@ -284,8 +280,6 @@ function displayValue(column: MetaColumn, row: WbsGridTaskRow, index: number): s
       return row.assigneeName ?? "";
     case "hours":
       return formatNumber((row[column.field as keyof WbsGridTaskRow] as number) / 60);
-    case "weight":
-      return row.prorationWeightBp === null ? "" : String(row.prorationWeightBp);
     case "progress":
       return row.progress.toFixed(2);
     case "date":
@@ -333,15 +327,6 @@ function buildChanges(
       if (!Number.isFinite(hours) || hours < 0) return null;
       return { actualEffortMinutes: Math.round(hours * 60) };
     }
-    case "prorationWeightBp": {
-      // Basis points (0–10000). Empty clears the weight (un-prorates the task); a
-      // valid whole number re-weights it, and the shared re-proration keeps the
-      // parent's effort split across its weighted children.
-      if (trimmed === "") return { prorationWeightBp: null };
-      const bp = Number(trimmed);
-      if (!Number.isInteger(bp) || bp < 0 || bp > 10_000) return null;
-      return { prorationWeightBp: bp };
-    }
     case "progress": {
       const fraction = Number(trimmed);
       if (!Number.isFinite(fraction)) return null;
@@ -359,10 +344,6 @@ function buildChanges(
       return { product: raw };
     case "name":
       return { name: raw };
-    case "reviewRef":
-      return { reviewRef: raw };
-    case "changeRef":
-      return { changeRef: raw };
     case "note":
       return { note: raw };
     case "contract":
