@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 45
     environment: staging
     concurrency:
-      group: earned-signal-staging-deploy
+      group: vecta-staging-deploy
       cancel-in-progress: false
     env:
       DEPLOY_ENV: staging
@@ -44,7 +44,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       EXPECTED_DATABASE_HOST: ${{ vars.DATABASE_HOST }}
       EXPECTED_DATABASE_NAME: ${{ vars.DATABASE_NAME }}
-      EARNED_SIGNAL_BASE_URL: ${{ vars.BASE_URL }}
+      VECTA_BASE_URL: ${{ vars.BASE_URL }}
       BACKUP_RESTORE_EVIDENCE_URL: ${{ vars.BACKUP_RESTORE_EVIDENCE_URL }}
       BACKUP_RESTORE_VERIFIED_AT: ${{ vars.BACKUP_RESTORE_VERIFIED_AT }}
       MONITORING_EVIDENCE_URL: ${{ vars.MONITORING_EVIDENCE_URL }}
@@ -66,7 +66,7 @@ jobs:
       - name: Materialize and verify staging configuration
         run: |
           node .github/scripts/materialize-deploy-config.mjs
-          EARNED_SIGNAL_ENV=staging node scripts/verify-beta-readiness.mjs
+          VECTA_ENV=staging node scripts/verify-beta-readiness.mjs
           node .github/scripts/verify-operations-evidence.mjs
       - name: Apply database migrations once
         run: pnpm --dir packages/persistence db:migrate
@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 45
     environment: production
     concurrency:
-      group: earned-signal-production-deploy
+      group: vecta-production-deploy
       cancel-in-progress: false
     env:
       DEPLOY_ENV: production
@@ -111,7 +111,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       EXPECTED_DATABASE_HOST: ${{ vars.DATABASE_HOST }}
       EXPECTED_DATABASE_NAME: ${{ vars.DATABASE_NAME }}
-      EARNED_SIGNAL_BASE_URL: ${{ vars.BASE_URL }}
+      VECTA_BASE_URL: ${{ vars.BASE_URL }}
       BACKUP_RESTORE_EVIDENCE_URL: ${{ vars.BACKUP_RESTORE_EVIDENCE_URL }}
       BACKUP_RESTORE_VERIFIED_AT: ${{ vars.BACKUP_RESTORE_VERIFIED_AT }}
       MONITORING_EVIDENCE_URL: ${{ vars.MONITORING_EVIDENCE_URL }}
@@ -131,7 +131,7 @@ jobs:
       - name: Materialize and verify production configuration
         run: |
           node .github/scripts/materialize-deploy-config.mjs
-          EARNED_SIGNAL_ENV=production node scripts/verify-beta-readiness.mjs
+          VECTA_ENV=production node scripts/verify-beta-readiness.mjs
           node .github/scripts/verify-operations-evidence.mjs
       - name: Apply database migrations once
         run: pnpm --dir packages/persistence db:migrate

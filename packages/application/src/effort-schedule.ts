@@ -1,4 +1,4 @@
-import { scheduleEffortDailyPlans } from "@earned-signal/domain";
+import { scheduleEffortDailyPlans } from "@vecta/domain";
 import { leafTaskIds, type ProjectState } from "./project-state.js";
 
 /**

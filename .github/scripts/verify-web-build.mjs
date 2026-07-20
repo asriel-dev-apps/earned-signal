@@ -14,8 +14,8 @@ if (!configPath.startsWith(`${path.join(webRoot, "dist")}${path.sep}`)) {
   throw new Error("Vite deploy configuration must point inside apps/web/dist");
 }
 const config = JSON.parse(await readFile(configPath, "utf8"));
-if (config.name !== `earned-signal-${environment}`) {
-  throw new Error(`Vite built ${config.name ?? "an unnamed Worker"}, expected earned-signal-${environment}`);
+if (config.name !== `vecta-${environment}`) {
+  throw new Error(`Vite built ${config.name ?? "an unnamed Worker"}, expected vecta-${environment}`);
 }
 if (config.assets?.binding !== "ASSETS" || config.assets?.run_worker_first !== true) {
   throw new Error("Vite output must route static assets through the Worker security boundary");

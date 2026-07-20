@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "earned-signal-worker-integration",
+  "name": "vecta-worker-integration",
   "main": "./test/worker-fixture.ts",
   "compatibility_date": "2026-07-17",
   "compatibility_flags": ["nodejs_compat"],
@@ -11,7 +11,7 @@
   },
   "vars": {
     "OIDC_ISSUER": "http://127.0.0.1:1/",
-    "OIDC_AUDIENCE": "earned-signal-api",
+    "OIDC_AUDIENCE": "vecta-api",
     "OIDC_JWKS_URL": "http://127.0.0.1:1/jwks"
   },
   "ratelimits": [

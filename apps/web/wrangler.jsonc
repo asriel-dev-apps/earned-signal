@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "earned-signal-local",
+  "name": "vecta-local",
   "main": "./src/worker.ts",
   "compatibility_date": "2026-07-17",
   "compatibility_flags": ["nodejs_compat"],
@@ -15,7 +15,7 @@
   },
   "vars": {
     "OIDC_ISSUER": "https://identity.example.invalid/",
-    "OIDC_AUDIENCE": "earned-signal-api-local",
+    "OIDC_AUDIENCE": "vecta-api-local",
     "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json"
   },
   "ratelimits": [
@@ -40,7 +40,7 @@
   ],
   "env": {
     "staging": {
-      "name": "earned-signal-staging",
+      "name": "vecta-staging",
       "observability": {
         "enabled": true,
         "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
@@ -48,7 +48,7 @@
       },
       "vars": {
         "OIDC_ISSUER": "https://identity.staging.example.invalid/",
-        "OIDC_AUDIENCE": "earned-signal-api-staging",
+        "OIDC_AUDIENCE": "vecta-api-staging",
         "OIDC_JWKS_URL": "https://identity.staging.example.invalid/.well-known/jwks.json"
       },
       "ratelimits": [
@@ -73,7 +73,7 @@
       ]
     },
     "production": {
-      "name": "earned-signal-production",
+      "name": "vecta-production",
       "observability": {
         "enabled": true,
         "logs": { "enabled": true, "head_sampling_rate": 0.1, "invocation_logs": true },
@@ -81,7 +81,7 @@
       },
       "vars": {
         "OIDC_ISSUER": "https://identity.production.example.invalid/",
-        "OIDC_AUDIENCE": "earned-signal-api-production",
+        "OIDC_AUDIENCE": "vecta-api-production",
         "OIDC_JWKS_URL": "https://identity.production.example.invalid/.well-known/jwks.json"
       },
       "ratelimits": [

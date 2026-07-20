@@ -7,7 +7,7 @@ REST token は設定済み `OIDC_AUDIENCE`、MCP token は canonical `MCP_RESOUR
 issuer と subject は PostgreSQL の principal に解決され、tenant claim だけでは認可されない。
 
 人間の role は tenant membership と project membership で決まり、agent は project membership に加えて許可された scope を必要とする。
-OIDC Provider 側の group だけで EarnedSignal の project access が付与されたと判断しない。
+OIDC Provider 側の group だけで VECTA の project access が付与されたと判断しない。
 
 ## 秘密情報の保管
 

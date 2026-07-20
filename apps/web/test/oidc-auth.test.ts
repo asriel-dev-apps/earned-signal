@@ -14,7 +14,7 @@ import {
 
 const config = {
   issuer: "https://identity.example.test/",
-  audience: "earned-signal-api",
+  audience: "vecta-api",
   jwksUrl: "https://identity.example.test/.well-known/jwks.json",
 };
 

@@ -7,7 +7,7 @@ const connectionString = process.env.DATABASE_URL;
 const environment = process.env.DEPLOY_ENV;
 const expectedHost = process.env.EXPECTED_DATABASE_HOST;
 const expectedDatabase = process.env.EXPECTED_DATABASE_NAME;
-const EARNED_SIGNAL_MIGRATION_LOCK = [1_169_796_931, 1_761_609_076];
+const VECTA_MIGRATION_LOCK = [1_169_796_931, 1_761_609_076];
 
 if (connectionString === undefined || connectionString.length === 0) {
   throw new Error("DATABASE_URL is required");
@@ -38,10 +38,10 @@ try {
   await client.connect();
   const lock = await client.query({
     text: "select pg_try_advisory_lock($1, $2) as acquired",
-    values: EARNED_SIGNAL_MIGRATION_LOCK,
+    values: VECTA_MIGRATION_LOCK,
   });
   locked = lock.rows[0]?.acquired === true;
-  if (!locked) throw new Error("Another EarnedSignal migration is already running");
+  if (!locked) throw new Error("Another VECTA migration is already running");
   await migrate(drizzle(client), {
     migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
   });
@@ -51,7 +51,7 @@ try {
     if (locked) {
       await client.query({
         text: "select pg_advisory_unlock($1, $2)",
-        values: EARNED_SIGNAL_MIGRATION_LOCK,
+        values: VECTA_MIGRATION_LOCK,
       });
     }
   } finally {

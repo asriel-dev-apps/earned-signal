@@ -1,4 +1,4 @@
-import type { AuthenticatedIdentity } from "@earned-signal/application";
+import type { AuthenticatedIdentity } from "@vecta/application";
 import {
   createRemoteJWKSet,
   jwtVerify,

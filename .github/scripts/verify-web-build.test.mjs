@@ -10,7 +10,7 @@ const execute = promisify(execFile);
 const script = path.resolve(import.meta.dirname, "verify-web-build.mjs");
 
 async function fixture(config) {
-  const root = await mkdtemp(path.join(tmpdir(), "earned-signal-web-build-"));
+  const root = await mkdtemp(path.join(tmpdir(), "vecta-web-build-"));
   const deploy = path.join(root, "apps/web/.wrangler/deploy");
   const output = path.join(root, "apps/web/dist/worker");
   await mkdir(deploy, { recursive: true });
@@ -22,7 +22,7 @@ async function fixture(config) {
 
 test("accepts a flattened environment-specific build with Worker-first assets", async () => {
   const root = await fixture({
-    name: "earned-signal-staging",
+    name: "vecta-staging",
     assets: { binding: "ASSETS", run_worker_first: true, directory: "../client" },
     vars: { OIDC_ISSUER: "https://identity.example.test/" },
   });
@@ -38,7 +38,7 @@ test("accepts a flattened environment-specific build with Worker-first assets", 
 
 test("rejects the wrong Worker environment and an asset-first build", async () => {
   const root = await fixture({
-    name: "earned-signal-production",
+    name: "vecta-production",
     assets: { binding: "ASSETS", directory: "../client" },
     vars: { OIDC_ISSUER: "https://identity.example.test/" },
   });

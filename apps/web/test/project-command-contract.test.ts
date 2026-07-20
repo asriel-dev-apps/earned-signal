@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProjectCommand } from "@earned-signal/application";
+import type { ProjectCommand } from "@vecta/application";
 import { ApiCommandSchema, fromCommand, toCommand } from "../src/project-command-contract.js";
 
 const PARENT_ID = "b0000000-0000-4000-8000-000000000001";

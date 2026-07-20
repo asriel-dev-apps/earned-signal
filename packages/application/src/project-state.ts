@@ -1,4 +1,4 @@
-import type { DependencyType } from "@earned-signal/domain";
+import type { DependencyType } from "@vecta/domain";
 import {
   deriveSubtaskId,
   getSubtaskTemplate,

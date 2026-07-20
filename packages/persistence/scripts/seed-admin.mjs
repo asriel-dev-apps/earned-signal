@@ -21,7 +21,7 @@ import pg from "pg";
 // Optional env:
 //   ADMIN_DISPLAY_NAME  overrides the display name (defaults to ADMIN_EMAIL)
 //   TENANT_ID / PROJECT_ID / ADMIN_PRINCIPAL_ID  stable UUIDs (else generated)
-//   TENANT_NAME / PROJECT_NAME                   labels (default "EarnedSignal")
+//   TENANT_NAME / PROJECT_NAME                   labels (default "VECTA")
 //   PROJECT_START / STATUS_DATE                  ISO dates (default today)
 
 const dryRun = process.argv.includes("--dry-run");
@@ -34,8 +34,8 @@ const displayName = process.env.ADMIN_DISPLAY_NAME ?? email;
 const tenantId = process.env.TENANT_ID ?? randomUUID();
 const projectId = process.env.PROJECT_ID ?? randomUUID();
 const principalId = process.env.ADMIN_PRINCIPAL_ID ?? randomUUID();
-const tenantName = process.env.TENANT_NAME ?? "EarnedSignal";
-const projectName = process.env.PROJECT_NAME ?? "EarnedSignal";
+const tenantName = process.env.TENANT_NAME ?? "VECTA";
+const projectName = process.env.PROJECT_NAME ?? "VECTA";
 const today = new Date().toISOString().slice(0, 10);
 const projectStart = process.env.PROJECT_START ?? today;
 const statusDate = process.env.STATUS_DATE ?? projectStart;

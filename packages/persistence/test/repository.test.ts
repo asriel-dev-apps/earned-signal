@@ -1,4 +1,4 @@
-import { projectWbsGrid } from "@earned-signal/application";
+import { projectWbsGrid } from "@vecta/application";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

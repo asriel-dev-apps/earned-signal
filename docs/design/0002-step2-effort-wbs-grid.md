@@ -259,7 +259,7 @@ under `pnpm check` = `lint && typecheck && test && test:operations && build` (ro
   These are also the **deploy targets** the web bindings point at: `apps/optimizer/wrangler.jsonc`
   defines the Workflow class `StaffingProposalWorkflow` (the `script_name` web's `STAFFING_WORKFLOW`
   targets) plus a `StaffingSolverContainer` Durable Object over the `staffing-solver` image;
-  `apps/simulator/wrangler.jsonc` defines the **queue consumers** for `earned-signal-{env}-forecast-runs`
+  `apps/simulator/wrangler.jsonc` defines the **queue consumers** for `vecta-{env}-forecast-runs`
   (the queue web produces to) plus a `ForecastSimulatorContainer` DO over the `forecast-simulator`
   image. Deleting the two apps removes both the workspace members and those deploy targets.
 - **`services/staffing-solver/`, `services/forecast-simulator/`** — Python (uv/`pyproject.toml`/
@@ -270,7 +270,7 @@ under `pnpm check` = `lint && typecheck && test && test:operations && build` (ro
   otherwise only by `.github/scripts`/`scripts`, see §6.5.)
 
 **Confirmed clean cut:** `apps/web` has **no TypeScript imports** of optimizer/simulator/services — it
-imports only `@earned-signal/{application,domain,persistence}` and local files. The only couplings are
+imports only `@vecta/{application,domain,persistence}` and local files. The only couplings are
 the two runtime bindings + one var in §6.2.
 
 ### 6.2 `apps/web` — MCP, workflow, and queue removal
@@ -284,11 +284,11 @@ the two runtime bindings + one var in §6.2.
   `staffingSubmission`/`scenarios`/`staffingProposals`/`forecastRuns`/`performance` fields of the
   session (`worker.ts:27-28,60-75`).
 - **`wrangler.jsonc`**: remove the `workflows` (`STAFFING_WORKFLOW`, `script_name:
-  earned-signal-optimizer-*`) and `queues.producers` (`FORECAST_QUEUE`) blocks from the top level and
+  vecta-optimizer-*`) and `queues.producers` (`FORECAST_QUEUE`) blocks from the top level and
   from `env.staging`/`env.production` (`wrangler.jsonc:42-54,89-104,139-154`); remove the
   `MCP_RESOURCE_URL` var (`wrangler.jsonc:20,67,117`). Also remove `MCP_RESOURCE_URL` from
   `apps/web/wrangler.integration.jsonc`. Regenerate `worker-configuration.d.ts`
-  (`pnpm --filter @earned-signal/web types:worker`) so the `Env` type drops `STAFFING_WORKFLOW`,
+  (`pnpm --filter @vecta/web types:worker`) so the `Env` type drops `STAFFING_WORKFLOW`,
   `FORECAST_QUEUE`, `MCP_RESOURCE_URL`; `worker.ts` then typechecks with those bindings gone. (Leaving
   stale fields in the committed `Env` type would not by itself break typecheck — extra bindings are
   harmless — but the wrangler configs and the code that reads them must be cut.)
@@ -367,7 +367,7 @@ Route groups in `api.ts` (paths grepped):
   `materialize-deploy-config.{mjs,test.mjs}` touch the excised subsystems: the script iterates
   `apps/optimizer/wrangler.jsonc` + `apps/simulator/wrangler.jsonc` (`materialize-deploy-config.mjs:67-68`)
   and requires `MCP_RESOURCE_URL` as the canonical `/mcp` URL (`:62`); the test asserts those paths and
-  the `EARNED_SIGNAL_OPTIMIZER_CONFIG`/`EARNED_SIGNAL_SIMULATOR_CONFIG` env
+  the `VECTA_OPTIMIZER_CONFIG`/`VECTA_SIMULATOR_CONFIG` env
   (`materialize-deploy-config.test.mjs:15-16,37,69-70`). It also transitively drives
   **`scripts/verify-beta-readiness.mjs`**, which validates optimizer/simulator/MCP cross-bindings.
   **All three must be edited** (drop optimizer/simulator configs + MCP; trim `verify-beta-readiness` to

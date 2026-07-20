@@ -1,4 +1,4 @@
-import type { ProjectState } from "@earned-signal/application";
+import type { ProjectState } from "@vecta/application";
 import type { PersistedProjectRecord } from "./project-record.js";
 import { ProjectRepository } from "./project-repository.js";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";

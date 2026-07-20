@@ -9,7 +9,7 @@ import {
   type ProjectState,
   type ProjectStateView,
   type WbsGridProjection,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { bodyLimit } from "hono/body-limit";
 import { AuthenticationRequiredError } from "./oidc-auth.js";
@@ -296,11 +296,11 @@ export function createApiApp(dependencies: ApiDependencies) {
     type: "http",
     scheme: "bearer",
     bearerFormat: "JWT",
-    description: "OIDC access token issued for the EarnedSignal API audience",
+    description: "OIDC access token issued for the VECTA API audience",
   });
 
   app.get("/api/health", (context) =>
-    context.json({ service: "earned-signal", status: "ok" }),
+    context.json({ service: "vecta", status: "ok" }),
   );
 
   app.use(
@@ -410,7 +410,7 @@ export function createApiApp(dependencies: ApiDependencies) {
 
   app.doc("/api/openapi.json", {
     openapi: "3.1.0",
-    info: { title: "EarnedSignal API", version: "0.1.0" },
+    info: { title: "VECTA API", version: "0.1.0" },
   });
 
   app.onError((error, context) => {

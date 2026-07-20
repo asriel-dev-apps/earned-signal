@@ -1,4 +1,4 @@
-# EarnedSignal セキュリティ運用
+# VECTA セキュリティ運用
 
 このディレクトリは、公開ベータで必要な identity、秘密情報、privacy、retention の運用判断を記録する。
 製品の認可モデルは [OIDC project authorization ADR](../adr/0002-oidc-project-authorization.md)、具体的な運用は次の Runbook に従う。

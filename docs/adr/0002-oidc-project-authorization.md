@@ -9,7 +9,7 @@ Human users and local agents must call the same command boundary without trustin
 
 ## Decision
 
-EarnedSignal is an OAuth/OIDC resource server. The Worker accepts only compact signed JWT bearer access tokens and verifies their signature through the configured remote JWKS, exact issuer and audience, expiry, and subject. Supported signing algorithms are asymmetric. The external authorization server remains environment-specific.
+VECTA is an OAuth/OIDC resource server. The Worker accepts only compact signed JWT bearer access tokens and verifies their signature through the configured remote JWKS, exact issuer and audience, expiry, and subject. Supported signing algorithms are asymmetric. The external authorization server remains environment-specific.
 
 PostgreSQL owns authorization. A global principal maps one issuer/subject to a stable internal UUID and a HUMAN or AGENT type. Tenant membership plus explicit project membership determines project access; claims naming a tenant or project are ignored. Disabled principals do not resolve.
 

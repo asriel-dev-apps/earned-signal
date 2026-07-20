@@ -1,4 +1,4 @@
-import type { AuthenticatedIdentity } from "@earned-signal/application";
+import type { AuthenticatedIdentity } from "@vecta/application";
 
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 const RATE_LIMIT_PERIOD_SECONDS = 60;

@@ -1,4 +1,4 @@
-import type { DependencyType } from "@earned-signal/domain";
+import type { DependencyType } from "@vecta/domain";
 
 /**
  * Subtask templates (ADR 0011 Decision 5). A template prorates the parent task's

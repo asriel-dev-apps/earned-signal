@@ -2,7 +2,7 @@ import type {
   ProjectCommand,
   ProjectState,
   WbsGridProjection,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { fromCommand } from "./project-command-contract.js";
 
 export interface WorkspaceDocument {

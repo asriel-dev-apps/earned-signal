@@ -1,4 +1,4 @@
-import { createProjectCommandService } from "@earned-signal/application";
+import { createProjectCommandService } from "@vecta/application";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

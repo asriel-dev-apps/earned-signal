@@ -2,7 +2,7 @@
 
 ## データ分類
 
-EarnedSignal は、identity、membership、WBS、Resource、Assignment、worklog、cost、Baseline、Scenario、Proposal、Forecast、audit event を PostgreSQL に保存する。
+VECTA は、identity、membership、WBS、Resource、Assignment、worklog、cost、Baseline、Scenario、Proposal、Forecast、audit event を PostgreSQL に保存する。
 表示名、Resource 名、作業記録には個人を識別できる情報が含まれる可能性がある。
 自由入力欄には不要な機微情報を入力しないという製品上の案内と契約上の制限を設ける。
 

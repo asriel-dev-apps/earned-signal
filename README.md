@@ -1,6 +1,6 @@
-# EarnedSignal
+# VECTA
 
-EarnedSignal is a work breakdown structure and earned value management application. It is designed to make plans, progress, actual effort, and forecasts understandable through a spreadsheet-like interface and automation-friendly APIs.
+VECTA is a work breakdown structure and earned value management application. It is designed to make plans, progress, actual effort, and forecasts understandable through a spreadsheet-like interface and automation-friendly APIs.
 
 Current and approved Baseline remain distinct from revision-pinned Scenarios. Scenario runs compare deterministic schedule, cost, labor, overload, and Skill-gap outcomes before a human explicitly publishes plan changes into Current.
 

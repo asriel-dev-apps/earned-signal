@@ -1,5 +1,5 @@
 {
-  "name": "@earned-signal/domain",
+  "name": "@vecta/domain",
   "version": "0.0.0",
   "private": true,
   "type": "module",

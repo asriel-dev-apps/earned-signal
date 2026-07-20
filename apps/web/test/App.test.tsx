@@ -8,7 +8,7 @@ import {
   projectWbsGrid,
   type ProjectCommand,
   type ProjectState,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { App } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
 import { TaskSchema } from "../src/project-command-contract.js";

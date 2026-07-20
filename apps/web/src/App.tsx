@@ -38,8 +38,8 @@ import {
   type ProjectTask,
   type WbsGridProjection,
   type WbsGridTaskRow,
-} from "@earned-signal/application";
-import type { TaskStatus } from "@earned-signal/domain";
+} from "@vecta/application";
+import type { TaskStatus } from "@vecta/domain";
 import { createDemoProject } from "./demo-project";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 
@@ -408,7 +408,7 @@ const EMPTY_PROJECT: ProjectState = {
 };
 
 /** Fixed localStorage key/version for the preview-only persistence below (exported for tests). */
-export const PREVIEW_STORAGE_KEY = "earned-signal-preview-state-v1";
+export const PREVIEW_STORAGE_KEY = "vecta-preview-state-v1";
 export const PREVIEW_STORAGE_VERSION = 1;
 
 interface PreviewStorageEnvelope {
@@ -1060,9 +1060,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <h1>{project.name || "EarnedSignal"}</h1>
+          <h1>VECTA</h1>
           <p className="app-subtitle">
-            Effort WBS · status date {grid.statusDate} · {rows.length.toLocaleString()} tasks · {days.length} plan days
+            Earned Value, Cost & Timeline Analytics
+            {project.name ? ` · ${project.name}` : ""} · status date {grid.statusDate} · {rows.length.toLocaleString()} tasks · {days.length} plan days
           </p>
         </div>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>

@@ -1,8 +1,8 @@
-# EarnedSignal thin MVP specification
+# VECTA thin MVP specification
 
 ## Purpose
 
-EarnedSignal provides one consistent place to maintain a WBS, an approved baseline, current progress, actual effort, and earned value forecasts. The product is public from the outset and may become a commercial service.
+VECTA provides one consistent place to maintain a WBS, an approved baseline, current progress, actual effort, and earned value forecasts. The product is public from the outset and may become a commercial service.
 
 ## Confirmed product rules
 

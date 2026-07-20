@@ -11,7 +11,7 @@ PITR の保持期間、復旧可能な最古時点、暗号鍵、リージョン
 
 ## バックアップ対象
 
-EarnedSignal の PostgreSQL database 全体を一つの整合した単位として扱う。
+VECTA の PostgreSQL database 全体を一つの整合した単位として扱う。
 テーブルは `tenant_id` で分離されているが、tenant、principal、membership、project、baseline、audit、Scenario、Proposal、Forecast の外部キーが相互に関係する。
 テーブル単位または `tenant_id` 条件付きの `pg_dump` は、復元可能なテナントバックアップにはならない。
 
@@ -31,7 +31,7 @@ umask 077
 export PGHOST PGPORT PGDATABASE PGUSER PGSSLMODE=verify-full
 pg_dump --format=custom --no-owner --no-acl --verbose=0 \
   | age --recipients-file ops-backup-recipients.txt \
-  > "earned-signal-$(date -u +%Y%m%dT%H%M%SZ).dump.age"
+  > "vecta-$(date -u +%Y%m%dT%H%M%SZ).dump.age"
 ```
 
 暗号化された object は、versioning、retention lock、アクセス監査を有効にした production database とは別の security boundary に保存する。
@@ -58,7 +58,7 @@ pg_dump --format=custom --no-owner --no-acl --verbose=0 \
 ```sh
 umask 077
 export PGHOST PGPORT PGDATABASE PGUSER PGSSLMODE=verify-full
-age --decrypt "earned-signal-backup.dump.age" \
+age --decrypt "vecta-backup.dump.age" \
   | pg_restore --exit-on-error --single-transaction --no-owner --no-acl --dbname="$PGDATABASE"
 ```
 

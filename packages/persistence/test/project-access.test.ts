@@ -1,7 +1,7 @@
 import {
   createProjectCommandAuthorizer,
   ProjectAccessDeniedError,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";

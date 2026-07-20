@@ -8,7 +8,7 @@ import {
   type ProjectCommandExecution,
   type ProjectRole,
   type ProjectState,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp, type ProjectSession } from "../src/api.js";
 import { createDemoProject } from "../src/demo-project.js";
@@ -66,7 +66,7 @@ describe("project REST API", () => {
     const { app } = fakeApp();
     const response = await app.request("/api/health", {}, env);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ service: "earned-signal", status: "ok" });
+    await expect(response.json()).resolves.toEqual({ service: "vecta", status: "ok" });
   });
 
   it("loads the persisted Current workspace as stored inputs", async () => {

@@ -14,15 +14,15 @@ export interface GoogleAuthConfig {
 
 interface AuthEnv {
   readonly VITE_GOOGLE_CLIENT_ID?: string | undefined;
-  readonly VITE_EARNED_SIGNAL_TENANT_ID?: string | undefined;
-  readonly VITE_EARNED_SIGNAL_PROJECT_ID?: string | undefined;
+  readonly VITE_VECTA_TENANT_ID?: string | undefined;
+  readonly VITE_VECTA_PROJECT_ID?: string | undefined;
 }
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const AUTH_SCOPE = "openid email profile";
-const PENDING_STATE_KEY = "earned-signal-auth-pending-state";
-const PENDING_NONCE_KEY = "earned-signal-auth-pending-nonce";
-const ACTIVE_TOKEN_KEY = "earned-signal-auth-id-token";
+const PENDING_STATE_KEY = "vecta-auth-pending-state";
+const PENDING_NONCE_KEY = "vecta-auth-pending-nonce";
+const ACTIVE_TOKEN_KEY = "vecta-auth-id-token";
 
 /**
  * Resolve the Google sign-in configuration from build/runtime vars. Returns null
@@ -33,8 +33,8 @@ export function readGoogleAuthConfig(
   env: AuthEnv = import.meta.env as AuthEnv,
 ): GoogleAuthConfig | null {
   const clientId = env.VITE_GOOGLE_CLIENT_ID?.trim();
-  const tenantId = env.VITE_EARNED_SIGNAL_TENANT_ID?.trim();
-  const projectId = env.VITE_EARNED_SIGNAL_PROJECT_ID?.trim();
+  const tenantId = env.VITE_VECTA_TENANT_ID?.trim();
+  const projectId = env.VITE_VECTA_PROJECT_ID?.trim();
   if (!clientId || !tenantId || !projectId) return null;
   return { clientId, tenantId, projectId };
 }

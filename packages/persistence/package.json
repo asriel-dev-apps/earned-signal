@@ -1,5 +1,5 @@
 {
-  "name": "@earned-signal/persistence",
+  "name": "@vecta/persistence",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@earned-signal/application": "workspace:*",
-    "@earned-signal/domain": "workspace:*",
+    "@vecta/application": "workspace:*",
+    "@vecta/domain": "workspace:*",
     "@neondatabase/serverless": "0.10.4",
     "drizzle-orm": "0.45.2",
     "pg": "8.22.0"

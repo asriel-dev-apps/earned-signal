@@ -31,7 +31,7 @@ function fakeDeps(overrides: {
     assign,
     store,
     location: {
-      origin: "https://earned-signal.workers.dev",
+      origin: "https://vecta.workers.dev",
       pathname: "/",
       search: "",
       hash: overrides.hash ?? "",
@@ -49,8 +49,8 @@ function fakeDeps(overrides: {
 describe("readGoogleAuthConfig", () => {
   const full = {
     VITE_GOOGLE_CLIENT_ID: "client-123",
-    VITE_EARNED_SIGNAL_TENANT_ID: "tenant-1",
-    VITE_EARNED_SIGNAL_PROJECT_ID: "project-1",
+    VITE_VECTA_TENANT_ID: "tenant-1",
+    VITE_VECTA_PROJECT_ID: "project-1",
   };
 
   it("returns the config when every var is present, trimming whitespace", () => {
@@ -66,8 +66,8 @@ describe("readGoogleAuthConfig", () => {
   });
 
   it("returns null when the tenant or project id is blank", () => {
-    expect(readGoogleAuthConfig({ ...full, VITE_EARNED_SIGNAL_TENANT_ID: "  " })).toBeNull();
-    expect(readGoogleAuthConfig({ ...full, VITE_EARNED_SIGNAL_PROJECT_ID: undefined })).toBeNull();
+    expect(readGoogleAuthConfig({ ...full, VITE_VECTA_TENANT_ID: "  " })).toBeNull();
+    expect(readGoogleAuthConfig({ ...full, VITE_VECTA_PROJECT_ID: undefined })).toBeNull();
   });
 });
 
@@ -76,14 +76,14 @@ describe("buildAuthorizationUrl", () => {
     const url = new URL(
       buildAuthorizationUrl({
         clientId: "client-123",
-        redirectUri: "https://earned-signal.workers.dev/",
+        redirectUri: "https://vecta.workers.dev/",
         nonce: "n1",
         state: "s1",
       }),
     );
     expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(url.searchParams.get("client_id")).toBe("client-123");
-    expect(url.searchParams.get("redirect_uri")).toBe("https://earned-signal.workers.dev/");
+    expect(url.searchParams.get("redirect_uri")).toBe("https://vecta.workers.dev/");
     expect(url.searchParams.get("response_type")).toBe("id_token");
     expect(url.searchParams.get("scope")).toBe("openid email profile");
     expect(url.searchParams.get("nonce")).toBe("n1");
@@ -132,23 +132,23 @@ describe("redirect sign-in lifecycle", () => {
     beginGoogleSignIn({ clientId: "client-123", tenantId: "t", projectId: "p" }, deps);
     expect(deps.assign).toHaveBeenCalledOnce();
     const url = new URL(deps.assign.mock.calls[0]![0] as string);
-    expect(url.searchParams.get("redirect_uri")).toBe("https://earned-signal.workers.dev/");
-    expect(url.searchParams.get("state")).toBe(deps.store.get("earned-signal-auth-pending-state"));
-    expect(deps.store.get("earned-signal-auth-pending-nonce")).toMatch(/^[0-9a-f]{32}$/u);
+    expect(url.searchParams.get("redirect_uri")).toBe("https://vecta.workers.dev/");
+    expect(url.searchParams.get("state")).toBe(deps.store.get("vecta-auth-pending-state"));
+    expect(deps.store.get("vecta-auth-pending-nonce")).toMatch(/^[0-9a-f]{32}$/u);
   });
 
   it("stores the token when the returned state matches the pending state", () => {
-    const store = new Map<string, string>([["earned-signal-auth-pending-state", "s1"]]);
+    const store = new Map<string, string>([["vecta-auth-pending-state", "s1"]]);
     const token = fakeJwt({ exp: FAR_FUTURE, email: "admin@example.com" });
     const deps = fakeDeps({ hash: `#id_token=${token}&state=s1`, store });
     expect(completeGoogleSignIn(deps)).toBe(token);
     expect(loadActiveToken(deps)).toBe(token);
     expect(deps.history.replaceState).toHaveBeenCalledOnce();
-    expect(store.has("earned-signal-auth-pending-state")).toBe(false);
+    expect(store.has("vecta-auth-pending-state")).toBe(false);
   });
 
   it("rejects a state mismatch and stores nothing", () => {
-    const store = new Map<string, string>([["earned-signal-auth-pending-state", "expected"]]);
+    const store = new Map<string, string>([["vecta-auth-pending-state", "expected"]]);
     const token = fakeJwt({ exp: FAR_FUTURE });
     const deps = fakeDeps({ hash: `#id_token=${token}&state=forged`, store });
     expect(completeGoogleSignIn(deps)).toBeNull();
@@ -162,11 +162,11 @@ describe("redirect sign-in lifecycle", () => {
 
   it("drops an expired stored token on load and clears on sign out", () => {
     const expired = fakeJwt({ exp: LONG_PAST });
-    const deps = fakeDeps({ store: new Map([["earned-signal-auth-id-token", expired]]) });
+    const deps = fakeDeps({ store: new Map([["vecta-auth-id-token", expired]]) });
     expect(loadActiveToken(deps)).toBeNull();
 
     const valid = fakeJwt({ exp: FAR_FUTURE });
-    deps.store.set("earned-signal-auth-id-token", valid);
+    deps.store.set("vecta-auth-id-token", valid);
     expect(loadActiveToken(deps)).toBe(valid);
     signOutGoogle(deps);
     expect(loadActiveToken(deps)).toBeNull();

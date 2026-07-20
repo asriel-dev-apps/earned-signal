@@ -3,7 +3,7 @@ import type {
   ProjectMember,
   ProjectState,
   ProjectTask,
-} from "@earned-signal/application";
+} from "@vecta/application";
 
 // Deterministic, browser-safe synthetic fixture for the client preview. It
 // mirrors the backend seed (packages/persistence/src/demo-project.ts) but emits

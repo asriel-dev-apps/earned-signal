@@ -9,7 +9,7 @@ import { openProjectSession } from "../src/worker.js";
 describe("openProjectSession driver selection", () => {
   it("routes to the Neon serverless driver when DATABASE_URL is set", async () => {
     const session = await openProjectSession({
-      DATABASE_URL: "postgresql://user:pw@localhost:5432/earned_signal",
+      DATABASE_URL: "postgresql://user:pw@localhost:5432/vecta",
     } as unknown as Env);
     try {
       expect(session.service).toBeDefined();

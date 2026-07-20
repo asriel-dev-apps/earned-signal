@@ -1,4 +1,4 @@
-import type { ProjectCommand, ProjectTask } from "@earned-signal/application";
+import type { ProjectCommand, ProjectTask } from "@vecta/application";
 import { z } from "zod";
 
 export const UuidSchema = z.string().uuid();

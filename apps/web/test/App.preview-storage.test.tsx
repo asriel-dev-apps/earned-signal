@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { ProjectState } from "@earned-signal/application";
+import type { ProjectState } from "@vecta/application";
 import { App, PREVIEW_STORAGE_KEY, PREVIEW_STORAGE_VERSION } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
 

@@ -3,7 +3,7 @@ import type {
   ProjectAccessGrantRequest,
   ProjectAccessGrantResolver,
   ProjectRole,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { and, eq, isNull } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {

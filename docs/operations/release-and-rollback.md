@@ -43,7 +43,7 @@ backup restore と alert drill の証跡 URL は資格情報を含まない HTTP
 別の設定ファイルを使う構成だけ、三つの config path を上書きする。
 
 ```sh
-EARNED_SIGNAL_ENV=production node scripts/verify-beta-readiness.mjs
+VECTA_ENV=production node scripts/verify-beta-readiness.mjs
 ```
 
 この検査は Cloudflare、OIDC、PostgreSQL の実リソースを照合しない。
@@ -56,9 +56,9 @@ production では次の順序を守る。
 
 1. PostgreSQL の復元可能時点と schema version を変更記録に残す。
 2. 後方互換な migration を一度だけ適用し、migration 管理テーブルと期待した制約を確認する。
-3. `earned-signal-optimizer-production` を配信し、Workflow と Staffing Solver Container を確認する。
-4. `earned-signal-simulator-production` を配信し、Queue consumer、DLQ consumer、Forecast Simulator Container を確認する。
-5. `earned-signal-production` を最後に配信し、REST API と MCP が新しい非同期処理を起動できる状態にする。
+3. `vecta-optimizer-production` を配信し、Workflow と Staffing Solver Container を確認する。
+4. `vecta-simulator-production` を配信し、Queue consumer、DLQ consumer、Forecast Simulator Container を確認する。
+5. `vecta-production` を最後に配信し、REST API と MCP が新しい非同期処理を起動できる状態にする。
 6. 読み取り専用 smoke test の後、専用の synthetic tenant で `scripts/beta-e2e.mjs` を実行し、WBS 更新、Scenario、要員提案、予測、REST、MCP を確認する。
 7. Worker version ID、Container rollout、検証結果を変更記録へ追記する。
 

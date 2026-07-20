@@ -29,15 +29,6 @@ importers:
       '@dnd-kit/core':
         specifier: 6.3.1
         version: 6.3.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@earned-signal/application':
-        specifier: workspace:*
-        version: link:../../packages/application
-      '@earned-signal/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
-      '@earned-signal/persistence':
-        specifier: workspace:*
-        version: link:../../packages/persistence
       '@hono/zod-openapi':
         specifier: 1.5.0
         version: 1.5.0(hono@4.12.30)(zod@4.4.3)
@@ -47,6 +38,15 @@ importers:
       '@tanstack/react-virtual':
         specifier: 3.13.12
         version: 3.13.12(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@vecta/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@vecta/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@vecta/persistence':
+        specifier: workspace:*
+        version: link:../../packages/persistence
       hono:
         specifier: 4.12.30
         version: 4.12.30
@@ -108,7 +108,7 @@ importers:
 
   packages/application:
     dependencies:
-      '@earned-signal/domain':
+      '@vecta/domain':
         specifier: workspace:*
         version: link:../domain
     devDependencies:
@@ -130,15 +130,15 @@ importers:
 
   packages/persistence:
     dependencies:
-      '@earned-signal/application':
-        specifier: workspace:*
-        version: link:../application
-      '@earned-signal/domain':
-        specifier: workspace:*
-        version: link:../domain
       '@neondatabase/serverless':
         specifier: 0.10.4
         version: 0.10.4
+      '@vecta/application':
+        specifier: workspace:*
+        version: link:../application
+      '@vecta/domain':
+        specifier: workspace:*
+        version: link:../domain
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@cloudflare/workers-types@5.20260714.1)(@neondatabase/serverless@0.10.4)(@types/pg@8.20.0)(pg@8.22.0)

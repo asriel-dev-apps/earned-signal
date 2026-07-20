@@ -53,7 +53,7 @@ describe("AppRoot", () => {
   it("switches to the connected app when a valid session token is present", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network in test"))));
     const token = fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3_600, email: "admin@example.com" });
-    window.sessionStorage.setItem("earned-signal-auth-id-token", token);
+    window.sessionStorage.setItem("vecta-auth-id-token", token);
 
     render(<AppRoot config={CONFIG} />);
 

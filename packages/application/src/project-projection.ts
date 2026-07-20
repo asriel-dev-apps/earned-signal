@@ -2,7 +2,7 @@ import {
   calculateEffortEvm,
   type EffortRollup,
   type TaskStatus,
-} from "@earned-signal/domain";
+} from "@vecta/domain";
 import type { ProjectRole } from "./project-command-authorizer.js";
 import { leafTaskIds, type ProjectMember, type ProjectState } from "./project-state.js";
 

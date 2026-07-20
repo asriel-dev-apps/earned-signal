@@ -24,7 +24,7 @@ Reject non-canonical hosts, foreign Origin headers, and request bodies larger th
 
 - REST and MCP cannot drift in input conversion or command error vocabulary.
 - Agent progress and actuals remain constrained by both signed token scopes and stored scopes; plan changes still require human approval.
-- Remote MCP clients can discover the external authorization server through RFC 9728 without EarnedSignal issuing its own tokens.
+- Remote MCP clients can discover the external authorization server through RFC 9728 without VECTA issuing its own tokens.
 - Interactive OAuth depends on the deployed authorization server supporting its required metadata, client-registration policy, PKCE, and the MCP resource indicator; provider provisioning remains environment-specific.
 
 ## References

@@ -6,9 +6,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const environment = process.env.EARNED_SIGNAL_ENV ?? "production";
+const environment = process.env.VECTA_ENV ?? "production";
 const paths = {
-  web: process.env.EARNED_SIGNAL_WEB_CONFIG ?? resolve(repoRoot, "apps/web/wrangler.jsonc"),
+  web: process.env.VECTA_WEB_CONFIG ?? resolve(repoRoot, "apps/web/wrangler.jsonc"),
 };
 
 let failures = 0;
@@ -99,8 +99,8 @@ if (web !== null) {
   if (web.observability?.enabled !== true || web.observability?.logs?.enabled !== true) {
     fail(`web ${environment} must enable Worker observability logs`);
   }
-  if (web.name !== `earned-signal-${environment}`) {
-    fail(`web ${environment} Worker name must be earned-signal-${environment}`);
+  if (web.name !== `vecta-${environment}`) {
+    fail(`web ${environment} Worker name must be vecta-${environment}`);
   }
   for (const field of ["OIDC_ISSUER", "OIDC_AUDIENCE", "OIDC_JWKS_URL"]) {
     if (typeof web.vars?.[field] !== "string") fail(`web ${environment} config is missing ${field}`);

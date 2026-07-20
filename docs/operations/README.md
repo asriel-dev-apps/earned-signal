@@ -1,4 +1,4 @@
-# EarnedSignal 運用ガイド
+# VECTA 運用ガイド
 
 このディレクトリは、公開ベータ環境を変更、監視、復旧する担当者向けの Runbook である。
 手順中の `production` やリソース名は例ではなく役割名であり、実環境の構成を Cloudflare と PostgreSQL 提供者の管理画面で照合してから実行する。
@@ -7,9 +7,9 @@
 
 | 構成要素 | 実行基盤 | 永続データ | 主な障害の影響 |
 | --- | --- | --- | --- |
-| Web、REST API、MCP | `earned-signal` Worker | PostgreSQL | UI、API、MCP が利用できない |
-| 要員割当提案 | `earned-signal-optimizer` Worker、Workflow、Container、Workers AI | PostgreSQL の提案、実行、監査レコード | 新しい提案が完了しない |
-| 予測シミュレーション | `earned-signal-simulator` Worker、Queue、DLQ、Container | PostgreSQL の予測実行、結果、監査レコード | 新しい予測が完了しない |
+| Web、REST API、MCP | `vecta` Worker | PostgreSQL | UI、API、MCP が利用できない |
+| 要員割当提案 | `vecta-optimizer` Worker、Workflow、Container、Workers AI | PostgreSQL の提案、実行、監査レコード | 新しい提案が完了しない |
+| 予測シミュレーション | `vecta-simulator` Worker、Queue、DLQ、Container | PostgreSQL の予測実行、結果、監査レコード | 新しい予測が完了しない |
 | 接続プール | Cloudflare Hyperdrive | 接続情報のみ | 三つの Worker が PostgreSQL に接続できない |
 | System of Record | PostgreSQL | テナント、WBS、EVM、監査、非同期処理 | 読み書きと非同期処理が停止する |
 | 認証 | 外部 OIDC Provider | Provider 側 | 保護された API と MCP を利用できない |

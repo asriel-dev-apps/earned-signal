@@ -24,7 +24,7 @@ flowchart TB
     G["Google OIDC<br/>accounts.google.com<br/>issues an ID token (JWT) — free"]
 
     subgraph CF["Cloudflare (edge, free plan) — *.workers.dev"]
-        subgraph W["Worker (Hono) — earned-signal"]
+        subgraph W["Worker (Hono) — vecta"]
             AST["Static assets binding<br/>serves the SPA"]
             AUTH["JWT verification (existing)<br/>issuer / audience / JWKS / expiry / subject"]
             APP["Application layer<br/>typed commands, WBS-grid projection<br/>OWNER,EDITOR = admin (PRIVILEGED) / VIEWER = general"]

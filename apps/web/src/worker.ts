@@ -2,7 +2,7 @@ import {
   createProjectCommandAuthorizer,
   createProjectCommandService,
   createProjectQueryAuthorizer,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import {
   createPersistenceDatabase,
   openNeonPersistenceConnection,
@@ -10,7 +10,7 @@ import {
   PostgresProjectCommandUnitOfWork,
   ProjectWorkspaceRepository,
   type PersistenceDatabase,
-} from "@earned-signal/persistence";
+} from "@vecta/persistence";
 import { Client } from "pg";
 import { createApiApp, type ProjectSession } from "./api.js";
 import {

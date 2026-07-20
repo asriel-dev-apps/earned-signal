@@ -1,5 +1,5 @@
 {
-  "name": "@earned-signal/web",
+  "name": "@vecta/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,9 +12,9 @@
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
-    "@earned-signal/application": "workspace:*",
-    "@earned-signal/domain": "workspace:*",
-    "@earned-signal/persistence": "workspace:*",
+    "@vecta/application": "workspace:*",
+    "@vecta/domain": "workspace:*",
+    "@vecta/persistence": "workspace:*",
     "@hono/zod-openapi": "1.5.0",
     "@tanstack/react-table": "8.21.3",
     "@tanstack/react-virtual": "3.13.12",

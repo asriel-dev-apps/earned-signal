@@ -8,7 +8,7 @@ import {
   type ProjectCommandRequest,
   type ProjectCommandUnitOfWork,
   type ProjectState,
-} from "@earned-signal/application";
+} from "@vecta/application";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {

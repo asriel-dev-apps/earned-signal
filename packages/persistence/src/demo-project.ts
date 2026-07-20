@@ -201,7 +201,7 @@ export function createSeedProjectRecord(
   ];
 
   return {
-    tenant: { id: tenantId, name: "EarnedSignal demo tenant" },
+    tenant: { id: tenantId, name: "VECTA demo tenant" },
     project: {
       id: projectId,
       tenantId,

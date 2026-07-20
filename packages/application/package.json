@@ -1,5 +1,5 @@
 {
-  "name": "@earned-signal/application",
+  "name": "@vecta/application",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@earned-signal/domain": "workspace:*"
+    "@vecta/domain": "workspace:*"
   },
   "devDependencies": {
     "typescript": "6.0.3",

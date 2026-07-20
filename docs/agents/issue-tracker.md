@@ -19,4 +19,4 @@ Issues and specifications for this repository live in GitHub Issues. Use the `gh
 - Prefer GitHub sub-issues and native issue dependencies. If either API is unavailable, list children as task-list entries in the map and record `Blocked by: #...` in ticket bodies.
 - Claim a ticket before work with `gh issue edit <number> --add-assignee @me`.
 - Resolve by commenting with the evidence, closing the ticket, and adding a one-line link to the map's Decisions-so-far section.
-- The execution override in the EarnedSignal map requires task tickets to include implementation, verification, security scan, and push—not decision-only output.
+- The execution override in the VECTA map requires task tickets to include implementation, verification, security scan, and push—not decision-only output.

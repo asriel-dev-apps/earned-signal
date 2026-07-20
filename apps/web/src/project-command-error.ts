@@ -5,7 +5,7 @@ import {
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
-} from "@earned-signal/application";
+} from "@vecta/application";
 
 export interface ProjectCommandErrorBody {
   readonly code: string;

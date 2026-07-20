@@ -13,7 +13,7 @@ const readiness = path.join(repoRoot, "scripts/verify-beta-readiness.mjs");
 const webConfig = "apps/web/wrangler.jsonc";
 
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "earned-signal-deploy-config-"));
+  const root = await mkdtemp(path.join(tmpdir(), "vecta-deploy-config-"));
   await mkdir(path.dirname(path.join(root, webConfig)), { recursive: true });
   await copyFile(path.join(repoRoot, webConfig), path.join(root, webConfig));
   return root;
@@ -26,7 +26,7 @@ function environment(overrides = {}) {
     HYPERDRIVE_ID: "abcdef0123456789abcdef0123456789",
     OTHER_HYPERDRIVE_ID: "1234567890abcdef1234567890abcdef",
     OIDC_ISSUER: "https://identity.staging.example.test/",
-    OIDC_AUDIENCE: "earned-signal-api-staging",
+    OIDC_AUDIENCE: "vecta-api-staging",
     OIDC_JWKS_URL: "https://identity.staging.example.test/jwks",
     PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: "910001",
     AUTH_RATE_LIMIT_NAMESPACE_ID: "910002",
@@ -54,8 +54,8 @@ test("materializes the web environment and passes the static deployment gate", a
       cwd: repoRoot,
       env: {
         ...process.env,
-        EARNED_SIGNAL_ENV: "staging",
-        EARNED_SIGNAL_WEB_CONFIG: path.join(root, webConfig),
+        VECTA_ENV: "staging",
+        VECTA_WEB_CONFIG: path.join(root, webConfig),
       },
     });
   } finally {
