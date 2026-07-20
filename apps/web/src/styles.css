@@ -67,6 +67,16 @@
   --band-cv-bg: #f4dbee;
   --band-cv-ink: #8f3573;
 
+  /* Body-cell wash: a much lighter tint of each band so the columns read as
+     belonging to their header band. Softer than the header fill; overridden by
+     parent/hover/selected/locked row states. */
+  --band-estimate-cell-bg: #f4f5f8;
+  --band-bac-cell-bg: #f1f6fc;
+  --band-pv-cell-bg: #f0f8f3;
+  --band-ev-cell-bg: #fdf9ec;
+  --band-ac-cell-bg: #fdf4ea;
+  --band-cv-cell-bg: #fbf1f8;
+
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ring: 0 0 0 1.5px var(--accent);
@@ -126,6 +136,13 @@
     --band-ac-ink: #e0a266;
     --band-cv-bg: #331c2c;
     --band-cv-ink: #dd93c4;
+
+    --band-estimate-cell-bg: #1c1e24;
+    --band-bac-cell-bg: #14202f;
+    --band-pv-cell-bg: #10251a;
+    --band-ev-cell-bg: #241d0e;
+    --band-ac-cell-bg: #241a0e;
+    --band-cv-cell-bg: #241521;
   }
 }
 
@@ -510,6 +527,15 @@ body {
 .cell--index,
 .cell--status { background: var(--derived-bg); color: var(--ink-soft); }
 .cell--derivedDate { font-family: var(--mono); font-size: 11px; }
+/* Body-cell band wash — overrides the grey derived-bg for banded columns so the
+   column matches its header band; ordered before parent/hover/selected/status so
+   those still win. */
+.cell--band-estimate { background: var(--band-estimate-cell-bg); }
+.cell--band-bac { background: var(--band-bac-cell-bg); }
+.cell--band-pv { background: var(--band-pv-cell-bg); }
+.cell--band-ev { background: var(--band-ev-cell-bg); }
+.cell--band-ac { background: var(--band-ac-cell-bg); }
+.cell--band-cv { background: var(--band-cv-cell-bg); }
 .cell--editable { cursor: cell; }
 .cell--editable:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .cell--locked { color: var(--muted); }
@@ -563,9 +589,11 @@ body {
 
 /* Status chips. */
 .cell--status { font-weight: 600; }
-.status--not_started { background: var(--status-todo-bg); color: var(--status-todo-ink); }
-.status--in_progress { background: var(--status-doing-bg); color: var(--status-doing-ink); }
-.status--done { background: var(--status-done-bg); color: var(--status-done-ink); }
+/* Status keeps its semantic hue as text only, so the EV band wash shows through
+   the cell (the whole 実績/EV block reads as one band). */
+.status--not_started { color: var(--status-todo-ink); }
+.status--in_progress { color: var(--status-doing-ink); }
+.status--done { color: var(--status-done-ink); }
 
 .cell-editor {
   width: 100%;

@@ -1168,6 +1168,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     const isSelected = selected.rowIndex === rowIndex && selected.colIndex === colIndex;
     const isEditing = editing?.rowIndex === rowIndex && editing.colIndex === colIndex;
     const classes = ["cell", `cell--${column.kind}`];
+    if (column.band !== undefined) classes.push(`cell--band-${column.band}`);
     if (column.editable) classes.push(editable ? "cell--editable" : "cell--locked");
     if (isSelected) classes.push("cell--selected");
     if (column.kind === "status") classes.push(`status--${row.status.toLowerCase()}`);
