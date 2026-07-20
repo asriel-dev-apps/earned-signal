@@ -324,3 +324,80 @@ body {
 .grid-row--locked .daily-cell { background: #fffbeb; color: #92400e; }
 .grid-row--locked .daily-cell--filled { background: #fef3c7; color: #b45309; }
 .daily-cell-editor { text-align: center; outline-offset: -2px; }
+
+/* Flat⇄tree view toggle (segmented control). */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-toggle-button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border: none;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+.view-toggle-button + .view-toggle-button { border-left: 1px solid var(--line-strong); }
+.view-toggle-button--active { background: var(--accent); color: #ffffff; font-weight: 600; }
+.toolbar-button--ghost {
+  background: var(--panel);
+  color: var(--accent);
+}
+.toolbar-button--ghost:hover { background: var(--accent-soft); }
+
+/* Tree affordances inside the Task/Subtask (name) cell. */
+.tree-affordance {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tree-toggle:hover { color: var(--accent); }
+.tree-toggle-spacer { display: inline-block; width: 16px; flex: 0 0 auto; }
+.drag-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--line-strong);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.drag-grip:hover { color: var(--muted); }
+
+/* Row highlighted as a valid drop target while a re-parent drag is over it. */
+.grid-row--drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grid-row--drop-target .pinned-group,
+.grid-row--drop-target .cell { background: var(--accent-soft); }
+
+.drag-overlay-chip {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}

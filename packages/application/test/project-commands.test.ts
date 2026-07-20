@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyProjectCommand, type ProjectState, type ProjectTask } from "../src/index.js";
+import {
+  applyProjectCommand,
+  leafTaskIds,
+  projectWbsGrid,
+  type ProjectState,
+  type ProjectTask,
+} from "../src/index.js";
 
 function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): ProjectTask {
   return {
@@ -156,6 +162,26 @@ describe("applyProjectCommand", () => {
     ).toThrow("cannot be its own parent");
   });
 
+  it("rejects re-parenting a task under one of its own (transitive) descendants", () => {
+    // A → B → C. Re-parenting A beneath its grandchild C would close the loop
+    // A→C→B→A; the acyclic check must fire on the re-parent path across depth.
+    const chain: ProjectState = {
+      ...project,
+      tasks: [
+        makeTask({ id: "A", sortOrder: 0, name: "A" }),
+        makeTask({ id: "B", parentId: "A", sortOrder: 1, name: "B" }),
+        makeTask({ id: "C", parentId: "B", sortOrder: 2, name: "C" }),
+      ],
+    };
+    expect(() =>
+      applyProjectCommand(chain, {
+        type: "task.update",
+        taskId: "A",
+        changes: { parentId: "C" },
+      }),
+    ).toThrow("cycle");
+  });
+
   it("rejects an unknown assignee member", () => {
     expect(() =>
       applyProjectCommand(project, {
@@ -174,5 +200,50 @@ describe("applyProjectCommand", () => {
         changes: { dependencies: [{ predecessorId: "task-missing", type: "FS", lagWorkingDays: 0 }] },
       }),
     ).toThrow("unknown task");
+  });
+});
+
+describe("drag re-parent recomputes leaf membership and holds the rollup", () => {
+  // P1 owns the only real-effort leaf L1 (8h = 1 pd); P2 is an empty leaf.
+  const reparentFixture: ProjectState = {
+    ...project,
+    tasks: [
+      makeTask({ id: "P1", sortOrder: 0, name: "Parent 1" }),
+      makeTask({
+        id: "L1",
+        parentId: "P1",
+        sortOrder: 1,
+        name: "Leaf 1",
+        plannedEffortMinutes: 480,
+        dailyPlan: { "2026-01-05": 480 },
+      }),
+      makeTask({ id: "P2", sortOrder: 2, name: "Parent 2" }),
+    ],
+  };
+
+  it("flips old parent to a leaf, new parent to a summary, and keeps BAC leaf-only", () => {
+    const beforeLeaves = leafTaskIds(reparentFixture.tasks);
+    expect(beforeLeaves.has("L1")).toBe(true);
+    expect(beforeLeaves.has("P2")).toBe(true);
+    expect(beforeLeaves.has("P1")).toBe(false); // P1 is a summary (owns L1)
+    // Leaf-only BAC: L1's 8h = 1 person-day (P2's empty leaf adds 0).
+    expect(projectWbsGrid(reparentFixture).rollup.bac).toBe(1);
+
+    // Drag L1 from P1 onto P2 — the same command the grid's dnd path dispatches.
+    const next = applyProjectCommand(reparentFixture, {
+      type: "task.update",
+      taskId: "L1",
+      changes: { parentId: "P2" },
+    });
+    expect(next.tasks.find((task) => task.id === "L1")?.parentId).toBe("P2");
+
+    const afterLeaves = leafTaskIds(next.tasks);
+    expect(afterLeaves.has("P1")).toBe(true); // old parent is now a leaf
+    expect(afterLeaves.has("P2")).toBe(false); // new parent is now a summary
+    expect(afterLeaves.has("L1")).toBe(true);
+
+    // The moved effort is still counted exactly once: BAC is unchanged at 1 pd
+    // (P1 now contributes 0 as a leaf, P2's former 0 leaf is now excluded).
+    expect(projectWbsGrid(next).rollup.bac).toBe(1);
   });
 });

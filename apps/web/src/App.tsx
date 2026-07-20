@@ -1,9 +1,23 @@
 import {
   getCoreRowModel,
+  getExpandedRowModel,
   useReactTable,
   type ColumnDef,
+  type ExpandedState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import {
   useCallback,
   useEffect,
@@ -12,6 +26,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   applyEffortSchedule,
@@ -120,6 +135,128 @@ function processHue(process: string): number {
     hash = (hash * 31 + process.charCodeAt(index)) | 0;
   }
   return Math.abs(hash) % 360;
+}
+
+type ViewMode = "flat" | "tree";
+
+/**
+ * A grid row augmented with `subRows` for TanStack's expanded row model. In tree
+ * mode the flat projection rows are nested under their `parentId`; flat mode
+ * feeds the projection rows straight through (no `subRows`, so every row is
+ * depth 0). The tree engine (TanStack Table `getExpandedRowModel`) is the same
+ * one validated in the grid spike (FINDINGS §"ツリー階層").
+ */
+type TreeRow = WbsGridTaskRow & { readonly subRows?: readonly TreeRow[] };
+
+export interface DragData {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly name: string;
+}
+
+/** dnd-kit listeners/attributes, derived so no internal type is imported. */
+type DragListeners = ReturnType<typeof useDraggable>["listeners"];
+type DragAttributes = ReturnType<typeof useDraggable>["attributes"];
+
+interface NameCellTree {
+  readonly depth: number;
+  readonly canExpand: boolean;
+  readonly isExpanded: boolean;
+  readonly onToggleExpand: () => void;
+  readonly dragRef?: ((element: HTMLElement | null) => void) | undefined;
+  readonly dragListeners?: DragListeners | undefined;
+  readonly dragAttributes?: DragAttributes | undefined;
+}
+
+/**
+ * Nest the flat, sort-ordered projection rows into a `parentId` tree. Children
+ * keep their source order because `rows` is already sorted by (sortOrder, id),
+ * and a child whose parent is missing is promoted to a root so no row is lost.
+ */
+function buildTree(rows: readonly WbsGridTaskRow[]): TreeRow[] {
+  const nodes = new Map<string, TreeRow & { subRows: TreeRow[] }>();
+  for (const row of rows) nodes.set(row.id, { ...row, subRows: [] });
+  const roots: TreeRow[] = [];
+  for (const row of rows) {
+    const node = nodes.get(row.id)!;
+    const parent = row.parentId === null ? undefined : nodes.get(row.parentId);
+    if (parent === undefined) roots.push(node);
+    else parent.subRows.push(node);
+  }
+  return roots;
+}
+
+/**
+ * Decide the new parent for a drag re-parent, or null when the drop is a no-op
+ * or illegal. Dropping row A onto row B nests A under B, except when B is A
+ * itself, B is already A's parent, or B lives inside A's subtree (which would
+ * create a cycle). This mirrors the domain's `validateParentHierarchy`
+ * (self-parent + acyclic) so the client rejects the same drops the server does.
+ */
+export function resolveReparentTarget(
+  active: DragData,
+  over: DragData,
+  isWithinActiveSubtree: (candidateId: string) => boolean,
+): string | null {
+  if (over.id === active.id) return null;
+  if (over.id === active.parentId) return null;
+  if (isWithinActiveSubtree(over.id)) return null;
+  return over.id;
+}
+
+/**
+ * The `task.update` re-parent command a drop should dispatch, or null when the
+ * drop is a no-op / illegal. This is the exact command sent through the shared
+ * `executeCommand` plumbing, so the drag path reuses the same save/reload/
+ * conflict handling as every inline edit.
+ */
+export function reparentCommand(
+  active: DragData,
+  over: DragData,
+  isWithinActiveSubtree: (candidateId: string) => boolean,
+): ProjectCommand | null {
+  const newParentId = resolveReparentTarget(active, over, isWithinActiveSubtree);
+  return newParentId === null
+    ? null
+    : { type: "task.update", taskId: active.id, changes: { parentId: newParentId } };
+}
+
+/**
+ * Per-row dnd wrapper. It calls the draggable/droppable hooks once per rendered
+ * row (rules of hooks) and hands their refs/listeners to a render prop, so the
+ * heavy row markup stays inline in `App` with direct access to grid state. The
+ * hooks are `disabled` in flat mode, and the enclosing `DndContext` stays
+ * mounted across the flat⇄tree toggle (spike gotcha #2: never remount it).
+ */
+function DndRow({
+  id,
+  parentId,
+  name,
+  enabled,
+  children,
+}: {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly children: (bag: {
+    readonly dropRef?: ((element: HTMLElement | null) => void) | undefined;
+    readonly dragRef?: ((element: HTMLElement | null) => void) | undefined;
+    readonly dragListeners?: DragListeners | undefined;
+    readonly dragAttributes?: DragAttributes | undefined;
+    readonly isOver: boolean;
+  }) => ReactNode;
+}): ReactNode {
+  const data: DragData = { id, parentId, name };
+  const draggable = useDraggable({ id: `drag-${id}`, data, disabled: !enabled });
+  const droppable = useDroppable({ id: `drop-${id}`, data, disabled: !enabled });
+  return children({
+    dropRef: enabled ? droppable.setNodeRef : undefined,
+    dragRef: enabled ? draggable.setNodeRef : undefined,
+    dragListeners: enabled ? draggable.listeners : undefined,
+    dragAttributes: enabled ? draggable.attributes : undefined,
+    isOver: enabled && droppable.isOver,
+  });
 }
 
 function displayValue(column: MetaColumn, row: WbsGridTaskRow, index: number): string {
@@ -285,6 +422,12 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [dailyEditing, setDailyEditing] = useState<DailyCellAddress | null>(null);
   const [dailyEditValue, setDailyEditValue] = useState("");
   const [templateId, setTemplateId] = useState<string>(SUBTASK_TEMPLATES[0]?.id ?? "");
+  const [viewMode, setViewMode] = useState<ViewMode>("flat");
+  // Expanded state. Default `true` = every parent expanded (the spike's initial
+  // all-expanded worst case), independent of async load timing; a per-row
+  // collapse or "Collapse all" narrows it to a record.
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
   const saving = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -304,17 +447,59 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return [...set].sort();
   }, [rows]);
 
-  const columns = useMemo<ColumnDef<WbsGridTaskRow>[]>(
+  const treeMode = viewMode === "tree";
+  const treeData = useMemo(() => buildTree(rows), [rows]);
+  // Tree mode nests rows under parentId; flat mode feeds the projection rows
+  // straight through (no subRows ⇒ every row depth 0, sort-order sequence).
+  const data: TreeRow[] = treeMode ? treeData : (rows as TreeRow[]);
+
+  const columns = useMemo<ColumnDef<TreeRow>[]>(
     () => META.map((column) => ({ id: column.id, header: column.header, accessorKey: "id" })),
     [],
   );
   const table = useReactTable({
-    data: rows,
+    data,
     columns,
+    state: { expanded },
+    onExpandedChange: setExpanded,
+    getSubRows: (row) => row.subRows as TreeRow[] | undefined,
     getRowId: (row) => row.id,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
   });
+  // In tree mode this is the expanded/visible set (collapsed subtrees drop out),
+  // so the row virtualizer window shrinks with collapse; in flat mode it is the
+  // full sort-ordered list. Selection/edit indices address this display order.
   const modelRows = table.getRowModel().rows;
+
+  // parentId → child ids, for the acyclic drop guard (target must not sit inside
+  // the dragged row's own subtree). Built from the full projection, not the
+  // visible set, so a collapsed descendant still blocks an illegal drop.
+  const childrenByParentId = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const row of rows) {
+      if (row.parentId === null) continue;
+      const siblings = map.get(row.parentId) ?? [];
+      siblings.push(row.id);
+      map.set(row.parentId, siblings);
+    }
+    return map;
+  }, [rows]);
+
+  const collectSubtree = useCallback(
+    (id: string): Set<string> => {
+      const found = new Set<string>();
+      const stack = [...(childrenByParentId.get(id) ?? [])];
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (found.has(current)) continue;
+        found.add(current);
+        for (const child of childrenByParentId.get(current) ?? []) stack.push(child);
+      }
+      return found;
+    },
+    [childrenByParentId],
+  );
 
   // initialRect seeds the viewport before the browser measures the scroller on
   // the first frame; a no-layout environment (e.g. tests) falls back to it.
@@ -428,6 +613,39 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [editable, executeCommand, templateId],
   );
 
+  // 6px activation distance so a click (cell select / expand toggle) or a scroll
+  // gesture never trips a drag, per the spike's PointerSensor tuning.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const onDragStart = useCallback((event: DragStartEvent) => {
+    setActiveDrag((event.active.data.current as DragData | undefined) ?? null);
+  }, []);
+
+  const onDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveDrag(null);
+      if (!editable) return;
+      const active = event.active.data.current as DragData | undefined;
+      const over = event.over?.data.current as DragData | undefined;
+      if (active === undefined || over === undefined) return;
+      const subtree = collectSubtree(active.id);
+      const command = reparentCommand(active, over, (candidateId) => subtree.has(candidateId));
+      if (command === null) return;
+      // Re-parent through the same typed command as every other edit; ④'s
+      // scheduler re-places the moved leaf and the leaf/rollup recompute on the
+      // write path (old parent may become a leaf, the new parent a summary).
+      const dispatched = executeCommand(command);
+      // Reveal the moved subtree by expanding its new parent.
+      if (dispatched && command.type === "task.update" && command.changes.parentId != null) {
+        const newParentId = command.changes.parentId;
+        setExpanded((previous) =>
+          previous === true ? previous : { ...previous, [newParentId]: true },
+        );
+      }
+    },
+    [collectSubtree, editable, executeCommand],
+  );
+
   const commit = useCallback(
     (column: MetaColumn, row: WbsGridTaskRow, raw: string) => {
       const changes = buildChanges(column, raw);
@@ -486,52 +704,52 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const beginEdit = useCallback(
     (address: CellAddress) => {
       const column = META[address.colIndex];
-      const row = rows[address.rowIndex];
+      const row = modelRows[address.rowIndex]?.original;
       if (column === undefined || row === undefined || !column.editable || !editable) return;
       setSelected(address);
       setEditing(address);
       setEditValue(editInitialValue(column, row));
     },
-    [editable, rows],
+    [editable, modelRows],
   );
 
   const finishEdit = useCallback(
     (persist: boolean) => {
       if (editing === null) return;
       const column = META[editing.colIndex];
-      const row = rows[editing.rowIndex];
+      const row = modelRows[editing.rowIndex]?.original;
       if (persist && column !== undefined && row !== undefined) {
         commit(column, row, editValue);
       }
       setEditing(null);
     },
-    [commit, editValue, editing, rows],
+    [commit, editValue, editing, modelRows],
   );
 
   const moveSelection = useCallback(
     (rowDelta: number, colDelta: number) => {
       setSelected((current) => {
-        const rowIndex = Math.max(0, Math.min(rows.length - 1, current.rowIndex + rowDelta));
+        const rowIndex = Math.max(0, Math.min(modelRows.length - 1, current.rowIndex + rowDelta));
         const colIndex = Math.max(0, Math.min(META.length - 1, current.colIndex + colDelta));
         if (rowDelta !== 0) rowVirtualizer.scrollToIndex(rowIndex, { align: "auto" });
         return { rowIndex, colIndex };
       });
     },
-    [rowVirtualizer, rows.length],
+    [rowVirtualizer, modelRows.length],
   );
 
   const copySelection = useCallback(() => {
     const column = META[selected.colIndex];
-    const row = rows[selected.rowIndex];
+    const row = modelRows[selected.rowIndex]?.original;
     if (column === undefined || row === undefined || navigator.clipboard === undefined) return;
     void navigator.clipboard
       .writeText(displayValue(column, row, selected.rowIndex))
       .catch(() => undefined);
-  }, [rows, selected]);
+  }, [modelRows, selected]);
 
   const pasteSelection = useCallback(() => {
     const column = META[selected.colIndex];
-    const row = rows[selected.rowIndex];
+    const row = modelRows[selected.rowIndex]?.original;
     if (
       column === undefined ||
       row === undefined ||
@@ -545,7 +763,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       .readText()
       .then((text) => commit(column, row, text.replace(/\r?\n$/u, "")))
       .catch(() => undefined);
-  }, [commit, editable, rows, selected]);
+  }, [commit, editable, modelRows, selected]);
 
   const onGridKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -577,7 +795,13 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [finishDailyEdit],
   );
 
-  const renderMetaCell = (column: MetaColumn, colIndex: number, row: WbsGridTaskRow, rowIndex: number) => {
+  const renderMetaCell = (
+    column: MetaColumn,
+    colIndex: number,
+    row: WbsGridTaskRow,
+    rowIndex: number,
+    tree?: NameCellTree,
+  ) => {
     if (column.kind === "lock") {
       const locked = row.dailyPlanLocked;
       return (
@@ -629,6 +853,40 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         onMouseDown={() => setSelected({ rowIndex, colIndex })}
         onDoubleClick={() => beginEdit({ rowIndex, colIndex })}
       >
+        {tree !== undefined && (
+          <span className="tree-affordance" style={{ paddingLeft: tree.depth * 16 }}>
+            {tree.canExpand ? (
+              <button
+                type="button"
+                className="tree-toggle"
+                data-testid="tree-toggle"
+                data-task-id={row.id}
+                aria-label={tree.isExpanded ? "Collapse" : "Expand"}
+                aria-expanded={tree.isExpanded}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  tree.onToggleExpand();
+                }}
+              >
+                {tree.isExpanded ? "▾" : "▸"}
+              </button>
+            ) : (
+              <span className="tree-toggle-spacer" aria-hidden />
+            )}
+            <span
+              ref={tree.dragRef}
+              className="drag-grip"
+              data-testid="drag-grip"
+              data-task-id={row.id}
+              title="Drag to re-parent"
+              {...(tree.dragListeners ?? {})}
+              {...(tree.dragAttributes ?? {})}
+            >
+              ⠿
+            </span>
+          </span>
+        )}
         {isEditing
           ? column.kind === "assignee"
             ? (
@@ -662,7 +920,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   };
 
   const rollup = grid.rollup;
-  const selectedRow = rows[selected.rowIndex];
+  const selectedRow = modelRows[selected.rowIndex]?.original;
 
   return (
     <div className="app-shell">
@@ -685,6 +943,50 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <RollupTile label="CV (pd)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
         <RollupTile label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
         <RollupTile label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
+      </section>
+
+      <section className="toolbar" aria-label="Hierarchy view" data-testid="view-toolbar">
+        <div className="view-toggle" role="group" aria-label="Row layout" data-testid="view-toggle">
+          <button
+            type="button"
+            className={`view-toggle-button ${treeMode ? "" : "view-toggle-button--active"}`}
+            data-testid="view-mode-flat"
+            aria-pressed={!treeMode}
+            onClick={() => setViewMode("flat")}
+          >
+            Flat
+          </button>
+          <button
+            type="button"
+            className={`view-toggle-button ${treeMode ? "view-toggle-button--active" : ""}`}
+            data-testid="view-mode-tree"
+            aria-pressed={treeMode}
+            onClick={() => setViewMode("tree")}
+          >
+            Tree
+          </button>
+        </div>
+        {treeMode && (
+          <>
+            <button
+              type="button"
+              className="toolbar-button toolbar-button--ghost"
+              data-testid="expand-all"
+              onClick={() => table.toggleAllRowsExpanded(true)}
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              className="toolbar-button toolbar-button--ghost"
+              data-testid="collapse-all"
+              onClick={() => table.toggleAllRowsExpanded(false)}
+            >
+              Collapse all
+            </button>
+            <span className="toolbar-hint">Drag a row’s ⠿ handle onto another task to re-parent it</span>
+          </>
+        )}
       </section>
 
       <section className="toolbar" aria-label="Subtask generation" data-testid="subtask-toolbar">
@@ -721,6 +1023,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
 
       {notice !== null && <div className="notice" role="alert">{notice}</div>}
 
+      {/* DndContext stays mounted in both modes so the scroller never remounts on
+          the flat⇄tree toggle (spike gotcha #2); the per-row hooks are simply
+          disabled in flat mode. */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActiveDrag(null)}
+      >
       <div
         ref={scrollerRef}
         className="scroller"
@@ -769,19 +1081,50 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           </div>
 
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const row = modelRows[virtualRow.index]!.original;
+            const modelRow = modelRows[virtualRow.index]!;
+            const row = modelRow.original;
             const rowIndex = virtualRow.index;
+            const depth = modelRow.depth;
+            const canExpand = modelRow.getCanExpand();
+            const isExpanded = modelRow.getIsExpanded();
+            const toggleExpand = modelRow.getToggleExpandedHandler();
             return (
-              <div
+              <DndRow
                 key={virtualRow.key}
-                className={`grid-row ${row.parentId === null ? "grid-row--parent" : "grid-row--child"}${row.dailyPlanLocked ? " grid-row--locked" : ""}`}
+                id={row.id}
+                parentId={row.parentId}
+                name={row.name}
+                enabled={treeMode}
+              >
+                {(dnd) => (
+              <div
+                ref={dnd.dropRef}
+                className={`grid-row ${row.parentId === null ? "grid-row--parent" : "grid-row--child"}${row.dailyPlanLocked ? " grid-row--locked" : ""}${dnd.isOver ? " grid-row--drop-target" : ""}`}
                 role="row"
                 data-locked={row.dailyPlanLocked ? "true" : "false"}
+                data-row-id={row.id}
+                data-depth={depth}
                 style={{ top: virtualRow.start, height: ROW_H, width: dayVirtualizer.getTotalSize() }}
               >
                 <div className="pinned-group" style={{ width: PINNED_WIDTH }}>
                   {PINNED.map((column) =>
-                    renderMetaCell(column, META.indexOf(column), row, rowIndex),
+                    renderMetaCell(
+                      column,
+                      META.indexOf(column),
+                      row,
+                      rowIndex,
+                      treeMode && column.id === "name"
+                        ? {
+                            depth,
+                            canExpand,
+                            isExpanded,
+                            onToggleExpand: toggleExpand,
+                            dragRef: dnd.dragRef,
+                            dragListeners: dnd.dragListeners,
+                            dragAttributes: dnd.dragAttributes,
+                          }
+                        : undefined,
+                    ),
                   )}
                 </div>
                 {NON_PINNED.map((column, index) => (
@@ -838,10 +1181,20 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   );
                 })}
               </div>
+                )}
+              </DndRow>
             );
           })}
         </div>
       </div>
+      <DragOverlay dropAnimation={null}>
+        {activeDrag !== null ? (
+          <div className="drag-overlay-chip" data-testid="drag-overlay">
+            {activeDrag.name}
+          </div>
+        ) : null}
+      </DragOverlay>
+      </DndContext>
     </div>
   );
 }
