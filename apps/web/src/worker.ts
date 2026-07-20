@@ -5,9 +5,11 @@ import {
 } from "@earned-signal/application";
 import {
   createPersistenceDatabase,
+  openNeonPersistenceConnection,
   PostgresProjectAccessGrantResolver,
   PostgresProjectCommandUnitOfWork,
   ProjectWorkspaceRepository,
+  type PersistenceDatabase,
 } from "@earned-signal/persistence";
 import { Client } from "pg";
 import { createApiApp, type ProjectSession } from "./api.js";
@@ -30,12 +32,21 @@ import {
   writeHttpRequestLog,
 } from "./edge-security.js";
 
-export async function openHyperdriveProjectSession(
-  environment: Env,
-): Promise<ProjectSession> {
-  const client = new Client({ connectionString: environment.HYPERDRIVE.connectionString });
-  await client.connect();
-  const database = createPersistenceDatabase(client);
+declare global {
+  interface Env {
+    /**
+     * Neon serverless Postgres connection string, supplied per deploy as a
+     * Worker secret. When present, the Worker resolves persistence through the
+     * Neon serverless driver; when absent, it falls back to Hyperdrive/pg.
+     */
+    readonly DATABASE_URL?: string;
+  }
+}
+
+function projectSessionFromDatabase(
+  database: PersistenceDatabase,
+  close: () => Promise<void>,
+): ProjectSession {
   const grantResolver = new PostgresProjectAccessGrantResolver(database);
   return {
     service: createProjectCommandService(
@@ -44,9 +55,40 @@ export async function openHyperdriveProjectSession(
     authorizer: createProjectCommandAuthorizer(grantResolver),
     queryAuthorizer: createProjectQueryAuthorizer(grantResolver),
     workspace: new ProjectWorkspaceRepository(database),
-    // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.
-    close: async () => undefined,
+    close,
   };
+}
+
+export async function openHyperdriveProjectSession(
+  environment: Env,
+): Promise<ProjectSession> {
+  const client = new Client({ connectionString: environment.HYPERDRIVE.connectionString });
+  await client.connect();
+  return projectSessionFromDatabase(
+    createPersistenceDatabase(client),
+    // Hyperdrive owns the origin pool; the invocation-scoped client is not ended in Workers.
+    async () => undefined,
+  );
+}
+
+export async function openNeonProjectSession(
+  connectionString: string,
+): Promise<ProjectSession> {
+  const connection = openNeonPersistenceConnection(connectionString);
+  return projectSessionFromDatabase(connection.database, () => connection.close());
+}
+
+/**
+ * Choose the persistence driver at request time: the Neon serverless driver
+ * when a `DATABASE_URL` secret is configured, otherwise Hyperdrive/pg. This
+ * keeps local and integration runs on Hyperdrive/pg unchanged while the
+ * authenticated `*.workers.dev` deployment runs on Neon.
+ */
+export function openProjectSession(environment: Env): Promise<ProjectSession> {
+  const databaseUrl = environment.DATABASE_URL;
+  return databaseUrl !== undefined && databaseUrl.length > 0
+    ? openNeonProjectSession(databaseUrl)
+    : openHyperdriveProjectSession(environment);
 }
 
 const authenticator = createOidcBearerAuthenticator(createJoseOidcTokenVerifier());
@@ -63,7 +105,7 @@ const authenticateForAudience = (audience: (environment: Env) => string) =>
 
 const app = createApiApp({
   authenticate: authenticateForAudience((environment) => environment.OIDC_AUDIENCE),
-  openProjectSession: openHyperdriveProjectSession,
+  openProjectSession,
 });
 
 export default {

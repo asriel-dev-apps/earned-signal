@@ -15,6 +15,8 @@ export async function migratePersistenceDatabase(client: Client): Promise<void> 
 }
 
 export * from "./schema.js";
+export * from "./persistence-database.js";
+export * from "./neon-database.js";
 export * from "./demo-project.js";
 export * from "./project-record.js";
 export * from "./project-repository.js";

@@ -9,12 +9,14 @@
     "db:check": "drizzle-kit check --config drizzle.config.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "node scripts/migrate.mjs",
+    "db:seed": "node scripts/seed-admin.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@earned-signal/application": "workspace:*",
     "@earned-signal/domain": "workspace:*",
+    "@neondatabase/serverless": "0.10.4",
     "drizzle-orm": "0.45.2",
     "pg": "8.22.0"
   },

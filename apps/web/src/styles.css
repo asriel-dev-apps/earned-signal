@@ -401,3 +401,42 @@ body {
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
   pointer-events: none;
 }
+
+/* Sign in with Google control. Fixed to the top-right so it overlays the header
+   whitespace without consuming layout height (the app-shell is a 100vh column). */
+.auth-bar {
+  position: fixed;
+  top: 10px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-identity {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-button {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.auth-button--ghost {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.auth-button:hover { filter: brightness(0.96); }
