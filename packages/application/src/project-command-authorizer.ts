@@ -5,6 +5,8 @@ export interface AuthenticatedIdentity {
   readonly issuer: string;
   readonly subject: string;
   readonly scopes: readonly string[];
+  /** Verified email claim, present only when the provider attests it (email_verified). */
+  readonly email?: string;
 }
 
 export type ProjectRole = "OWNER" | "EDITOR" | "VIEWER";

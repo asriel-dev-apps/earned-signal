@@ -112,6 +112,22 @@ export class PostgresProjectAccessGrantResolver implements ProjectAccessGrantRes
   constructor(private readonly database: NodePgDatabase<typeof schema>) {}
 
   async resolve(request: ProjectAccessGrantRequest): Promise<ProjectAccessGrant | null> {
+    const direct = await this.resolveBySubject(request, request.identity.subject);
+    if (direct !== null) {
+      return direct;
+    }
+    // Fallback: a principal seeded before its provider subject is known may be keyed by a
+    // verified email claim as `email:<address>` (e.g. the admin seed).
+    if (request.identity.email !== undefined) {
+      return this.resolveBySubject(request, `email:${request.identity.email}`);
+    }
+    return null;
+  }
+
+  private async resolveBySubject(
+    request: ProjectAccessGrantRequest,
+    subject: string,
+  ): Promise<ProjectAccessGrant | null> {
     const [grant] = await this.database
       .select({
         principalId: principals.id,
@@ -138,7 +154,7 @@ export class PostgresProjectAccessGrantResolver implements ProjectAccessGrantRes
       .where(
         and(
           eq(principals.issuer, request.identity.issuer),
-          eq(principals.subject, request.identity.subject),
+          eq(principals.subject, subject),
           isNull(principals.disabledAt),
         ),
       )

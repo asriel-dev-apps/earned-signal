@@ -16,9 +16,11 @@ import pg from "pg";
 // Required env:
 //   DATABASE_URL    Postgres/Neon connection string (never committed)
 //   OIDC_ISSUER     e.g. https://accounts.google.com
-//   ADMIN_SUBJECT   the provider's stable subject claim (Google `sub`)
 //   ADMIN_EMAIL     admin email, used as the principal display name
 // Optional env:
+//   ADMIN_SUBJECT   the provider's stable subject claim (Google `sub`); when omitted the
+//                   principal is keyed as `email:<ADMIN_EMAIL>` and the resolver's verified
+//                   email fallback matches it at sign-in
 //   ADMIN_DISPLAY_NAME  overrides the display name (defaults to ADMIN_EMAIL)
 //   TENANT_ID / PROJECT_ID / ADMIN_PRINCIPAL_ID  stable UUIDs (else generated)
 //   TENANT_NAME / PROJECT_NAME                   labels (default "VECTA")
@@ -28,8 +30,10 @@ const dryRun = process.argv.includes("--dry-run");
 
 const connectionString = process.env.DATABASE_URL;
 const issuer = process.env.OIDC_ISSUER;
-const subject = process.env.ADMIN_SUBJECT;
 const email = process.env.ADMIN_EMAIL;
+const subject =
+  process.env.ADMIN_SUBJECT ??
+  (email === undefined ? undefined : `email:${email.trim().toLowerCase()}`);
 const displayName = process.env.ADMIN_DISPLAY_NAME ?? email;
 const tenantId = process.env.TENANT_ID ?? randomUUID();
 const projectId = process.env.PROJECT_ID ?? randomUUID();
@@ -62,11 +66,11 @@ const loopback = issuerUrl.hostname === "localhost" || issuerUrl.hostname === "1
 if (issuerUrl.protocol !== "https:" && !(issuerUrl.protocol === "http:" && loopback)) {
   fail("OIDC_ISSUER must use HTTPS");
 }
-if (subject === undefined || subject.trim().length === 0) {
-  fail("ADMIN_SUBJECT is required");
-}
 if (email === undefined || email.trim().length === 0) {
   fail("ADMIN_EMAIL is required");
+}
+if (subject === undefined || subject.trim().length === 0) {
+  fail("ADMIN_SUBJECT (or ADMIN_EMAIL) is required");
 }
 if (displayName === undefined || displayName.trim().length === 0) {
   fail("ADMIN_DISPLAY_NAME (or ADMIN_EMAIL) must not be blank");

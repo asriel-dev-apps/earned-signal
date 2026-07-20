@@ -78,10 +78,17 @@ export function createJoseOidcTokenVerifier(
         payload.scope === undefined
           ? []
           : [...new Set(payload.scope.split(" ").filter((scope) => scope.length > 0))];
+      const email =
+        payload.email_verified === true &&
+        typeof payload.email === "string" &&
+        payload.email.length > 0
+          ? payload.email.toLowerCase()
+          : undefined;
       return {
         issuer: config.issuer,
         subject: payload.sub,
         scopes,
+        ...(email === undefined ? {} : { email }),
       };
     },
   };
