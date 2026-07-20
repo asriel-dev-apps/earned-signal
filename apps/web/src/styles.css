@@ -432,8 +432,7 @@ body {
 .cell--derivedNum,
 .cell--derivedPercent,
 .cell--hours,
-.cell--progress,
-.cell--weight {
+.cell--progress {
   justify-content: flex-end;
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
