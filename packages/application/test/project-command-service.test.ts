@@ -9,40 +9,36 @@ import {
 
 const initialProject: ProjectState = {
   id: "10000000-0000-4000-8000-000000000001",
-  name: "API project",
-  projectStart: "2026-07-13",
-  statusDate: "2026-07-24",
+  name: "Effort project",
+  projectStart: "2026-01-05",
+  statusDate: "2026-01-20",
   currency: "JPY",
-  defaultCalendarId: "calendar-standard",
+  defaultCalendarId: "standard",
   calendars: [
-    {
-      id: "calendar-standard",
-      name: "Standard",
-      workingWeekdays: [1, 2, 3, 4, 5],
-      nonWorkingDates: [],
-    },
+    { id: "standard", name: "Standard", workingWeekdays: [1, 2, 3, 4, 5], nonWorkingDates: [] },
   ],
-  wbsGroups: [],
-  skills: [],
-  resources: [],
-  assignments: [],
+  members: [],
   tasks: [
     {
       id: "30000000-0000-4000-8000-000000000001",
-      wbs: "1.1",
-      wbsParentId: null,
-      name: "Build API",
-      owner: "Maya Chen",
-      durationWorkingDays: 5,
-      measurementMethod: "PHYSICAL_PERCENT",
-      calendarId: "calendar-standard",
+      parentId: null,
+      sortOrder: 0,
+      name: "Subtask",
+      process: "Phase A",
+      product: "Product 1",
+      reviewRef: "",
+      changeRef: "",
+      note: "",
+      contract: "",
+      assigneeMemberId: null,
+      plannedEffortMinutes: 480,
+      progressBasisPoints: 2_000,
+      actualEffortMinutes: 300,
+      dailyPlan: { "2026-01-05": 480 },
+      dailyPlanLocked: false,
+      actualStart: "2026-01-05",
+      actualFinish: null,
       dependencies: [],
-      constraint: null,
-      requiredSkillIds: [],
-      budget: 600_000,
-      progressPercent: 20,
-      actualCost: 100_000,
-      actualMinutes: 600,
     },
   ],
 };
@@ -81,7 +77,7 @@ describe("ProjectCommandService", () => {
       command: {
         type: "task.update",
         taskId: initialProject.tasks[0]!.id,
-        changes: { progressPercent: 55, actualMinutes: 900 },
+        changes: { progressBasisPoints: 5_500, actualEffortMinutes: 900 },
       },
     });
 
@@ -91,8 +87,8 @@ describe("ProjectCommandService", () => {
       replayed: false,
     });
     expect(unitOfWork.readProject().tasks[0]).toMatchObject({
-      progressPercent: 55,
-      actualMinutes: 900,
+      progressBasisPoints: 5_500,
+      actualEffortMinutes: 900,
     });
   });
 });

@@ -1,23 +1,11 @@
 import {
-  ActualValueDecreaseError,
   AgentPlanApprovalRequiredError,
   IdempotencyConflictError,
   ProjectAccessDeniedError,
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
-  StaffingProposalValidationError,
 } from "@earned-signal/application";
-import {
-  ScenarioNotFoundError,
-  ScenarioRevisionConflictError,
-  ScenarioRunRequiredError,
-  ScenarioStaleError,
-  ScenarioTerminalError,
-  StaffingProposalIdempotencyConflictError,
-  StaffingProposalNotFoundError,
-  StaffingProposalStaleError,
-} from "@earned-signal/persistence";
 
 export interface ProjectCommandErrorBody {
   readonly code: string;
@@ -49,54 +37,6 @@ export function resolveProjectCommandError(
   if (error instanceof ProjectNotFoundError) {
     return { status: 404, error: { code: "PROJECT_NOT_FOUND", message: error.message } };
   }
-  if (error instanceof ScenarioNotFoundError) {
-    return { status: 404, error: { code: "SCENARIO_NOT_FOUND", message: error.message } };
-  }
-  if (error instanceof StaffingProposalNotFoundError) {
-    return { status: 404, error: { code: "STAFFING_PROPOSAL_NOT_FOUND", message: error.message } };
-  }
-  if (error instanceof StaffingProposalIdempotencyConflictError) {
-    return { status: 409, error: { code: "STAFFING_PROPOSAL_IDEMPOTENCY_CONFLICT", message: error.message } };
-  }
-  if (error instanceof StaffingProposalStaleError) {
-    return {
-      status: 409,
-      error: {
-        code: "STAFFING_PROPOSAL_STALE",
-        message: error.message,
-        expectedRevision: error.baseProjectRevision.toString(),
-        actualRevision: error.currentProjectRevision.toString(),
-      },
-    };
-  }
-  if (error instanceof ScenarioRevisionConflictError) {
-    return {
-      status: 409,
-      error: {
-        code: "SCENARIO_REVISION_CONFLICT",
-        message: error.message,
-        expectedRevision: error.expectedRevision.toString(),
-        actualRevision: error.actualRevision.toString(),
-      },
-    };
-  }
-  if (error instanceof ScenarioStaleError) {
-    return {
-      status: 409,
-      error: {
-        code: "SCENARIO_STALE",
-        message: error.message,
-        expectedRevision: error.baseProjectRevision.toString(),
-        actualRevision: error.currentProjectRevision.toString(),
-      },
-    };
-  }
-  if (error instanceof ScenarioTerminalError) {
-    return { status: 409, error: { code: "SCENARIO_TERMINAL", message: error.message } };
-  }
-  if (error instanceof ScenarioRunRequiredError) {
-    return { status: 422, error: { code: "SCENARIO_RUN_REQUIRED", message: error.message } };
-  }
   if (error instanceof ProjectVersionConflictError) {
     return {
       status: 409,
@@ -114,14 +54,8 @@ export function resolveProjectCommandError(
       error: { code: "IDEMPOTENCY_CONFLICT", message: error.message },
     };
   }
-  if (
-    error instanceof ProjectCommandValidationError ||
-    error instanceof ActualValueDecreaseError
-  ) {
+  if (error instanceof ProjectCommandValidationError) {
     return { status: 422, error: { code: "COMMAND_INVALID", message: error.message } };
-  }
-  if (error instanceof StaffingProposalValidationError) {
-    return { status: 422, error: { code: error.code, message: error.message } };
   }
   return null;
 }

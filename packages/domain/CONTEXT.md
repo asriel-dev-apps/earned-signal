@@ -1,23 +1,18 @@
 # Domain context
 
-The Domain context contains deterministic, infrastructure-free scheduling and earned value calculations.
+The Domain context contains deterministic, infrastructure-free scheduling and earned-value calculations.
 
-Scheduling supports project and activity working calendars, holidays, multiple FS/SS/FF/SF dependencies, bounded non-negative working-day lag, SNET/FNLT/MSO/MFO date constraints, forward/backward passes, float, critical-path flags, constraint-violation signals, and exact cycle membership. Activity duration follows its activity calendar. Relationship lag follows the project default calendar so one dependency has one stable lag basis even when the linked activities use different calendars.
+Scheduling supports project and activity working calendars, holidays, multiple FS/SS/FF/SF dependencies, bounded non-negative working-day lag, SNET/FNLT/MSO/MFO date constraints, forward/backward passes, float, critical-path flags, constraint-violation signals, and exact cycle membership. Activity duration follows its activity calendar. Relationship lag follows the project default calendar so one dependency has one stable lag basis even when the linked activities use different calendars. Scheduling is a pure engine retained for the ④ capacity-aware placement step.
 
-EVM currently supports 0/100 and physical-percent measurement, status-date filtering, direct actual costs and labor worklog costs, and BAC/PV/EV/AC/SV/CV/SPI/CPI/EAC/ETC/VAC/TCPI. Effort is stored as integer minutes, currency values remain unrounded until final output, and zero denominators return `null`.
+Effort EVM is the earned-value engine. Task effort is person-hours stored as integer person-minutes; project aggregates are person-days = person-hours / 8. Per task it derives K (planned person-days = L/8), M (planned person-hours = Σ daily plot), N (planned earned to the status date), O (planned progress = N/M, div0 → 0), P/Q (first/last non-zero daily date), U (status from T), V (earned effort = M × T), and X (cost variance = V − W). The project rollup sums M/8, N/8, (M × T)/8, and W/8 into BAC/PV/EV/AC, then derives SV, CV, SPI = EV/PV, and CPI = EV/AC. There is no rounding; a zero denominator yields `"-"` while the planned-progress ratio yields `0`. This module is the single formula source for both the server projection and the client's optimistic recompute.
 
-EVM history replays the latest Progress Measurement available at each weekly Period Bucket, filters Actual Cost by that bucket's status date, and produces an EVM Snapshot plus leaf-WBS variance ranking. The first and last buckets may be partial weeks; every intermediate bucket ends on Sunday.
-
-Capacity analysis combines scheduled activity dates with each Resource's Calendar and Assignment units. It reports daily available and demanded minutes, over-allocation, utilization, planned labor cost, and required-Skill gaps without changing the schedule.
+Capacity analysis combines scheduled dates with each member's calendar and daily capacity to report daily available and demanded minutes, over-allocation, and utilization. It is a pure engine retained for ④; money-derived outputs (rate × effort) are a Phase 2 concern.
 
 ## Language
 
-- **Resource**: a person or capacity unit that may be assigned to work packages.
-- **Skill**: a named capability held by a Resource or required by a work package.
-- **Assignment**: a planned fractional commitment of one Resource to one work package.
-- **Units percent**: the percentage of a Resource's available daily minutes consumed by an Assignment, from 1 through 100.
-- **Daily capacity**: the minutes a Resource can supply on a working day in its Calendar.
-- **Over-allocation**: demand above a Resource's daily capacity. It remains visible and does not invalidate the plan.
-- **Rate**: planned labor cost per productive hour, stored in minor currency units.
-- **Period Bucket**: a weekly reporting interval with its own inclusive status date.
-- **EVM Snapshot**: the calculated EVM metrics and ranked WBS variances as of one Period Bucket's status date.
+- **Person-day / person-hour / person-minute**: the effort units; a person-day is 8 person-hours, and effort is stored as integer person-minutes.
+- **Planned effort (L)**: a task's whole-minute planned estimate; K = L/8 person-days.
+- **Daily planned-value plot**: a sparse `ISO-date → minutes` map whose sum is the planned effort M and whose non-zero extent gives the planned start P and finish Q.
+- **Progress (T)**: an actual completion fraction stored as basis points (0–10000); earned effort V = M × T.
+- **Status (U)**: not-started, in-progress, or done, derived from T.
+- **Rollup**: BAC/PV/EV/AC in person-days with SV, CV, SPI, and CPI derived from them.

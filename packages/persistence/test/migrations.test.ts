@@ -8,258 +8,23 @@ describe("persistence migrations", () => {
   let client: Client;
   let stopContainer: (() => Promise<void>) | undefined;
 
+  const tenantId = "00000000-0000-4000-8000-000000000001";
+  const projectId = "10000000-0000-4000-8000-000000000001";
+  const memberId = "c0000000-0000-4000-8000-000000000001";
+  const taskId = "d0000000-0000-4000-8000-000000000001";
+
   beforeAll(async () => {
     const started = await container.start();
     stopContainer = async () => started.stop().then(() => undefined);
     client = new Client({ connectionString: started.getConnectionUri() });
     await client.connect();
     await migratePersistenceDatabase(client);
-  }, 60_000);
 
-  afterAll(async () => {
-    await client.end();
-    await stopContainer?.();
-  });
-
-  it("applies the system-of-record schema to an empty PostgreSQL database", async () => {
-    const result = await client.query<{ table_name: string }>(
-      "select table_name from information_schema.tables where table_schema = 'public' order by table_name",
-    );
-
-    expect(result.rows.map((row) => row.table_name)).toEqual([
-      "activities",
-      "activity_skill_requirements",
-      "assignments",
-      "audit_events",
-      "baseline_activities",
-      "baseline_activity_skill_requirements",
-      "baseline_assignments",
-      "baseline_calendars",
-      "baseline_dependencies",
-      "baseline_resource_skills",
-      "baseline_resources",
-      "baseline_skills",
-      "baseline_versions",
-      "baseline_wbs_nodes",
-      "command_receipts",
-      "dependencies",
-      "direct_actual_costs",
-      "evm_snapshot_wbs_variances",
-      "evm_snapshots",
-      "forecast_run_audit_events",
-      "forecast_run_results",
-      "forecast_runs",
-      "period_buckets",
-      "principals",
-      "progress_measurements",
-      "project_calendars",
-      "project_memberships",
-      "projects",
-      "resource_skills",
-      "resources",
-      "scenario_audit_events",
-      "scenario_runs",
-      "scenarios",
-      "skills",
-      "staffing_proposal_audit_events",
-      "staffing_proposal_runs",
-      "staffing_proposals",
-      "tenant_memberships",
-      "tenants",
-      "wbs_nodes",
-      "worklogs",
-    ]);
-  });
-
-  it("enforces principal scope and tenant/project membership boundaries", async () => {
-    const tenantA = "00000000-0000-4000-8000-000000000021";
-    const tenantB = "00000000-0000-4000-8000-000000000022";
-    const projectB = "10000000-0000-4000-8000-000000000022";
-    const principalId = "90000000-0000-4000-8000-000000000021";
-    await client.query(
-      "insert into tenants (id, name) values ($1, 'Access tenant A'), ($2, 'Access tenant B')",
-      [tenantA, tenantB],
-    );
+    await client.query("insert into tenants (id, name) values ($1, 'Tenant A')", [tenantId]);
     await client.query("begin");
     await client.query(
       `insert into projects (id, tenant_id, name, project_start, status_date)
-       values ($1, $2, 'Access project B', '2026-01-01', '2026-01-01')`,
-      [projectB, tenantB],
-    );
-    await client.query(
-      `insert into project_calendars
-         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
-       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
-      [tenantB, projectB],
-    );
-    await client.query("commit");
-
-    await expect(
-      client.query(
-        `insert into principals (issuer, subject, type, display_name, allowed_scopes)
-         values ('https://identity.example.test/', 'human-with-agent-scope', 'HUMAN',
-                 'Invalid human', array['project:progress:write'])`,
-      ),
-    ).rejects.toMatchObject({ code: "23514" });
-
-    await client.query(
-      `insert into principals (id, issuer, subject, type, display_name)
-       values ($1, 'https://identity.example.test/', 'bounded-human', 'HUMAN', 'Bounded human')`,
-      [principalId],
-    );
-    await client.query(
-      "insert into tenant_memberships (tenant_id, principal_id, role) values ($1, $2, 'MEMBER')",
-      [tenantA, principalId],
-    );
-    await expect(
-      client.query(
-        `insert into project_memberships (tenant_id, project_id, principal_id, role)
-         values ($1, $2, $3, 'EDITOR')`,
-        [tenantB, projectB, principalId],
-      ),
-    ).rejects.toMatchObject({ code: "23503" });
-  });
-
-  it("rejects tenant/project boundary violations and invalid effort", async () => {
-    const tenantA = "00000000-0000-4000-8000-000000000001";
-    const tenantB = "00000000-0000-4000-8000-000000000002";
-    const projectA = "10000000-0000-4000-8000-000000000001";
-    const projectB = "10000000-0000-4000-8000-000000000002";
-    const wbsA = "20000000-0000-4000-8000-000000000001";
-    const activityA = "30000000-0000-4000-8000-000000000001";
-    const resourceA = "60000000-0000-4000-8000-000000000001";
-    const resourceB = "60000000-0000-4000-8000-000000000002";
-
-    await client.query(
-      "insert into tenants (id, name) values ($1, 'Tenant A'), ($2, 'Tenant B')",
-      [tenantA, tenantB],
-    );
-    await client.query("begin");
-    await client.query(
-      `insert into projects (id, tenant_id, name, project_start, status_date)
-       values ($1, $2, 'Project A', '2026-01-01', '2026-01-01'),
-              ($3, $4, 'Project B', '2026-01-01', '2026-01-01')`,
-      [projectA, tenantA, projectB, tenantB],
-    );
-    await client.query(
-      `insert into project_calendars
-         (tenant_id, project_id, id, name, working_weekdays, non_working_dates)
-       values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[]),
-              ($3, $4, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
-      [tenantA, projectA, tenantB, projectB],
-    );
-    await client.query("commit");
-    await client.query(
-      "insert into wbs_nodes (id, tenant_id, project_id, code, name) values ($1, $2, $3, 'A', 'A')",
-      [wbsA, tenantA, projectA],
-    );
-    await client.query(
-      `insert into activities
-         (id, tenant_id, project_id, wbs_node_id, name, duration_working_days, budget_minor, measurement_method)
-       values ($1, $2, $3, $4, 'Activity A', 1, 100, 'PHYSICAL_PERCENT')`,
-      [activityA, tenantA, projectA, wbsA],
-    );
-    await client.query(
-      `insert into resources
-         (id, tenant_id, project_id, name, calendar_id, daily_capacity_minutes, cost_rate_minor_per_hour)
-       values ($1, $2, $3, 'Resource A', 'standard', 480, 6000),
-              ($4, $5, $6, 'Resource B', 'standard', 480, 6000)`,
-      [resourceA, tenantA, projectA, resourceB, tenantB, projectB],
-    );
-
-    await expect(
-      client.query(
-        `insert into activities
-           (tenant_id, project_id, wbs_node_id, name, duration_working_days, budget_minor, measurement_method)
-         values ($1, $2, $3, 'Cross tenant', 1, 100, 'PHYSICAL_PERCENT')`,
-        [tenantB, projectB, wbsA],
-      ),
-    ).rejects.toMatchObject({ code: "23503" });
-
-    await expect(
-      client.query(
-        `insert into worklogs
-           (tenant_id, project_id, activity_id, work_date, actual_minutes, rate_minor_per_hour, person_ref)
-         values ($1, $2, $3, '2026-01-01', -1, '1000.000000', 'person-a')`,
-        [tenantA, projectA, activityA],
-      ),
-    ).rejects.toMatchObject({ code: "23514" });
-
-    await expect(
-      client.query(
-        `insert into assignments
-           (tenant_id, project_id, activity_id, resource_id, units_percent)
-         values ($1, $2, $3, $4, 100)`,
-        [tenantA, projectA, activityA, resourceB],
-      ),
-    ).rejects.toMatchObject({ code: "23503" });
-    await expect(
-      client.query(
-        `insert into assignments
-           (tenant_id, project_id, activity_id, resource_id, units_percent)
-         values ($1, $2, $3, $4, 101)`,
-        [tenantA, projectA, activityA, resourceA],
-      ),
-    ).rejects.toMatchObject({ code: "23514" });
-
-    await expect(
-      client.query("update activities set calendar_id = 'missing' where id = $1", [activityA]),
-    ).rejects.toMatchObject({ code: "23503" });
-    await expect(
-      client.query(
-        "update activities set constraint_type = 'MUST_START_ON' where id = $1",
-        [activityA],
-      ),
-    ).rejects.toMatchObject({ code: "23514" });
-    await client.query("begin");
-    await client.query("update projects set default_calendar_id = 'missing' where id = $1", [projectA]);
-    await expect(client.query("commit")).rejects.toMatchObject({ code: "23503" });
-    await client.query("rollback");
-
-    await client.query(
-      `insert into direct_actual_costs
-         (tenant_id, project_id, activity_id, cost_date, amount_minor, description)
-       values ($1, $2, $3, '2026-01-01', 9007199254740993, 'Precision check')`,
-      [tenantA, projectA, activityA],
-    );
-    const preciseAmount = await client.query<{ amount_minor: string }>(
-      "select amount_minor from direct_actual_costs where activity_id = $1",
-      [activityA],
-    );
-    expect(preciseAmount.rows[0]?.amount_minor).toBe("9007199254740993");
-
-    await client.query(
-      `insert into progress_measurements
-         (tenant_id, project_id, activity_id, measurement_date, method, progress_basis_points)
-       values ($1, $2, $3, '2026-01-01', 'PHYSICAL_PERCENT', 5000)`,
-      [tenantA, projectA, activityA],
-    );
-    await expect(
-      client.query(
-        `insert into progress_measurements
-           (tenant_id, project_id, activity_id, measurement_date, method, progress_basis_points)
-         values ($1, $2, $3, '2026-01-01', 'PHYSICAL_PERCENT', 6000)`,
-        [tenantA, projectA, activityA],
-      ),
-    ).rejects.toMatchObject({ code: "23505" });
-  });
-
-  it("keeps approved baseline records immutable", async () => {
-    const tenantId = "00000000-0000-4000-8000-000000000011";
-    const projectId = "10000000-0000-4000-8000-000000000011";
-    const versionId = "40000000-0000-4000-8000-000000000011";
-    const sourceWbsNodeId = "20000000-0000-4000-8000-000000000011";
-    const sourceActivityId = "30000000-0000-4000-8000-000000000011";
-    const sourceSkillId = "d0000000-0000-4000-8000-000000000011";
-    const sourceResourceId = "e0000000-0000-4000-8000-000000000011";
-
-    await client.query("insert into tenants (id, name) values ($1, 'Baseline tenant')", [
-      tenantId,
-    ]);
-    await client.query("begin");
-    await client.query(
-      `insert into projects (id, tenant_id, name, project_start, status_date)
-       values ($1, $2, 'Baseline project', '2026-01-01', '2026-01-01')`,
+       values ($1, $2, 'Project A', '2026-01-05', '2026-01-20')`,
       [projectId, tenantId],
     );
     await client.query(
@@ -268,131 +33,130 @@ describe("persistence migrations", () => {
        values ($1, $2, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
       [tenantId, projectId],
     );
-    await client.query(
-      `insert into baseline_versions
-         (id, tenant_id, project_id, version, label, approved_at, approved_by)
-       values ($1, $2, $3, 1, 'Approved plan', null, null)`,
-      [versionId, tenantId, projectId],
-    );
-    await client.query(
-      `insert into baseline_calendars
-         (tenant_id, project_id, baseline_version_id, source_calendar_id, name,
-          working_weekdays, non_working_dates)
-       values ($1, $2, $3, 'standard', 'Standard', array[1,2,3,4,5], array[]::date[])`,
-      [tenantId, projectId, versionId],
-    );
     await client.query("commit");
     await client.query(
-      `insert into baseline_wbs_nodes
-         (tenant_id, project_id, baseline_version_id, source_wbs_node_id, code, name, sort_order)
-       values ($1, $2, $3, $4, '1', 'Approved WBS', 0)`,
-      [tenantId, projectId, versionId, sourceWbsNodeId],
+      `insert into members (id, tenant_id, project_id, name, calendar_id, daily_capacity_minutes)
+       values ($1, $2, $3, 'Member 01', 'standard', 480)`,
+      [memberId, tenantId, projectId],
     );
     await client.query(
-      `insert into baseline_activities
-         (tenant_id, project_id, baseline_version_id, source_activity_id, source_wbs_node_id,
-          wbs_code, name, duration_working_days, baseline_start, baseline_finish, budget_minor,
-          measurement_method)
-       values ($1, $2, $3, $4, $5, '1.1', 'Approved activity', 1,
-               '2026-01-01', '2026-01-01', 100, 'PHYSICAL_PERCENT')`,
-      [tenantId, projectId, versionId, sourceActivityId, sourceWbsNodeId],
+      `insert into tasks (id, tenant_id, project_id, name, planned_effort_minutes, progress_basis_points)
+       values ($1, $2, $3, 'Subtask', 480, 5000)`,
+      [taskId, tenantId, projectId],
     );
-    await client.query(
-      `insert into baseline_skills
-         (tenant_id, project_id, baseline_version_id, source_skill_id, name)
-       values ($1, $2, $3, $4, 'Engineering')`,
-      [tenantId, projectId, versionId, sourceSkillId],
-    );
-    await client.query(
-      `insert into baseline_resources
-         (tenant_id, project_id, baseline_version_id, source_resource_id, name, calendar_id,
-          daily_capacity_minutes, cost_rate_minor_per_hour)
-       values ($1, $2, $3, $4, 'Engineer', 'standard', 480, 7000)`,
-      [tenantId, projectId, versionId, sourceResourceId],
-    );
-    await client.query(
-      `insert into baseline_assignments
-         (tenant_id, project_id, baseline_version_id, source_activity_id, source_resource_id, units_percent)
-       values ($1, $2, $3, $4, $5, 100)`,
-      [tenantId, projectId, versionId, sourceActivityId, sourceResourceId],
-    );
-    await client.query(
-      `insert into baseline_resource_skills
-         (tenant_id, project_id, baseline_version_id, source_resource_id, source_skill_id)
-       values ($1, $2, $3, $4, $5)`,
-      [tenantId, projectId, versionId, sourceResourceId, sourceSkillId],
-    );
-    await client.query(
-      `insert into baseline_activity_skill_requirements
-         (tenant_id, project_id, baseline_version_id, source_activity_id, source_skill_id)
-       values ($1, $2, $3, $4, $5)`,
-      [tenantId, projectId, versionId, sourceActivityId, sourceSkillId],
-    );
-    await client.query(
-      "update baseline_versions set approved_at = now(), approved_by = 'planner@example.test' where id = $1",
-      [versionId],
-    );
+  }, 60_000);
 
-    await expect(
-      client.query("update baseline_versions set label = 'Changed' where id = $1", [versionId]),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        `insert into baseline_wbs_nodes
-           (tenant_id, project_id, baseline_version_id, source_wbs_node_id, code, name, sort_order)
-         values ($1, $2, $3, '20000000-0000-4000-8000-000000000012', '2', 'Late WBS', 1)`,
-        [tenantId, projectId, versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query("delete from baseline_activities where source_activity_id = $1", [
-        sourceActivityId,
-      ]),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        "update baseline_calendars set name = 'Changed' where baseline_version_id = $1",
-        [versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        "update baseline_resources set name = 'Changed' where baseline_version_id = $1",
-        [versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        "delete from baseline_assignments where baseline_version_id = $1",
-        [versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        "delete from baseline_resource_skills where baseline_version_id = $1",
-        [versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        "delete from baseline_activity_skill_requirements where baseline_version_id = $1",
-        [versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
-    await expect(
-      client.query(
-        `insert into baseline_skills
-           (tenant_id, project_id, baseline_version_id, source_skill_id, name)
-         values ($1, $2, $3, 'd0000000-0000-4000-8000-000000000012', 'Late skill')`,
-        [tenantId, projectId, versionId],
-      ),
-    ).rejects.toMatchObject({ code: "55000" });
+  afterAll(async () => {
+    await client.end();
+    await stopContainer?.();
+  });
 
+  it("applies the effort-first schema to an empty PostgreSQL database", async () => {
+    const result = await client.query<{ table_name: string }>(
+      "select table_name from information_schema.tables where table_schema = 'public' order by table_name",
+    );
+    expect(result.rows.map((row) => row.table_name)).toEqual([
+      "audit_events",
+      "command_receipts",
+      "members",
+      "principals",
+      "project_calendars",
+      "project_memberships",
+      "projects",
+      "task_dependencies",
+      "tasks",
+      "tenant_memberships",
+      "tenants",
+    ]);
+  });
+
+  it("rejects a human principal that carries agent scopes", async () => {
+    await expect(
+      client.query(
+        `insert into principals (issuer, subject, type, display_name, allowed_scopes)
+         values ('https://identity.example.test/', 'human-with-scope', 'HUMAN',
+                 'Invalid human', array['project:progress:write'])`,
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("enforces project membership boundaries across tenants", async () => {
+    const principalId = "90000000-0000-4000-8000-000000000001";
+    const otherTenant = "00000000-0000-4000-8000-000000000002";
+    await client.query("insert into tenants (id, name) values ($1, 'Tenant B')", [otherTenant]);
+    await client.query(
+      `insert into principals (id, issuer, subject, type, display_name)
+       values ($1, 'https://identity.example.test/', 'bounded-human', 'HUMAN', 'Bounded human')`,
+      [principalId],
+    );
+    await client.query(
+      "insert into tenant_memberships (tenant_id, principal_id, role) values ($1, $2, 'MEMBER')",
+      [otherTenant, principalId],
+    );
+    await expect(
+      client.query(
+        `insert into project_memberships (tenant_id, project_id, principal_id, role)
+         values ($1, $2, $3, 'EDITOR')`,
+        [tenantId, projectId, principalId],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+
+  it("enforces task effort, progress, parent, and date invariants", async () => {
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, planned_effort_minutes) values ($1, $2, 'Bad', -1)",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, progress_basis_points) values ($1, $2, 'Bad', 10001)",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      client.query(
+        "insert into tasks (id, tenant_id, project_id, name, parent_task_id) values ($3, $1, $2, 'Bad', $3)",
+        [tenantId, projectId, "d0000000-0000-4000-8000-000000000099"],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, actual_start, actual_finish) values ($1, $2, 'Bad', '2026-02-01', '2026-01-01')",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, assignee_member_id) values ($1, $2, 'Bad', $3)",
+        [tenantId, projectId, "c0000000-0000-4000-8000-0000000000ff"],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+
+  it("enforces member capacity and task-dependency invariants", async () => {
+    await expect(
+      client.query(
+        "insert into members (tenant_id, project_id, name, calendar_id, daily_capacity_minutes) values ($1, $2, 'Bad', 'standard', 0)",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      client.query(
+        `insert into task_dependencies (tenant_id, project_id, predecessor_task_id, successor_task_id)
+         values ($1, $2, $3, $3)`,
+        [tenantId, projectId, taskId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("keeps audit events append-only and timezone-normalized", async () => {
     await client.query(
       `insert into audit_events
          (tenant_id, project_id, project_revision, actor_type, actor_id, command_type, payload, occurred_at)
-       values ($1, $2, 1, 'HUMAN', 'planner@example.test', 'baseline.approve', '{}',
-               '2026-07-13 09:00:00+09')`,
+       values ($1, $2, 1, 'HUMAN', 'planner@example.test', 'project.seed', '{}',
+               '2026-01-05 09:00:00+09')`,
       [tenantId, projectId],
     );
     await client.query("set timezone = 'America/New_York'");
@@ -401,14 +165,15 @@ describe("persistence migrations", () => {
        from audit_events where project_id = $1`,
       [projectId],
     );
-    expect(auditInstant.rows[0]?.utc_instant).toBe("2026-07-13T00:00:00.000Z");
+    expect(auditInstant.rows[0]?.utc_instant).toBe("2026-01-05T00:00:00.000Z");
     await expect(
-      client.query(
-        "update audit_events set payload = '{\"changed\":true}' where project_id = $1",
-        [projectId],
-      ),
+      client.query("update audit_events set payload = '{\"changed\":true}' where project_id = $1", [
+        projectId,
+      ]),
     ).rejects.toMatchObject({ code: "55000" });
+  });
 
+  it("keeps command receipts immutable", async () => {
     await client.query(
       `insert into command_receipts
          (tenant_id, project_id, idempotency_key, request_hash, result_revision)
@@ -416,10 +181,9 @@ describe("persistence migrations", () => {
       [tenantId, projectId],
     );
     await expect(
-      client.query(
-        "update command_receipts set result_revision = 2 where project_id = $1",
-        [projectId],
-      ),
+      client.query("update command_receipts set result_revision = 2 where project_id = $1", [
+        projectId,
+      ]),
     ).rejects.toMatchObject({ code: "55000" });
   });
 });

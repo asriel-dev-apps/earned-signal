@@ -12,8 +12,7 @@
   "vars": {
     "OIDC_ISSUER": "http://127.0.0.1:1/",
     "OIDC_AUDIENCE": "earned-signal-api",
-    "OIDC_JWKS_URL": "http://127.0.0.1:1/jwks",
-    "MCP_RESOURCE_URL": "http://127.0.0.1:1/mcp"
+    "OIDC_JWKS_URL": "http://127.0.0.1:1/jwks"
   },
   "ratelimits": [
     {

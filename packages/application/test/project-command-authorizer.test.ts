@@ -3,8 +3,6 @@ import {
   AgentPlanApprovalRequiredError,
   createProjectCommandAuthorizer,
   createProjectQueryAuthorizer,
-  createScenarioMutationAuthorizer,
-  createStaffingProposalAuthorizer,
   ProjectAccessDeniedError,
   type ProjectAccessGrantResolver,
 } from "../src/index.js";
@@ -23,19 +21,12 @@ describe("ProjectCommandAuthorizer", () => {
 
     await expect(
       authorizer.authorize({
-        identity: {
-          issuer: "https://identity.example.test/",
-          subject: "human-editor",
-          scopes: [],
-        },
+        identity: { issuer: "https://identity.example.test/", subject: "human-editor", scopes: [] },
         tenantId: "00000000-0000-4000-8000-000000000001",
         projectId: "10000000-0000-4000-8000-000000000001",
         command: { type: "task.delete", taskId: "task-1" },
       }),
-    ).resolves.toEqual({
-      type: "HUMAN",
-      id: "90000000-0000-4000-8000-000000000001",
-    });
+    ).resolves.toEqual({ type: "HUMAN", id: "90000000-0000-4000-8000-000000000001" });
   });
 
   it("authorizes an agent progress update only when both grant and token carry the scope", async () => {
@@ -61,16 +52,13 @@ describe("ProjectCommandAuthorizer", () => {
         command: {
           type: "task.update",
           taskId: "task-1",
-          changes: { progressPercent: 75 },
+          changes: { progressBasisPoints: 7_500 },
         },
       }),
-    ).resolves.toEqual({
-      type: "AGENT",
-      id: "90000000-0000-4000-8000-000000000002",
-    });
+    ).resolves.toEqual({ type: "AGENT", id: "90000000-0000-4000-8000-000000000002" });
   });
 
-  it("requires every applicable scope for an agent progress and actuals update", async () => {
+  it("authorizes an agent progress and actuals update carrying every applicable scope", async () => {
     const resolver: ProjectAccessGrantResolver = {
       resolve: async () => ({
         principalId: "90000000-0000-4000-8000-000000000002",
@@ -93,64 +81,50 @@ describe("ProjectCommandAuthorizer", () => {
         command: {
           type: "task.update",
           taskId: "task-1",
-          changes: { progressPercent: 75, actualMinutes: 480, actualCost: 120_000 },
+          changes: { progressBasisPoints: 7_500, actualEffortMinutes: 480 },
         },
       }),
     ).resolves.toMatchObject({ type: "AGENT" });
   });
 
   it("requires human approval instead of directly applying an agent plan change", async () => {
-    const resolver: ProjectAccessGrantResolver = {
-      resolve: async () => ({
-        principalId: "90000000-0000-4000-8000-000000000002",
-        principalType: "AGENT",
-        projectRole: "EDITOR",
-        allowedScopes: ["project:plan:write"],
-      }),
-    };
-    const authorizer = createProjectCommandAuthorizer(resolver);
-
-    await expect(
-      authorizer.authorize({
-        identity: {
-          issuer: "https://identity.example.test/",
-          subject: "planning-agent",
-          scopes: ["project:plan:write"],
-        },
-        tenantId: "00000000-0000-4000-8000-000000000001",
-        projectId: "10000000-0000-4000-8000-000000000001",
-        command: {
-          type: "task.update",
-          taskId: "task-1",
-          changes: { durationWorkingDays: 10 },
-        },
-      }),
-    ).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
-  });
-
-  it("requires human approval for an agent assignment change", async () => {
     const authorizer = createProjectCommandAuthorizer({
       resolve: async () => ({
         principalId: "90000000-0000-4000-8000-000000000002",
         principalType: "AGENT",
         projectRole: "EDITOR",
-        allowedScopes: ["project:plan:write"],
+        allowedScopes: [],
       }),
     });
 
     await expect(
       authorizer.authorize({
-        identity: {
-          issuer: "https://identity.example.test/",
-          subject: "planning-agent",
-          scopes: ["project:plan:write"],
-        },
+        identity: { issuer: "https://identity.example.test/", subject: "planning-agent", scopes: [] },
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        projectId: "10000000-0000-4000-8000-000000000001",
+        command: { type: "task.update", taskId: "task-1", changes: { plannedEffortMinutes: 600 } },
+      }),
+    ).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
+  });
+
+  it("requires human approval for an agent member change", async () => {
+    const authorizer = createProjectCommandAuthorizer({
+      resolve: async () => ({
+        principalId: "90000000-0000-4000-8000-000000000002",
+        principalType: "AGENT",
+        projectRole: "EDITOR",
+        allowedScopes: [],
+      }),
+    });
+
+    await expect(
+      authorizer.authorize({
+        identity: { issuer: "https://identity.example.test/", subject: "planning-agent", scopes: [] },
         tenantId: "00000000-0000-4000-8000-000000000001",
         projectId: "10000000-0000-4000-8000-000000000001",
         command: {
-          type: "assignment.replace",
-          taskId: "task-1",
-          assignments: [{ resourceId: "resource-1", unitsPercent: 100 }],
+          type: "member.add",
+          member: { id: "member-1", name: "Member 01", calendarId: "standard", dailyCapacityMinutes: 480 },
         },
       }),
     ).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
@@ -169,18 +143,10 @@ describe("ProjectCommandAuthorizer", () => {
 
     await expect(
       authorizer.authorize({
-        identity: {
-          issuer: "https://identity.example.test/",
-          subject: "progress-agent",
-          scopes: [],
-        },
+        identity: { issuer: "https://identity.example.test/", subject: "progress-agent", scopes: [] },
         tenantId: "00000000-0000-4000-8000-000000000001",
         projectId: "10000000-0000-4000-8000-000000000001",
-        command: {
-          type: "task.update",
-          taskId: "task-1",
-          changes: { progressPercent: 75 },
-        },
+        command: { type: "task.update", taskId: "task-1", changes: { progressBasisPoints: 7_500 } },
       }),
     ).rejects.toBeInstanceOf(ProjectAccessDeniedError);
   });
@@ -196,141 +162,19 @@ describe("ProjectCommandAuthorizer", () => {
     });
     const unprovisioned = createProjectCommandAuthorizer({ resolve: async () => null });
     const request = {
-      identity: {
-        issuer: "https://identity.example.test/",
-        subject: "viewer",
-        scopes: [],
-      },
+      identity: { issuer: "https://identity.example.test/", subject: "viewer", scopes: [] },
       tenantId: "00000000-0000-4000-8000-000000000001",
       projectId: "10000000-0000-4000-8000-000000000001",
       command: { type: "task.delete" as const, taskId: "task-1" },
     };
 
     await expect(viewer.authorize(request)).rejects.toBeInstanceOf(ProjectAccessDeniedError);
-    await expect(unprovisioned.authorize(request)).rejects.toBeInstanceOf(
-      ProjectAccessDeniedError,
-    );
-  });
-});
-
-describe("StaffingProposalAuthorizer", () => {
-  const request = {
-    tenantId: "00000000-0000-4000-8000-000000000001",
-    projectId: "10000000-0000-4000-8000-000000000001",
-  };
-
-  it("allows a human editor and a doubly-scoped agent to request a proposal", async () => {
-    const human = createStaffingProposalAuthorizer({
-      resolve: async () => ({
-        principalId: "human",
-        principalType: "HUMAN",
-        projectRole: "EDITOR",
-        allowedScopes: [],
-      }),
-    });
-    const agent = createStaffingProposalAuthorizer({
-      resolve: async () => ({
-        principalId: "agent",
-        principalType: "AGENT",
-        projectRole: "EDITOR",
-        allowedScopes: ["project:staffing:propose"],
-      }),
-    });
-
-    await expect(human.authorize({
-      ...request,
-      identity: { issuer: "https://identity.example.test/", subject: "human", scopes: [] },
-    })).resolves.toEqual({ type: "HUMAN", id: "human" });
-    await expect(agent.authorize({
-      ...request,
-      identity: {
-        issuer: "https://identity.example.test/",
-        subject: "agent",
-        scopes: ["project:staffing:propose"],
-      },
-    })).resolves.toEqual({ type: "AGENT", id: "agent" });
-  });
-
-  it("rejects a viewer or an agent missing either stored or token scope", async () => {
-    const viewer = createStaffingProposalAuthorizer({
-      resolve: async () => ({
-        principalId: "viewer",
-        principalType: "HUMAN",
-        projectRole: "VIEWER",
-        allowedScopes: [],
-      }),
-    });
-    const agent = createStaffingProposalAuthorizer({
-      resolve: async () => ({
-        principalId: "agent",
-        principalType: "AGENT",
-        projectRole: "EDITOR",
-        allowedScopes: ["project:staffing:propose"],
-      }),
-    });
-
-    await expect(viewer.authorize({
-      ...request,
-      identity: { issuer: "https://identity.example.test/", subject: "viewer", scopes: [] },
-    })).rejects.toBeInstanceOf(ProjectAccessDeniedError);
-    await expect(agent.authorize({
-      ...request,
-      identity: { issuer: "https://identity.example.test/", subject: "agent", scopes: [] },
-    })).rejects.toBeInstanceOf(ProjectAccessDeniedError);
-  });
-});
-
-describe("ScenarioMutationAuthorizer", () => {
-  it("allows a human editor to create, run, discard, or publish a Scenario", async () => {
-    const authorizer = createScenarioMutationAuthorizer({
-      resolve: async () => ({
-        principalId: "90000000-0000-4000-8000-000000000001",
-        principalType: "HUMAN",
-        projectRole: "EDITOR",
-        allowedScopes: [],
-      }),
-    });
-
-    await expect(authorizer.authorize({
-      identity: { issuer: "https://identity.example.test/", subject: "editor", scopes: [] },
-      tenantId: "00000000-0000-4000-8000-000000000001",
-      projectId: "10000000-0000-4000-8000-000000000001",
-    })).resolves.toEqual({
-      type: "HUMAN",
-      id: "90000000-0000-4000-8000-000000000001",
-    });
-  });
-
-  it("requires human approval and rejects viewers", async () => {
-    const agent = createScenarioMutationAuthorizer({
-      resolve: async () => ({
-        principalId: "agent",
-        principalType: "AGENT",
-        projectRole: "EDITOR",
-        allowedScopes: [],
-      }),
-    });
-    const viewer = createScenarioMutationAuthorizer({
-      resolve: async () => ({
-        principalId: "viewer",
-        principalType: "HUMAN",
-        projectRole: "VIEWER",
-        allowedScopes: [],
-      }),
-    });
-    const request = {
-      identity: { issuer: "https://identity.example.test/", subject: "principal", scopes: [] },
-      tenantId: "00000000-0000-4000-8000-000000000001",
-      projectId: "10000000-0000-4000-8000-000000000001",
-    };
-
-    await expect(agent.authorize(request)).rejects.toBeInstanceOf(AgentPlanApprovalRequiredError);
-    await expect(viewer.authorize(request)).rejects.toBeInstanceOf(ProjectAccessDeniedError);
+    await expect(unprovisioned.authorize(request)).rejects.toBeInstanceOf(ProjectAccessDeniedError);
   });
 });
 
 describe("ProjectQueryAuthorizer", () => {
-  it("allows every provisioned project role to read performance", async () => {
+  it("allows every provisioned project role to read the grid", async () => {
     const grant = {
       principalId: "90000000-0000-4000-8000-000000000003",
       principalType: "HUMAN" as const,

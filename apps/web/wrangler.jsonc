@@ -16,8 +16,7 @@
   "vars": {
     "OIDC_ISSUER": "https://identity.example.invalid/",
     "OIDC_AUDIENCE": "earned-signal-api-local",
-    "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json",
-    "MCP_RESOURCE_URL": "https://earned-signal.example.invalid/mcp"
+    "OIDC_JWKS_URL": "https://identity.example.invalid/.well-known/jwks.json"
   },
   "ratelimits": [
     {
@@ -39,19 +38,6 @@
   "hyperdrive": [
     { "binding": "HYPERDRIVE", "id": "00000000000000000000000000000000" }
   ],
-  "workflows": [
-    {
-      "binding": "STAFFING_WORKFLOW",
-      "name": "earned-signal-local-staffing-proposals",
-      "class_name": "StaffingProposalWorkflow",
-      "script_name": "earned-signal-optimizer-local"
-    }
-  ],
-  "queues": {
-    "producers": [
-      { "binding": "FORECAST_QUEUE", "queue": "earned-signal-local-forecast-runs" }
-    ]
-  },
   "env": {
     "staging": {
       "name": "earned-signal-staging",
@@ -63,8 +49,7 @@
       "vars": {
         "OIDC_ISSUER": "https://identity.staging.example.invalid/",
         "OIDC_AUDIENCE": "earned-signal-api-staging",
-        "OIDC_JWKS_URL": "https://identity.staging.example.invalid/.well-known/jwks.json",
-        "MCP_RESOURCE_URL": "https://staging.earned-signal.example.invalid/mcp"
+        "OIDC_JWKS_URL": "https://identity.staging.example.invalid/.well-known/jwks.json"
       },
       "ratelimits": [
         {
@@ -85,23 +70,7 @@
       ],
       "hyperdrive": [
         { "binding": "HYPERDRIVE", "id": "11111111111111111111111111111111" }
-      ],
-      "workflows": [
-        {
-          "binding": "STAFFING_WORKFLOW",
-          "name": "earned-signal-staging-staffing-proposals",
-          "class_name": "StaffingProposalWorkflow",
-          "script_name": "earned-signal-optimizer-staging"
-        }
-      ],
-      "queues": {
-        "producers": [
-          {
-            "binding": "FORECAST_QUEUE",
-            "queue": "earned-signal-staging-forecast-runs"
-          }
-        ]
-      }
+      ]
     },
     "production": {
       "name": "earned-signal-production",
@@ -113,8 +82,7 @@
       "vars": {
         "OIDC_ISSUER": "https://identity.production.example.invalid/",
         "OIDC_AUDIENCE": "earned-signal-api-production",
-        "OIDC_JWKS_URL": "https://identity.production.example.invalid/.well-known/jwks.json",
-        "MCP_RESOURCE_URL": "https://earned-signal.example.invalid/mcp"
+        "OIDC_JWKS_URL": "https://identity.production.example.invalid/.well-known/jwks.json"
       },
       "ratelimits": [
         {
@@ -135,23 +103,7 @@
       ],
       "hyperdrive": [
         { "binding": "HYPERDRIVE", "id": "22222222222222222222222222222222" }
-      ],
-      "workflows": [
-        {
-          "binding": "STAFFING_WORKFLOW",
-          "name": "earned-signal-production-staffing-proposals",
-          "class_name": "StaffingProposalWorkflow",
-          "script_name": "earned-signal-optimizer-production"
-        }
-      ],
-      "queues": {
-        "producers": [
-          {
-            "binding": "FORECAST_QUEUE",
-            "queue": "earned-signal-production-forecast-runs"
-          }
-        ]
-      }
+      ]
     }
   }
 }

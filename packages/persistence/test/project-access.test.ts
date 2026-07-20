@@ -71,8 +71,8 @@ describe("PostgreSQL project access", () => {
         projectId: demoProjectRecord.project.id,
         command: {
           type: "task.update",
-          taskId: demoProjectRecord.activities[0]!.id,
-          changes: { owner: "New owner" },
+          taskId: demoProjectRecord.tasks[0]!.id,
+          changes: { name: "New name" },
         },
       }),
     ).resolves.toEqual({
@@ -108,7 +108,7 @@ describe("PostgreSQL project access", () => {
         projectId: demoProjectRecord.project.id,
         command: {
           type: "task.delete",
-          taskId: demoProjectRecord.activities[0]!.id,
+          taskId: demoProjectRecord.tasks[0]!.id,
         },
       }),
     ).rejects.toBeInstanceOf(ProjectAccessDeniedError);

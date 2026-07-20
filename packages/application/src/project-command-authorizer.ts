@@ -38,14 +38,6 @@ export interface ProjectQueryAuthorizer {
   authorize(request: ProjectAccessGrantRequest): Promise<ProjectAccessGrant>;
 }
 
-export interface ScenarioMutationAuthorizer {
-  authorize(request: ProjectAccessGrantRequest): Promise<AuditActor>;
-}
-
-export interface StaffingProposalAuthorizer {
-  authorize(request: ProjectAccessGrantRequest): Promise<AuditActor>;
-}
-
 export class ProjectAccessDeniedError extends Error {
   constructor() {
     super("Project command is not permitted");
@@ -60,10 +52,12 @@ export class AgentPlanApprovalRequiredError extends Error {
   }
 }
 
+// Agents may directly write only progress and actuals on a single task.
+const AGENT_DIRECT_FIELDS = new Set(["progressBasisPoints", "actualEffortMinutes"]);
+
 function isAgentPlanChange(command: ProjectCommand): boolean {
   if (command.type !== "task.update") return true;
-  const directAgentFields = new Set(["progressPercent", "actualMinutes", "actualCost"]);
-  return Object.keys(command.changes).some((field) => !directAgentFields.has(field));
+  return Object.keys(command.changes).some((field) => !AGENT_DIRECT_FIELDS.has(field));
 }
 
 function canAgentApply(
@@ -78,10 +72,10 @@ function canAgentApply(
   if (isAgentPlanChange(request.command)) return false;
 
   const requiredScopes = new Set<string>();
-  if (changedFields.includes("progressPercent")) {
+  if (changedFields.includes("progressBasisPoints")) {
     requiredScopes.add("project:progress:write");
   }
-  if (changedFields.includes("actualMinutes") || changedFields.includes("actualCost")) {
+  if (changedFields.includes("actualEffortMinutes")) {
     requiredScopes.add("project:actuals:write");
   }
   return [...requiredScopes].every(
@@ -121,49 +115,6 @@ export function createProjectQueryAuthorizer(
       const grant = await resolver.resolve(request);
       if (grant === null) throw new ProjectAccessDeniedError();
       return grant;
-    },
-  };
-}
-
-export function createScenarioMutationAuthorizer(
-  resolver: ProjectAccessGrantResolver,
-): ScenarioMutationAuthorizer {
-  return {
-    async authorize(request) {
-      const grant = await resolver.resolve(request);
-      if (
-        grant === null ||
-        (grant.projectRole !== "OWNER" && grant.projectRole !== "EDITOR")
-      ) {
-        throw new ProjectAccessDeniedError();
-      }
-      if (grant.principalType === "AGENT") {
-        throw new AgentPlanApprovalRequiredError();
-      }
-      return { type: "HUMAN", id: grant.principalId };
-    },
-  };
-}
-
-export function createStaffingProposalAuthorizer(
-  resolver: ProjectAccessGrantResolver,
-): StaffingProposalAuthorizer {
-  return {
-    async authorize(request) {
-      const grant = await resolver.resolve(request);
-      if (
-        grant === null ||
-        (grant.projectRole !== "OWNER" && grant.projectRole !== "EDITOR")
-      ) {
-        throw new ProjectAccessDeniedError();
-      }
-      if (grant.principalType === "AGENT") {
-        const scope = "project:staffing:propose";
-        if (!grant.allowedScopes.includes(scope) || !request.identity.scopes.includes(scope)) {
-          throw new ProjectAccessDeniedError();
-        }
-      }
-      return { type: grant.principalType, id: grant.principalId };
     },
   };
 }

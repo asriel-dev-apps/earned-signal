@@ -4,7 +4,6 @@ import {
   enforceAuthenticatedLimits,
   enforcePreAuthenticationLimit,
   errorName,
-  isComputeRequest,
   requestId,
   RequestRateLimitedError,
   routeKey,
@@ -23,13 +22,16 @@ function limiter(success = true) {
 }
 
 describe("edge request security", () => {
-  it("normalizes tenant and project identifiers into bounded route classes", async () => {
-    const first = new Request("https://app.test/api/tenants/tenant-a/projects/project-a/scenarios/scenario-a/forecast-runs", { method: "POST" });
-    const second = new Request("https://app.test/api/tenants/tenant-b/projects/project-b/scenarios/scenario-b/forecast-runs", { method: "POST" });
-    expect(routeKey(first)).toBe("POST:forecast-runs");
+  it("normalizes tenant and project identifiers into bounded route classes", () => {
+    const first = new Request("https://app.test/api/tenants/tenant-a/projects/project-a/commands", { method: "POST" });
+    const second = new Request("https://app.test/api/tenants/tenant-b/projects/project-b/commands", { method: "POST" });
+    expect(routeKey(first)).toBe("POST:commands");
     expect(routeKey(second)).toBe(routeKey(first));
-    await expect(isComputeRequest(first)).resolves.toBe(true);
-    await expect(isComputeRequest(new Request("https://app.test/api/tenants/t/projects/p/performance"))).resolves.toBe(false);
+    expect(routeKey(new Request("https://app.test/api/tenants/t/projects/p/wbs-grid"))).toBe("GET:wbs-grid");
+    expect(routeKey(new Request("https://app.test/api/tenants/t/projects/p"))).toBe("GET:project");
+    expect(routeKey(new Request("https://app.test/api/health"))).toBe("GET:api-health");
+    expect(routeKey(new Request("https://app.test/.well-known/oauth-protected-resource"))).toBe("GET:oauth-metadata");
+    expect(routeKey(new Request("https://app.test/assets/index.js"))).toBe("GET:static-or-unknown");
   });
 
   it("applies a pre-authentication IP and route limit without exposing the raw key", async () => {
@@ -46,54 +48,17 @@ describe("edge request security", () => {
     expect(key).not.toContain("203.0.113.8");
   });
 
-  it("applies both principal and tenant-scoped compute limits after authentication", async () => {
+  it("applies a principal-scoped authenticated limit without exposing the principal", async () => {
     const authenticated = limiter();
-    const compute = limiter();
-    const request = new Request("https://app.test/api/tenants/tenant-a/projects/project-a/staffing-proposals", { method: "POST" });
-    await enforceAuthenticatedLimits(authenticated, compute, request, {
-      issuer: "https://identity.test/",
-      subject: "principal@example.test",
-      scopes: [],
-    });
-    expect(authenticated.limit).toHaveBeenCalledOnce();
-    expect(compute.limit).toHaveBeenCalledOnce();
-    for (const call of [...authenticated.limit.mock.calls, ...compute.limit.mock.calls]) {
-      expect(call[0].key).toMatch(/^[a-f0-9]{64}$/);
-      expect(call[0].key).not.toContain("principal@example.test");
-    }
-  });
-
-  it("does not spend a compute token for ordinary reads", async () => {
-    const authenticated = limiter();
-    const compute = limiter();
     await enforceAuthenticatedLimits(
       authenticated,
-      compute,
-      new Request("https://app.test/api/tenants/t/projects/p/performance"),
-      { issuer: "https://identity.test/", subject: "reader", scopes: [] },
+      new Request("https://app.test/api/tenants/tenant-a/projects/project-a/commands", { method: "POST" }),
+      { issuer: "https://identity.test/", subject: "principal@example.test", scopes: [] },
     );
     expect(authenticated.limit).toHaveBeenCalledOnce();
-    expect(compute.limit).not.toHaveBeenCalled();
-  });
-
-  it("limits only expensive MCP tool calls as compute requests", async () => {
-    const message = (name: string) => new Request("https://app.test/mcp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
-    });
-    await expect(isComputeRequest(message("request_staffing_proposal"))).resolves.toBe(true);
-    await expect(isComputeRequest(message("update_project_task"))).resolves.toBe(false);
-
-    const authenticated = limiter();
-    const compute = limiter();
-    await enforceAuthenticatedLimits(
-      authenticated,
-      compute,
-      message("request_staffing_proposal"),
-      { issuer: "https://identity.test/", subject: "agent", scopes: [] },
-    );
-    expect(compute.limit).toHaveBeenCalledOnce();
+    const key = authenticated.limit.mock.calls[0]?.[0].key;
+    expect(key).toMatch(/^[a-f0-9]{64}$/);
+    expect(key).not.toContain("principal@example.test");
   });
 
   it("fails closed when a native rate limiter rejects the key", async () => {
@@ -149,7 +114,6 @@ describe("edge request security", () => {
     );
     expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(response.headers.get("content-security-policy")).toContain("connect-src 'self' https://identity.test");
-    expect(response.headers.get("content-security-policy")).not.toContain("connect-src 'self' https:;");
     expect(response.headers.get("content-security-policy")).toContain("upgrade-insecure-requests");
     const local = secureResponse(
       new Request("http://127.0.0.1:4173/"),

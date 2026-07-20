@@ -59,13 +59,6 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
-export class ActualValueDecreaseError extends Error {
-  constructor(field: "actualMinutes" | "actualCost") {
-    super(`${field} cannot decrease; record a correction instead`);
-    this.name = "ActualValueDecreaseError";
-  }
-}
-
 export class ProjectCommandValidationError extends Error {
   constructor(message: string) {
     super(message);

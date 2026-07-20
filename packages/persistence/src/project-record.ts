@@ -1,4 +1,3 @@
-export type MeasurementMethod = "ZERO_HUNDRED" | "PHYSICAL_PERCENT";
 export type DependencyType = "FS" | "SS" | "FF" | "SF";
 
 export interface TenantRecord {
@@ -27,115 +26,46 @@ export interface ProjectCalendarRecord {
   readonly nonWorkingDates: readonly string[];
 }
 
-export interface SkillRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly name: string;
-}
-
-export interface ResourceRecord {
+export interface MemberRecord {
   readonly id: string;
   readonly tenantId: string;
   readonly projectId: string;
   readonly name: string;
   readonly calendarId: string;
   readonly dailyCapacityMinutes: number;
-  readonly costRateMinorPerHour: bigint;
 }
 
-export interface ResourceSkillRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly resourceId: string;
-  readonly skillId: string;
-}
-
-export interface ActivitySkillRequirementRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly activityId: string;
-  readonly skillId: string;
-}
-
-export interface AssignmentRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly activityId: string;
-  readonly resourceId: string;
-  readonly unitsPercent: number;
-}
-
-export interface WbsNodeRecord {
+export interface TaskRecord {
   readonly id: string;
   readonly tenantId: string;
   readonly projectId: string;
-  readonly parentId: string | null;
-  readonly code: string;
-  readonly name: string;
+  readonly parentTaskId: string | null;
   readonly sortOrder: number;
-}
-
-export interface ActivityRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly wbsNodeId: string;
   readonly name: string;
-  readonly owner: string;
-  readonly durationWorkingDays: number;
-  readonly calendarId: string;
-  readonly constraintType:
-    | "START_NO_EARLIER_THAN"
-    | "FINISH_NO_LATER_THAN"
-    | "MUST_START_ON"
-    | "MUST_FINISH_ON"
-    | null;
-  readonly constraintDate: string | null;
-  readonly budgetMinor: bigint;
-  readonly measurementMethod: MeasurementMethod;
-  readonly sortOrder: number;
+  readonly process: string;
+  readonly product: string;
+  readonly reviewRef: string;
+  readonly changeRef: string;
+  readonly note: string;
+  readonly contract: string;
+  readonly assigneeMemberId: string | null;
+  readonly plannedEffortMinutes: number;
+  readonly progressBasisPoints: number;
+  readonly actualEffortMinutes: number;
+  readonly dailyPlan: Readonly<Record<string, number>>;
+  readonly dailyPlanLocked: boolean;
+  readonly actualStart: string | null;
+  readonly actualFinish: string | null;
 }
 
-export interface DependencyRecord {
+export interface TaskDependencyRecord {
   readonly id: string;
   readonly tenantId: string;
   readonly projectId: string;
-  readonly predecessorActivityId: string;
-  readonly successorActivityId: string;
+  readonly predecessorTaskId: string;
+  readonly successorTaskId: string;
   readonly type: DependencyType;
   readonly lagWorkingDays: number;
-}
-
-export interface ProgressMeasurementRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly activityId: string;
-  readonly measurementDate: string;
-  readonly method: MeasurementMethod;
-  readonly progressBasisPoints: number;
-}
-
-export interface WorklogRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly activityId: string;
-  readonly workDate: string;
-  readonly actualMinutes: number;
-  readonly rateMinorPerHour: string;
-  readonly personRef: string;
-}
-
-export interface DirectActualCostRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly activityId: string;
-  readonly costDate: string;
-  readonly amountMinor: bigint;
-  readonly description: string;
 }
 
 export interface AuditEventRecord {
@@ -150,136 +80,12 @@ export interface AuditEventRecord {
   readonly occurredAt: string;
 }
 
-export interface BaselineVersionRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly version: number;
-  readonly label: string;
-  readonly defaultCalendarId: string;
-  readonly approvedAt: string;
-  readonly approvedBy: string;
-}
-
-export interface BaselineWbsNodeRecord extends Omit<WbsNodeRecord, "parentId"> {
-  readonly baselineVersionId: string;
-  readonly sourceWbsNodeId: string;
-  readonly parentSourceWbsNodeId: string | null;
-}
-
-export interface BaselineActivityRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceActivityId: string;
-  readonly sourceWbsNodeId: string;
-  readonly wbsCode: string;
-  readonly name: string;
-  readonly owner: string;
-  readonly durationWorkingDays: number;
-  readonly calendarId: string;
-  readonly constraintType: ActivityRecord["constraintType"];
-  readonly constraintDate: string | null;
-  readonly baselineStart: string;
-  readonly baselineFinish: string;
-  readonly budgetMinor: bigint;
-  readonly measurementMethod: MeasurementMethod;
-}
-
-export interface BaselineCalendarRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceCalendarId: string;
-  readonly name: string;
-  readonly workingWeekdays: readonly number[];
-  readonly nonWorkingDates: readonly string[];
-}
-
-export interface BaselineSkillRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceSkillId: string;
-  readonly name: string;
-}
-
-export interface BaselineResourceRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceResourceId: string;
-  readonly name: string;
-  readonly calendarId: string;
-  readonly dailyCapacityMinutes: number;
-  readonly costRateMinorPerHour: bigint;
-}
-
-export interface BaselineResourceSkillRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceResourceId: string;
-  readonly sourceSkillId: string;
-}
-
-export interface BaselineActivitySkillRequirementRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceActivityId: string;
-  readonly sourceSkillId: string;
-}
-
-export interface BaselineAssignmentRecord {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly sourceActivityId: string;
-  readonly sourceResourceId: string;
-  readonly unitsPercent: number;
-}
-
-export interface BaselineDependencyRecord {
-  readonly id: string;
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly baselineVersionId: string;
-  readonly predecessorSourceActivityId: string;
-  readonly successorSourceActivityId: string;
-  readonly type: DependencyType;
-  readonly lagWorkingDays: number;
-}
-
-export interface BaselineRecord {
-  readonly version: BaselineVersionRecord;
-  readonly calendars: readonly BaselineCalendarRecord[];
-  readonly skills: readonly BaselineSkillRecord[];
-  readonly resources: readonly BaselineResourceRecord[];
-  readonly resourceSkills: readonly BaselineResourceSkillRecord[];
-  readonly wbsNodes: readonly BaselineWbsNodeRecord[];
-  readonly activities: readonly BaselineActivityRecord[];
-  readonly activitySkillRequirements: readonly BaselineActivitySkillRequirementRecord[];
-  readonly assignments: readonly BaselineAssignmentRecord[];
-  readonly dependencies: readonly BaselineDependencyRecord[];
-}
-
 export interface PersistedProjectRecord {
   readonly tenant: TenantRecord;
   readonly project: ProjectRecord;
   readonly calendars: readonly ProjectCalendarRecord[];
-  readonly skills: readonly SkillRecord[];
-  readonly resources: readonly ResourceRecord[];
-  readonly resourceSkills: readonly ResourceSkillRecord[];
-  readonly wbsNodes: readonly WbsNodeRecord[];
-  readonly activities: readonly ActivityRecord[];
-  readonly activitySkillRequirements: readonly ActivitySkillRequirementRecord[];
-  readonly assignments: readonly AssignmentRecord[];
-  readonly dependencies: readonly DependencyRecord[];
-  readonly progressMeasurements: readonly ProgressMeasurementRecord[];
-  readonly worklogs: readonly WorklogRecord[];
-  readonly directActualCosts: readonly DirectActualCostRecord[];
+  readonly members: readonly MemberRecord[];
+  readonly tasks: readonly TaskRecord[];
+  readonly dependencies: readonly TaskDependencyRecord[];
   readonly auditEvents: readonly AuditEventRecord[];
-  readonly baseline: BaselineRecord | null;
 }

@@ -15,7 +15,7 @@ if (!/^[a-f\d]{32}$/iu.test(otherHyperdriveId ?? "") || otherHyperdriveId === hy
   throw new Error("OTHER_HYPERDRIVE_ID must be a different 32-character hexadecimal ID");
 }
 
-function requiredHttpsUrl(name, options = {}) {
+function requiredHttpsUrl(name) {
   const value = process.env[name];
   if (value === undefined) throw new Error(`${name} is required`);
   const url = new URL(value);
@@ -24,9 +24,6 @@ function requiredHttpsUrl(name, options = {}) {
   }
   if (url.hostname.endsWith(".invalid")) {
     throw new Error(`${name} must not use the reserved .invalid domain`);
-  }
-  if (options.mcp === true && (url.pathname !== "/mcp" || url.search !== "" || url.hash !== "")) {
-    throw new Error(`${name} must be the canonical HTTPS /mcp resource URL`);
   }
   return value;
 }
@@ -59,14 +56,9 @@ const webVars = {
   OIDC_ISSUER: requiredHttpsUrl("OIDC_ISSUER"),
   OIDC_AUDIENCE: oidcAudience,
   OIDC_JWKS_URL: requiredHttpsUrl("OIDC_JWKS_URL"),
-  MCP_RESOURCE_URL: requiredHttpsUrl("MCP_RESOURCE_URL", { mcp: true }),
 };
 
-for (const relativePath of [
-  "apps/web/wrangler.jsonc",
-  "apps/optimizer/wrangler.jsonc",
-  "apps/simulator/wrangler.jsonc",
-]) {
+for (const relativePath of ["apps/web/wrangler.jsonc"]) {
   const configPath = path.resolve(relativePath);
   const config = JSON.parse(await readFile(configPath, "utf8"));
   const target = config.env?.[environment];
@@ -74,16 +66,14 @@ for (const relativePath of [
     throw new Error(`${relativePath} has no single Hyperdrive binding for ${environment}`);
   }
   target.hyperdrive[0].id = hyperdriveId;
-  if (relativePath === "apps/web/wrangler.jsonc") {
-    target.vars = webVars;
-    if (!Array.isArray(target.ratelimits) || target.ratelimits.length !== 3) {
-      throw new Error(`apps/web/wrangler.jsonc must have three rate-limit bindings for ${environment}`);
-    }
-    for (const binding of target.ratelimits) {
-      const namespaceId = rateLimitNamespaceIds[binding.name];
-      if (namespaceId === undefined) throw new Error(`Unexpected rate-limit binding ${binding.name}`);
-      binding.namespace_id = namespaceId;
-    }
+  target.vars = webVars;
+  if (!Array.isArray(target.ratelimits) || target.ratelimits.length !== 3) {
+    throw new Error(`apps/web/wrangler.jsonc must have three rate-limit bindings for ${environment}`);
+  }
+  for (const binding of target.ratelimits) {
+    const namespaceId = rateLimitNamespaceIds[binding.name];
+    if (namespaceId === undefined) throw new Error(`Unexpected rate-limit binding ${binding.name}`);
+    binding.namespace_id = namespaceId;
   }
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }

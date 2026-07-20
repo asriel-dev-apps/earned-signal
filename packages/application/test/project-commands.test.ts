@@ -1,64 +1,57 @@
 import { describe, expect, it } from "vitest";
+import { applyProjectCommand, type ProjectState, type ProjectTask } from "../src/index.js";
 
-import {
-  applyProjectCommand,
-  type ProjectState,
-} from "../src/index.js";
+function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): ProjectTask {
+  return {
+    parentId: null,
+    sortOrder: 0,
+    name: "Task",
+    process: "",
+    product: "",
+    reviewRef: "",
+    changeRef: "",
+    note: "",
+    contract: "",
+    assigneeMemberId: null,
+    plannedEffortMinutes: 0,
+    progressBasisPoints: 0,
+    actualEffortMinutes: 0,
+    dailyPlan: {},
+    dailyPlanLocked: false,
+    actualStart: null,
+    actualFinish: null,
+    dependencies: [],
+    ...overrides,
+  };
+}
 
 const project: ProjectState = {
   id: "project-1",
-  name: "新製品開発",
-  projectStart: "2026-07-13",
-  statusDate: "2026-07-24",
+  name: "Effort WBS",
+  projectStart: "2026-01-05",
+  statusDate: "2026-01-20",
   currency: "JPY",
-  defaultCalendarId: "calendar-standard",
+  defaultCalendarId: "standard",
   calendars: [
-    {
-      id: "calendar-standard",
-      name: "Standard",
-      workingWeekdays: [1, 2, 3, 4, 5],
-      nonWorkingDates: [],
-    },
+    { id: "standard", name: "Standard", workingWeekdays: [1, 2, 3, 4, 5], nonWorkingDates: [] },
   ],
-  wbsGroups: [{ id: "group-1", parentId: null, code: "1", name: "Delivery" }],
-  skills: [],
-  resources: [],
-  assignments: [],
+  members: [
+    { id: "member-1", name: "Member 01", calendarId: "standard", dailyCapacityMinutes: 480 },
+  ],
   tasks: [
-    {
-      id: "task-1",
-      wbs: "1.1",
-      wbsParentId: "group-1",
-      name: "要件定義",
-      owner: "佐藤",
-      durationWorkingDays: 5,
-      measurementMethod: "ZERO_HUNDRED",
-      calendarId: "calendar-standard",
-      dependencies: [],
-      constraint: null,
-      requiredSkillIds: [],
-      budget: 600_000,
-      progressPercent: 100,
-      actualCost: 580_000,
-      actualMinutes: 2_280,
-    },
-    {
+    makeTask({ id: "task-1", sortOrder: 0, name: "Phase A", process: "Phase A" }),
+    makeTask({
       id: "task-2",
-      wbs: "1.2",
-      wbsParentId: "group-1",
-      name: "設計",
-      owner: "田中",
-      durationWorkingDays: 8,
-      measurementMethod: "PHYSICAL_PERCENT",
-      calendarId: "calendar-standard",
-      dependencies: [{ predecessorId: "task-1", type: "FS", lagWorkingDays: 0 }],
-      constraint: null,
-      requiredSkillIds: [],
-      budget: 900_000,
-      progressPercent: 40,
-      actualCost: 420_000,
-      actualMinutes: 3_120,
-    },
+      parentId: "task-1",
+      sortOrder: 1,
+      name: "Subtask 1.1",
+      assigneeMemberId: "member-1",
+      plannedEffortMinutes: 480,
+      progressBasisPoints: 4_000,
+      actualEffortMinutes: 300,
+      dailyPlan: { "2026-01-05": 480 },
+      actualStart: "2026-01-05",
+    }),
   ],
 };
 
@@ -67,149 +60,118 @@ describe("applyProjectCommand", () => {
     const next = applyProjectCommand(project, {
       type: "task.update",
       taskId: "task-2",
-      changes: {
-        owner: "鈴木",
-        progressPercent: 55,
-        actualMinutes: 3_660,
-      },
+      changes: { progressBasisPoints: 5_500, actualEffortMinutes: 3_660 },
     });
 
-    expect(next).toEqual({
-      ...project,
-      tasks: [
-        project.tasks[0],
-        {
-          ...project.tasks[1],
-          owner: "鈴木",
-          progressPercent: 55,
-          actualMinutes: 3_660,
-        },
-      ],
+    expect(next.tasks[1]).toMatchObject({
+      progressBasisPoints: 5_500,
+      actualEffortMinutes: 3_660,
     });
     expect(project.tasks[1]).toMatchObject({
-      owner: "田中",
-      progressPercent: 40,
-      actualMinutes: 3_120,
+      progressBasisPoints: 4_000,
+      actualEffortMinutes: 300,
     });
   });
 
   it("adds a task without mutating the current task list", () => {
-    const addedTask = {
+    const added = makeTask({
       id: "task-3",
-      wbs: "1.3",
-      wbsParentId: "group-1",
-      name: "実装",
-      owner: "高橋",
-      durationWorkingDays: 10,
-      measurementMethod: "PHYSICAL_PERCENT",
-      calendarId: "calendar-standard",
+      parentId: "task-1",
+      sortOrder: 2,
+      name: "Subtask 1.2",
+      assigneeMemberId: "member-1",
+      plannedEffortMinutes: 960,
+      dailyPlan: { "2026-01-06": 480, "2026-01-07": 480 },
       dependencies: [{ predecessorId: "task-2", type: "FS", lagWorkingDays: 0 }],
-      constraint: null,
-      requiredSkillIds: [],
-      budget: 1_200_000,
-      progressPercent: 0,
-      actualCost: 0,
-      actualMinutes: 0,
-    } as const;
-
-    const next = applyProjectCommand(project, {
-      type: "task.add",
-      task: addedTask,
     });
-
-    expect(next.tasks).toEqual([...project.tasks, addedTask]);
+    const next = applyProjectCommand(project, { type: "task.add", task: added });
+    expect(next.tasks).toEqual([...project.tasks, added]);
     expect(project.tasks).toHaveLength(2);
   });
 
-  it("deletes one task without mutating the current task list", () => {
-    const next = applyProjectCommand(project, {
-      type: "task.delete",
-      taskId: "task-2",
-    });
-
-    expect(next.tasks).toEqual([project.tasks[0]]);
-    expect(project.tasks).toHaveLength(2);
+  it("deletes a task and re-parents its children to null", () => {
+    const next = applyProjectCommand(project, { type: "task.delete", taskId: "task-1" });
+    expect(next.tasks.map((task) => task.id)).toEqual(["task-2"]);
+    expect(next.tasks[0]?.parentId).toBeNull();
   });
 
-  it("rejects task updates that violate project invariants", () => {
+  it("rejects progress outside 0..10000 basis points", () => {
     expect(() =>
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-2",
-        changes: { progressPercent: 120 },
+        changes: { progressBasisPoints: 10_500 },
       }),
-    ).toThrow("Progress must be between 0 and 100");
+    ).toThrow("progress must be whole basis points");
   });
 
-  it("rejects intermediate progress for the 0/100 measurement method", () => {
+  it("rejects non-whole planned effort minutes", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { plannedEffortMinutes: 480.5 },
+      }),
+    ).toThrow("planned effort must be whole minutes");
+  });
+
+  it("rejects negative daily plan values", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { dailyPlan: { "2026-01-05": -60 } },
+      }),
+    ).toThrow("daily plan values must be finite and >= 0");
+  });
+
+  it("rejects an actual finish that precedes the actual start (R <= S)", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "task.update",
+        taskId: "task-2",
+        changes: { actualStart: "2026-01-10", actualFinish: "2026-01-05" },
+      }),
+    ).toThrow("actual finish must not precede");
+  });
+
+  it("rejects a parent cycle in the task hierarchy", () => {
     expect(() =>
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-1",
-        changes: { progressPercent: 50 },
+        changes: { parentId: "task-2" },
       }),
-    ).toThrow("0/100 progress must be either 0 or 100");
+    ).toThrow("cycle");
   });
 
-  it("rejects durations that would exhaust the scheduling loop", () => {
+  it("rejects a task that is its own parent", () => {
     expect(() =>
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-2",
-        changes: { durationWorkingDays: 10_001 },
+        changes: { parentId: "task-2" },
       }),
-    ).toThrow("Duration must be a whole number from 1 to 10000");
+    ).toThrow("cannot be its own parent");
   });
 
-  it("rejects dependencies that create a schedule cycle", () => {
-    expect(() =>
-      applyProjectCommand(project, {
-        type: "task.update",
-        taskId: "task-1",
-        changes: {
-          dependencies: [{ predecessorId: "task-2", type: "SS", lagWorkingDays: 0 }],
-        },
-      }),
-    ).toThrow("dependency cycle");
-  });
-
-  it("rejects a task calendar that is not configured for the project", () => {
+  it("rejects an unknown assignee member", () => {
     expect(() =>
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-2",
-        changes: { calendarId: "calendar-missing" },
+        changes: { assigneeMemberId: "member-missing" },
       }),
-    ).toThrow("Unknown calendar");
+    ).toThrow("unknown member");
   });
 
-  it("rejects a WBS parent that is not part of the project hierarchy", () => {
+  it("rejects a dependency on an unknown task", () => {
     expect(() =>
       applyProjectCommand(project, {
         type: "task.update",
         taskId: "task-2",
-        changes: { wbsParentId: "group-missing" },
+        changes: { dependencies: [{ predecessorId: "task-missing", type: "FS", lagWorkingDays: 0 }] },
       }),
-    ).toThrow("Unknown WBS parent");
-  });
-
-  it("stores actual effort as whole minutes", () => {
-    expect(() =>
-      applyProjectCommand(project, {
-        type: "task.update",
-        taskId: "task-2",
-        changes: { actualMinutes: 1.5 },
-      }),
-    ).toThrow("whole minutes");
-  });
-
-  it("stores money as safe whole minor units", () => {
-    expect(() =>
-      applyProjectCommand(project, {
-        type: "task.update",
-        taskId: "task-2",
-        changes: { actualCost: 420_000.5 },
-      }),
-    ).toThrow("whole minor units");
+    ).toThrow("unknown task");
   });
 });

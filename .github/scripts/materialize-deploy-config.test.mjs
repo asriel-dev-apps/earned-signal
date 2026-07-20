@@ -10,18 +10,12 @@ const execute = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const materializer = path.join(repoRoot, ".github/scripts/materialize-deploy-config.mjs");
 const readiness = path.join(repoRoot, "scripts/verify-beta-readiness.mjs");
-const configs = [
-  "apps/web/wrangler.jsonc",
-  "apps/optimizer/wrangler.jsonc",
-  "apps/simulator/wrangler.jsonc",
-];
+const webConfig = "apps/web/wrangler.jsonc";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "earned-signal-deploy-config-"));
-  for (const relativePath of configs) {
-    await mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
-    await copyFile(path.join(repoRoot, relativePath), path.join(root, relativePath));
-  }
+  await mkdir(path.dirname(path.join(root, webConfig)), { recursive: true });
+  await copyFile(path.join(repoRoot, webConfig), path.join(root, webConfig));
   return root;
 }
 
@@ -34,7 +28,6 @@ function environment(overrides = {}) {
     OIDC_ISSUER: "https://identity.staging.example.test/",
     OIDC_AUDIENCE: "earned-signal-api-staging",
     OIDC_JWKS_URL: "https://identity.staging.example.test/jwks",
-    MCP_RESOURCE_URL: "https://staging.example.test/mcp",
     PRE_AUTH_RATE_LIMIT_NAMESPACE_ID: "910001",
     AUTH_RATE_LIMIT_NAMESPACE_ID: "910002",
     COMPUTE_RATE_LIMIT_NAMESPACE_ID: "910003",
@@ -45,15 +38,12 @@ function environment(overrides = {}) {
   };
 }
 
-test("materializes one environment and passes the static deployment gate", async () => {
+test("materializes the web environment and passes the static deployment gate", async () => {
   const root = await fixture();
   try {
     await execute(process.execPath, [materializer], { cwd: root, env: environment() });
-    for (const relativePath of configs) {
-      const config = JSON.parse(await readFile(path.join(root, relativePath), "utf8"));
-      assert.equal(config.env.staging.hyperdrive[0].id, "abcdef0123456789abcdef0123456789");
-    }
-    const web = JSON.parse(await readFile(path.join(root, configs[0]), "utf8"));
+    const web = JSON.parse(await readFile(path.join(root, webConfig), "utf8"));
+    assert.equal(web.env.staging.hyperdrive[0].id, "abcdef0123456789abcdef0123456789");
     assert.equal(web.env.staging.vars.OIDC_ISSUER, "https://identity.staging.example.test/");
     assert.deepEqual(web.env.staging.ratelimits.map((binding) => binding.namespace_id), [
       "910001",
@@ -65,9 +55,7 @@ test("materializes one environment and passes the static deployment gate", async
       env: {
         ...process.env,
         EARNED_SIGNAL_ENV: "staging",
-        EARNED_SIGNAL_WEB_CONFIG: path.join(root, configs[0]),
-        EARNED_SIGNAL_OPTIMIZER_CONFIG: path.join(root, configs[1]),
-        EARNED_SIGNAL_SIMULATOR_CONFIG: path.join(root, configs[2]),
+        EARNED_SIGNAL_WEB_CONFIG: path.join(root, webConfig),
       },
     });
   } finally {

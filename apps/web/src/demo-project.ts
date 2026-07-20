@@ -1,251 +1,173 @@
-import type { ProjectState, ProjectTask } from "@earned-signal/application";
+import type {
+  ProjectDependency,
+  ProjectMember,
+  ProjectState,
+  ProjectTask,
+} from "@earned-signal/application";
 
-const baselineTasks: readonly ProjectTask[] = [
-  {
-    id: "A1",
-    wbs: "1.1",
-    wbsParentId: "G1",
-    name: "Confirm launch requirements",
-    owner: "Maya Chen",
-    durationWorkingDays: 5,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [],
-    constraint: null,
-    requiredSkillIds: ["S1"],
-    budget: 600_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A2",
-    wbs: "1.2",
-    wbsParentId: "G1",
-    name: "Approve experience flows",
-    owner: "Leo Martin",
-    durationWorkingDays: 4,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [{ predecessorId: "A1", type: "FS", lagWorkingDays: 0 }],
-    constraint: null,
-    requiredSkillIds: ["S3"],
-    budget: 400_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A3",
-    wbs: "2.1",
-    wbsParentId: "G2",
-    name: "Build account API",
-    owner: "Noah Williams",
-    durationWorkingDays: 6,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [{ predecessorId: "A1", type: "FS", lagWorkingDays: 0 }],
-    constraint: null,
-    requiredSkillIds: ["S2"],
-    budget: 900_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A4",
-    wbs: "2.2",
-    wbsParentId: "G2",
-    name: "Build customer workspace",
-    owner: "Leo Martin",
-    durationWorkingDays: 8,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [
-      { predecessorId: "A2", type: "FS", lagWorkingDays: 0 },
-      { predecessorId: "A3", type: "SS", lagWorkingDays: 2 },
+// Deterministic, browser-safe synthetic fixture for the client preview. It
+// mirrors the backend seed (packages/persistence/src/demo-project.ts) but emits
+// a ProjectState directly so the preview never pulls the persistence/pg layer
+// into the browser bundle. All labels are generic and anonymized ("Phase A",
+// "Product 1", "Member 01"); no client/vendor/product/contract names and no
+// real values. The reference worksheet under .wbs-private/ is never read.
+
+export interface DemoProjectOptions {
+  readonly parentCount?: number;
+  readonly subtasksPerParent?: number;
+  readonly memberCount?: number;
+  readonly seed?: number;
+}
+
+/** mulberry32 — a small, deterministic PRNG. */
+function createRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function makeUuid(prefix: string, sequence: number): string {
+  return `${prefix}0000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}`;
+}
+
+function pick<T>(values: readonly T[], random: () => number): T {
+  return values[Math.floor(random() * values.length)]!;
+}
+
+const PHASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const PER_DAY_MINUTES = [60, 120, 180, 240, 300, 360, 420, 480] as const;
+
+function buildWorkingDays(start: string, count: number): string[] {
+  const days: string[] = [];
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  while (days.length < count) {
+    const weekday = cursor.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) {
+      days.push(cursor.toISOString().slice(0, 10));
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+export function createDemoProject(options: DemoProjectOptions = {}): ProjectState {
+  const parentCount = options.parentCount ?? 300;
+  const subtasksPerParent = options.subtasksPerParent ?? 9;
+  const memberCount = options.memberCount ?? 40;
+  const random = createRandom(options.seed ?? 0x5eed);
+
+  const projectStart = "2026-01-05"; // a Monday
+  const horizon = 260;
+  const workingDays = buildWorkingDays(projectStart, horizon);
+  const statusDate = workingDays[130]!;
+
+  const members: ProjectMember[] = Array.from({ length: memberCount }, (_, index) => ({
+    id: makeUuid("c", index + 1),
+    name: `Member ${(index + 1).toString().padStart(2, "0")}`,
+    calendarId: "standard",
+    dailyCapacityMinutes: 480,
+  }));
+
+  const tasks: ProjectTask[] = [];
+  let sortOrder = 0;
+  let leafCounter = 0;
+
+  for (let parentIndex = 0; parentIndex < parentCount; parentIndex += 1) {
+    const parentId = makeUuid("d", parentIndex + 1);
+    const phase = PHASE_LETTERS[parentIndex % PHASE_LETTERS.length];
+    const product = `Product ${(parentIndex % 6) + 1}`;
+    tasks.push({
+      id: parentId,
+      parentId: null,
+      sortOrder: sortOrder++,
+      name: `Phase ${phase} deliverable ${parentIndex + 1}`,
+      process: `Phase ${phase}`,
+      product,
+      reviewRef: `REV-${(parentIndex + 1).toString().padStart(4, "0")}`,
+      changeRef: `CHG-${(parentIndex + 1).toString().padStart(4, "0")}`,
+      note: "",
+      contract: `Contract ${(parentIndex % 4) + 1}`,
+      assigneeMemberId: null,
+      plannedEffortMinutes: 0,
+      progressBasisPoints: 0,
+      actualEffortMinutes: 0,
+      dailyPlan: {},
+      dailyPlanLocked: false,
+      actualStart: null,
+      actualFinish: null,
+      dependencies: [],
+    });
+
+    let previousLeafId: string | null = null;
+    for (let subtaskIndex = 0; subtaskIndex < subtasksPerParent; subtaskIndex += 1) {
+      leafCounter += 1;
+      const leafId = makeUuid("e", leafCounter);
+      const span = 1 + Math.floor(random() * 8);
+      const perDay = pick(PER_DAY_MINUTES, random);
+      const startIndex = Math.floor(random() * (horizon - span));
+      const dailyPlan: Record<string, number> = {};
+      for (let day = 0; day < span; day += 1) {
+        dailyPlan[workingDays[startIndex + day]!] = perDay;
+      }
+      const plannedEffortMinutes = perDay * span;
+      const progressBasisPoints = Math.floor(random() * 10_001);
+      const actualEffortMinutes = Math.round(
+        (plannedEffortMinutes * progressBasisPoints) / 10_000,
+      );
+      const actualStart = progressBasisPoints > 0 ? workingDays[startIndex]! : null;
+      const actualFinish =
+        progressBasisPoints >= 10_000 ? workingDays[startIndex + span - 1]! : null;
+      const dependencies: ProjectDependency[] =
+        previousLeafId === null
+          ? []
+          : [{ predecessorId: previousLeafId, type: "FS", lagWorkingDays: 0 }];
+
+      tasks.push({
+        id: leafId,
+        parentId,
+        sortOrder: sortOrder++,
+        name: `Subtask ${parentIndex + 1}.${subtaskIndex + 1}`,
+        process: `Phase ${phase}`,
+        product,
+        reviewRef: `REV-${(parentIndex + 1).toString().padStart(4, "0")}`,
+        changeRef: `CHG-${(parentIndex + 1).toString().padStart(4, "0")}`,
+        note: subtaskIndex % 3 === 0 ? `Note ${leafCounter}` : "",
+        contract: `Contract ${(parentIndex % 4) + 1}`,
+        assigneeMemberId: members[leafCounter % memberCount]!.id,
+        plannedEffortMinutes,
+        progressBasisPoints,
+        actualEffortMinutes,
+        dailyPlan,
+        dailyPlanLocked: false,
+        actualStart,
+        actualFinish,
+        dependencies,
+      });
+      previousLeafId = leafId;
+    }
+  }
+
+  return {
+    id: makeUuid("b", 1),
+    name: "Effort WBS demo",
+    projectStart,
+    statusDate,
+    currency: "JPY",
+    defaultCalendarId: "standard",
+    calendars: [
+      {
+        id: "standard",
+        name: "Standard working week",
+        workingWeekdays: [1, 2, 3, 4, 5],
+        nonWorkingDates: [],
+      },
     ],
-    constraint: null,
-    requiredSkillIds: ["S3"],
-    budget: 950_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A5",
-    wbs: "2.3",
-    wbsParentId: "G2",
-    name: "Integrate UI and API",
-    owner: "Noah Williams",
-    durationWorkingDays: 5,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [
-      { predecessorId: "A4", type: "FS", lagWorkingDays: 0 },
-      { predecessorId: "A3", type: "FF", lagWorkingDays: 1 },
-    ],
-    constraint: null,
-    requiredSkillIds: ["S2"],
-    budget: 650_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A6",
-    wbs: "2.4",
-    wbsParentId: "G2",
-    name: "Prepare customer data",
-    owner: "Maya Chen",
-    durationWorkingDays: 4,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [{ predecessorId: "A3", type: "FS", lagWorkingDays: 0 }],
-    constraint: null,
-    requiredSkillIds: ["S1"],
-    budget: 350_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A7",
-    wbs: "3.1",
-    wbsParentId: "G3",
-    name: "Run acceptance testing",
-    owner: "Maya Chen",
-    durationWorkingDays: 5,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [{ predecessorId: "A5", type: "FS", lagWorkingDays: 0 }],
-    constraint: null,
-    requiredSkillIds: ["S1"],
-    budget: 500_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A8",
-    wbs: "3.2",
-    wbsParentId: "G3",
-    name: "Train support team",
-    owner: "Leo Martin",
-    durationWorkingDays: 3,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "support",
-    dependencies: [{ predecessorId: "A6", type: "FS", lagWorkingDays: 0 }],
-    constraint: null,
-    requiredSkillIds: ["S1"],
-    budget: 250_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-  {
-    id: "A9",
-    wbs: "3.3",
-    wbsParentId: "G3",
-    name: "Launch customer portal",
-    owner: "Noah Williams",
-    durationWorkingDays: 1,
-    measurementMethod: "PHYSICAL_PERCENT",
-    calendarId: "delivery",
-    dependencies: [
-      { predecessorId: "A7", type: "FS", lagWorkingDays: 0 },
-      { predecessorId: "A8", type: "FF", lagWorkingDays: 0 },
-    ],
-    constraint: { type: "FINISH_NO_LATER_THAN", date: "2026-08-31" },
-    requiredSkillIds: ["S1"],
-    budget: 100_000,
-    progressPercent: 0,
-    actualCost: 0,
-    actualMinutes: 0,
-  },
-];
-
-export const baselineProject: ProjectState = {
-  id: "customer-portal-launch",
-  name: "Customer portal launch",
-  projectStart: "2026-07-13",
-  statusDate: "2026-08-07",
-  currency: "JPY",
-  defaultCalendarId: "delivery",
-  calendars: [
-    {
-      id: "delivery",
-      name: "Delivery · Mon–Fri",
-      workingWeekdays: [1, 2, 3, 4, 5],
-      nonWorkingDates: ["2026-07-20", "2026-08-11"],
-    },
-    {
-      id: "support",
-      name: "Support · Tue–Sat",
-      workingWeekdays: [2, 3, 4, 5, 6],
-      nonWorkingDates: ["2026-08-11"],
-    },
-  ],
-  wbsGroups: [
-    { id: "G1", parentId: null, code: "1", name: "Discover" },
-    { id: "G2", parentId: null, code: "2", name: "Build" },
-    { id: "G3", parentId: null, code: "3", name: "Launch" },
-  ],
-  skills: [
-    { id: "S1", name: "Delivery management" },
-    { id: "S2", name: "API engineering" },
-    { id: "S3", name: "Experience design" },
-  ],
-  resources: [
-    {
-      id: "R1",
-      name: "Maya Chen",
-      calendarId: "delivery",
-      dailyCapacityMinutes: 480,
-      costRateMinorPerHour: 6_000,
-      skillIds: ["S1"],
-    },
-    {
-      id: "R2",
-      name: "Leo Martin",
-      calendarId: "support",
-      dailyCapacityMinutes: 420,
-      costRateMinorPerHour: 6_500,
-      skillIds: ["S1", "S3"],
-    },
-    {
-      id: "R3",
-      name: "Noah Williams",
-      calendarId: "delivery",
-      dailyCapacityMinutes: 480,
-      costRateMinorPerHour: 7_000,
-      skillIds: ["S2"],
-    },
-  ],
-  assignments: [
-    { taskId: "A1", resourceId: "R1", unitsPercent: 100 },
-    { taskId: "A2", resourceId: "R2", unitsPercent: 100 },
-    { taskId: "A3", resourceId: "R3", unitsPercent: 100 },
-    { taskId: "A4", resourceId: "R2", unitsPercent: 100 },
-    { taskId: "A5", resourceId: "R3", unitsPercent: 100 },
-    { taskId: "A6", resourceId: "R1", unitsPercent: 100 },
-    { taskId: "A7", resourceId: "R1", unitsPercent: 100 },
-    { taskId: "A8", resourceId: "R2", unitsPercent: 100 },
-    { taskId: "A9", resourceId: "R3", unitsPercent: 100 },
-  ],
-  tasks: baselineTasks,
-};
-
-const currentOverrides: Readonly<Record<string, Partial<ProjectTask>>> = {
-  A1: { progressPercent: 100, actualCost: 650_000, actualMinutes: 2_760 },
-  A2: { progressPercent: 100, actualCost: 450_000, actualMinutes: 2_100 },
-  A3: { durationWorkingDays: 7, progressPercent: 65, actualCost: 800_000, actualMinutes: 4_080 },
-  A4: { durationWorkingDays: 10, progressPercent: 45, actualCost: 700_000, actualMinutes: 3_660 },
-  A5: { durationWorkingDays: 6, progressPercent: 10, actualCost: 100_000, actualMinutes: 720 },
-  A6: { progressPercent: 20, actualCost: 120_000, actualMinutes: 960 },
-};
-
-export const initialProject: ProjectState = {
-  ...baselineProject,
-  tasks: baselineTasks.map((task) => ({ ...task, ...currentOverrides[task.id] })),
-};
+    members,
+    tasks,
+  };
+}

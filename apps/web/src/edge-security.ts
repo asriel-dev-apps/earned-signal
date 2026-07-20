@@ -20,49 +20,12 @@ export function routeKey(request: Request): string {
   const method = request.method.toUpperCase();
   if (parts[0] === "api" && parts[1] === "health") return `${method}:api-health`;
   if (parts[0] === ".well-known") return `${method}:oauth-metadata`;
-  if (parts[0] === "mcp") return `${method}:mcp`;
   if (parts[0] !== "api" || parts[1] !== "tenants") return `${method}:static-or-unknown`;
 
   const resource = parts.slice(5);
-  if (resource[0] === "staffing-proposals") return `${method}:staffing-proposals`;
   if (resource[0] === "commands") return `${method}:commands`;
-  if (resource[0] === "performance") return `${method}:performance`;
-  if (resource[0] === "scenarios") {
-    if (resource.includes("forecast-runs")) return `${method}:forecast-runs`;
-    if (resource.at(-1) === "runs") return `${method}:scenario-runs`;
-    if (resource.at(-1) === "publish") return `${method}:scenario-publish`;
-    if (resource.at(-1) === "discard") return `${method}:scenario-discard`;
-    return `${method}:scenarios`;
-  }
+  if (resource[0] === "wbs-grid") return `${method}:wbs-grid`;
   return `${method}:project`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isComputeMcpMessage(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(isComputeMcpMessage);
-  if (!isRecord(value) || value.method !== "tools/call" || !isRecord(value.params)) return false;
-  return value.params.name === "request_staffing_proposal";
-}
-
-export async function isComputeRequest(request: Request): Promise<boolean> {
-  const key = routeKey(request);
-  if (key === "POST:staffing-proposals" || key === "POST:forecast-runs" || key === "POST:scenario-runs") return true;
-  if (key !== "POST:mcp" || request.body === null) return false;
-  try {
-    return isComputeMcpMessage(await request.clone().json());
-  } catch {
-    return false;
-  }
-}
-
-function tenantId(request: Request): string {
-  const parts = routeParts(new URL(request.url).pathname);
-  return parts[0] === "api" && parts[1] === "tenants" && parts[2] !== undefined
-    ? parts[2]
-    : "no-tenant";
 }
 
 async function digestKey(value: string): Promise<string> {
@@ -86,18 +49,11 @@ export async function enforcePreAuthenticationLimit(
 
 export async function enforceAuthenticatedLimits(
   authenticatedLimiter: RateLimit,
-  computeLimiter: RateLimit,
   request: Request,
   identity: AuthenticatedIdentity,
 ): Promise<void> {
   const principal = `${identity.issuer}:${identity.subject}`;
   await requireRateLimit(authenticatedLimiter, `auth:${principal}:${routeKey(request)}`);
-  if (await isComputeRequest(request)) {
-    await requireRateLimit(
-      computeLimiter,
-      `compute:${tenantId(request)}:${principal}:${routeKey(request)}`,
-    );
-  }
 }
 
 export async function boundedRequest(
@@ -145,7 +101,7 @@ export function withRequestId(request: Request, id: string): Request {
 
 function isApiResponse(request: Request): boolean {
   const pathname = new URL(request.url).pathname;
-  return pathname.startsWith("/api/") || pathname === "/mcp" || pathname.startsWith("/.well-known/");
+  return pathname.startsWith("/api/") || pathname.startsWith("/.well-known/");
 }
 
 function allowedConnectSource(oidcIssuer: string | undefined): string {
