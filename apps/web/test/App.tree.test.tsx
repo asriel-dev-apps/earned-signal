@@ -2,9 +2,15 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { projectWbsGrid, type ProjectState } from "@earned-signal/application";
+import {
+  applyProjectCommand,
+  projectWbsGrid,
+  type ProjectCommand,
+  type ProjectState,
+} from "@earned-signal/application";
 import { App, reparentCommand, resolveReparentTarget, type DragData } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
+import { TaskSchema } from "../src/project-command-contract.js";
 import type { ProjectApiClient } from "../src/project-api-client.js";
 
 // Same no-layout shims as App.test.tsx so both virtualizers materialize rows.
@@ -32,6 +38,31 @@ function fakeClient(execute = vi.fn(async () => ({ revision: "8", replayed: fals
   const client: ProjectApiClient = {
     load: async () => ({ revision: "7", current: project }),
     grid: async () => grid,
+    execute,
+  };
+  return { client, execute };
+}
+
+/**
+ * Like `fakeClient`, but actually applies each executed command to its own
+ * project copy (via the same `applyProjectCommand` the server runs), so the
+ * optimistic-apply → save → reload round trip settles on the mutated state
+ * instead of the reload reverting an added row back out.
+ */
+function statefulFakeClient(seed: ProjectState): {
+  readonly client: ProjectApiClient;
+  readonly execute: ReturnType<typeof vi.fn<(command: ProjectCommand, revision: string) => Promise<{ revision: string; replayed: boolean }>>>;
+} {
+  let current = seed;
+  let revisionCounter = 7;
+  const execute = vi.fn(async (command: ProjectCommand) => {
+    current = applyProjectCommand(current, command);
+    revisionCounter += 1;
+    return { revision: String(revisionCounter), replayed: false };
+  });
+  const client: ProjectApiClient = {
+    load: async () => ({ revision: String(revisionCounter), current }),
+    grid: async () => projectWbsGrid(current),
     execute,
   };
   return { client, execute };
@@ -161,5 +192,37 @@ describe("App hybrid flat/tree toggle", () => {
       { type: "task.update", taskId: parentA.id, changes: { plannedEffortMinutes: 420 } },
       "7",
     );
+  });
+
+  it("adds a new task as a sibling of the selected row, not nested under it, in tree mode", async () => {
+    const { client, execute } = statefulFakeClient(project);
+    render(<App client={client} />);
+    await ready();
+    fireEvent.click(screen.getByTestId("view-mode-tree"));
+    await waitFor(() => expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull());
+
+    // Select a child of parent A (not a root) via its name cell.
+    const childCell = document.querySelector(
+      `.grid-row[data-row-id="${childrenOfA[0]!.id}"] [data-col="name"]`,
+    ) as HTMLElement;
+    fireEvent.mouseDown(childCell);
+
+    const rowCountBefore = document.querySelectorAll(".grid-row").length;
+    fireEvent.click(screen.getByTestId("add-task"));
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const command = execute.mock.calls[0]![0];
+    if (command.type !== "task.add") throw new Error(`expected task.add, got ${command.type}`);
+    // Same level as the selected child (parentA), not nested under the child.
+    expect(command.task.parentId).toBe(parentA.id);
+    expect(() => TaskSchema.parse(command.task)).not.toThrow();
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".grid-row").length).toBe(rowCountBefore + 1);
+    });
+    // The tree stays intact: the original children of A are still present.
+    for (const child of childrenOfA) {
+      expect(document.querySelector(`.grid-row[data-row-id="${child.id}"]`)).not.toBeNull();
+    }
   });
 });

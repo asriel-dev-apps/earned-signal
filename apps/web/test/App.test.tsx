@@ -6,10 +6,12 @@ import {
   applyEffortSchedule,
   applyProjectCommand,
   projectWbsGrid,
+  type ProjectCommand,
   type ProjectState,
 } from "@earned-signal/application";
 import { App } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
+import { TaskSchema } from "../src/project-command-contract.js";
 import type { ProjectApiClient } from "../src/project-api-client.js";
 
 // TanStack Virtual measures the scroll element via offsetWidth/offsetHeight and
@@ -37,6 +39,33 @@ function fakeClient(execute = vi.fn(async () => ({ revision: "8", replayed: fals
   const client: ProjectApiClient = {
     load: async () => ({ revision: "7", current: project }),
     grid: async () => grid,
+    execute,
+  };
+  return { client, execute };
+}
+
+/**
+ * A fake client that actually applies each executed command to its own
+ * project copy (via the same `applyProjectCommand` the server runs) and
+ * serves it back from `load`/`grid`. Unlike `fakeClient` (which always serves
+ * the static fixture), this lets a test assert on the settled state after the
+ * optimistic-apply → save → reload round trip, with no risk of the reload
+ * reverting an added/edited row back out.
+ */
+function statefulFakeClient(seed: ProjectState): {
+  readonly client: ProjectApiClient;
+  readonly execute: ReturnType<typeof vi.fn<(command: ProjectCommand, revision: string) => Promise<{ revision: string; replayed: boolean }>>>;
+} {
+  let current = seed;
+  let revisionCounter = 7;
+  const execute = vi.fn(async (command: ProjectCommand) => {
+    current = applyProjectCommand(current, command);
+    revisionCounter += 1;
+    return { revision: String(revisionCounter), replayed: false };
+  });
+  const client: ProjectApiClient = {
+    load: async () => ({ revision: String(revisionCounter), current }),
+    grid: async () => projectWbsGrid(current),
     execute,
   };
   return { client, execute };
@@ -166,6 +195,65 @@ describe("App WBS grid", () => {
       { type: "task.update", taskId: child.id, changes: { prorationWeightBp: 4_000 } },
       "9",
     );
+  });
+});
+
+describe("App add task (flat mode)", () => {
+  it("dispatches task.add as a root-level sibling of the (default) selected row and adds a row", async () => {
+    const { client, execute } = statefulFakeClient(project);
+    render(<App client={client} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="add-task"]')).not.toBeNull();
+      expect(screen.getByTestId("save-state").textContent).toBe("saved");
+    });
+    const initialRowCount = document.querySelectorAll(".grid-row").length;
+
+    // The default selection (row 0) is the sole parent, whose parentId is
+    // null, so the new task lands at the root too.
+    fireEvent.click(screen.getByTestId("add-task"));
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const command = execute.mock.calls[0]![0];
+    if (command.type !== "task.add") throw new Error(`expected task.add, got ${command.type}`);
+    expect(command.task.parentId).toBeNull();
+    expect(command.task.name).toBe("New task");
+    // Appended after every existing sortOrder (0..project.tasks.length-1).
+    expect(command.task.sortOrder).toBe(project.tasks.length);
+    // The dispatched payload is a fully-populated, schema-valid ProjectTask.
+    expect(() => TaskSchema.parse(command.task)).not.toThrow();
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".grid-row").length).toBe(initialRowCount + 1);
+    });
+    // The new row is selected (name column) so it is ready for inline editing.
+    const newRow = document.querySelector(`.grid-row[data-row-id="${command.task.id}"]`);
+    expect(newRow).not.toBeNull();
+    expect(newRow!.querySelector('[data-col="name"]')?.className).toContain("cell--selected");
+  });
+
+  it("adds a root task with sortOrder 0 when the project has no rows yet", async () => {
+    const empty = createDemoProject({ parentCount: 0, subtasksPerParent: 0, memberCount: 0 });
+    const { client, execute } = statefulFakeClient(empty);
+    render(<App client={client} />);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="add-task"]')).not.toBeNull();
+      expect(screen.getByTestId("save-state").textContent).toBe("saved");
+    });
+
+    fireEvent.click(screen.getByTestId("add-task"));
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const command = execute.mock.calls[0]![0];
+    if (command.type !== "task.add") throw new Error(`expected task.add, got ${command.type}`);
+    expect(command.task.parentId).toBeNull();
+    expect(command.task.sortOrder).toBe(0);
+    expect(() => TaskSchema.parse(command.task)).not.toThrow();
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".grid-row").length).toBe(1);
+    });
   });
 });
 
