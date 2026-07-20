@@ -51,7 +51,12 @@ import {
 } from "./cross-project-load";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 
-const HEADER_H = 46;
+// The grid header is two stacked rows: a grouped EVM band row (BAND_H) on top of
+// the existing column-name row (HEAD_NAME_H). HEADER_H is their sum so the
+// row/day virtualizers' paddingStart keeps rows/day cells clear of the header.
+const BAND_H = 22;
+const HEAD_NAME_H = 46;
+const HEADER_H = BAND_H + HEAD_NAME_H;
 const ROW_H = 30;
 const DAILY_COL_W = 48;
 
@@ -68,6 +73,18 @@ type ColKind =
   | "derivedDate"
   | "status";
 
+/** EVM band a meta column groups under in the 2-row header (color set in CSS). */
+type BandId = "estimate" | "bac" | "pv" | "ev" | "ac" | "cv";
+
+const BAND_LABEL: Record<BandId, string> = {
+  estimate: "見積り",
+  bac: "BAC",
+  pv: "PV",
+  ev: "EV",
+  ac: "AC",
+  cv: "CV",
+};
+
 const SUBTASK_TEMPLATES = listSubtaskTemplates();
 
 interface MetaColumn {
@@ -79,11 +96,13 @@ interface MetaColumn {
   readonly kind: ColKind;
   /** Stored input field edited by this column (editable columns only). */
   readonly field?: keyof WbsGridTaskRow;
+  /** EVM band this column groups under in the 2-row header (no band = blank). */
+  readonly band?: BandId;
 }
 
 // Japanese column headers follow the source worksheet. Numeric EVM columns spell
 // out the metric in Japanese with its unit in parentheses; the PV/EV/AC/CV
-// abbreviations survive only in the top rollup tiles.
+// abbreviations survive in the grouped header bands and the top totals strip.
 const META: readonly MetaColumn[] = [
   { id: "lock", header: "ロック", width: 44, pinned: true, editable: false, kind: "lock" },
   { id: "no", header: "No.", width: 72, pinned: true, editable: false, kind: "index" },
@@ -93,20 +112,20 @@ const META: readonly MetaColumn[] = [
   { id: "product", header: "プロダクト", width: 108, pinned: false, editable: true, kind: "text", field: "product" },
   { id: "note", header: "備考", width: 140, pinned: false, editable: true, kind: "text", field: "note" },
   { id: "contract", header: "契約", width: 96, pinned: false, editable: true, kind: "text", field: "contract" },
-  { id: "plannedEffortDays", header: "工数(人日)", width: 92, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedEffortMinutes", header: "工数(人時)", width: 92, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes" },
-  { id: "plannedEffortHours", header: "計画工数(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedEarnedHours", header: "計画進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedProgress", header: "進捗率(計画)", width: 96, pinned: false, editable: false, kind: "derivedPercent" },
-  { id: "plannedStart", header: "開始予定", width: 92, pinned: false, editable: false, kind: "derivedDate" },
-  { id: "plannedFinish", header: "終了予定", width: 92, pinned: false, editable: false, kind: "derivedDate" },
-  { id: "actualStart", header: "開始日", width: 88, pinned: false, editable: true, kind: "date", field: "actualStart" },
-  { id: "actualFinish", header: "終了日", width: 88, pinned: false, editable: true, kind: "date", field: "actualFinish" },
-  { id: "progress", header: "進捗率", width: 84, pinned: false, editable: true, kind: "progress", field: "progressBasisPoints" },
-  { id: "status", header: "ステータス", width: 96, pinned: false, editable: false, kind: "status" },
-  { id: "earnedEffortHours", header: "実績進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "actualEffortMinutes", header: "実績投入工数(人時)", width: 116, pinned: false, editable: true, kind: "hours", field: "actualEffortMinutes" },
-  { id: "costVarianceHours", header: "コスト差異(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "plannedEffortDays", header: "工数(人日)", width: 92, pinned: false, editable: false, kind: "derivedNum", band: "estimate" },
+  { id: "plannedEffortMinutes", header: "工数(人時)", width: 92, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes", band: "estimate" },
+  { id: "plannedEffortHours", header: "計画工数(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum", band: "bac" },
+  { id: "plannedEarnedHours", header: "計画進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum", band: "pv" },
+  { id: "plannedProgress", header: "進捗率(計画)", width: 96, pinned: false, editable: false, kind: "derivedPercent", band: "pv" },
+  { id: "plannedStart", header: "開始予定", width: 92, pinned: false, editable: false, kind: "derivedDate", band: "pv" },
+  { id: "plannedFinish", header: "終了予定", width: 92, pinned: false, editable: false, kind: "derivedDate", band: "pv" },
+  { id: "actualStart", header: "開始日", width: 88, pinned: false, editable: true, kind: "date", field: "actualStart", band: "ev" },
+  { id: "actualFinish", header: "終了日", width: 88, pinned: false, editable: true, kind: "date", field: "actualFinish", band: "ev" },
+  { id: "progress", header: "進捗率", width: 84, pinned: false, editable: true, kind: "progress", field: "progressBasisPoints", band: "ev" },
+  { id: "status", header: "ステータス", width: 96, pinned: false, editable: false, kind: "status", band: "ev" },
+  { id: "earnedEffortHours", header: "実績進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum", band: "ev" },
+  { id: "actualEffortMinutes", header: "実績投入工数(人時)", width: 116, pinned: false, editable: true, kind: "hours", field: "actualEffortMinutes", band: "ac" },
+  { id: "costVarianceHours", header: "コスト差異(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum", band: "cv" },
 ];
 
 const PINNED = META.filter((column) => column.pinned);
@@ -125,6 +144,34 @@ const NON_PINNED_LEFT: readonly number[] = (() => {
     cursor += column.width;
   }
   return offsets;
+})();
+
+interface BandGroup {
+  readonly id: BandId;
+  readonly label: string;
+  readonly left: number;
+  readonly width: number;
+}
+
+// Contiguous same-band non-pinned columns collapse into one header band. `left`
+// is the left edge of the group's first column and `width` the sum of its
+// columns' widths, so each band lines up exactly over the column-name cells below
+// it — derived from the column widths, never hardcoded. Every banded column lives
+// in the NON_PINNED region, so band cells position like the non-pinned name cells.
+const BANDS: readonly BandGroup[] = (() => {
+  const groups: { id: BandId; label: string; left: number; width: number }[] = [];
+  NON_PINNED.forEach((column, index) => {
+    const band = column.band;
+    if (band === undefined) return;
+    const left = NON_PINNED_LEFT[index]!;
+    const previous = groups[groups.length - 1];
+    if (previous !== undefined && previous.id === band && previous.left + previous.width === left) {
+      previous.width += column.width;
+    } else {
+      groups.push({ id: band, label: BAND_LABEL[band], left, width: column.width });
+    }
+  });
+  return groups;
 })();
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -1223,14 +1270,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       </header>
 
       <section className="rollup" aria-label="プロジェクト集計" data-testid="rollup">
-        <RollupTile label="BAC (人日)" value={formatNumber(rollup.bac)} />
-        <RollupTile label="PV (人日)" value={formatNumber(rollup.pv)} />
-        <RollupTile label="EV (人日)" value={formatNumber(rollup.ev)} />
-        <RollupTile label="AC (人日)" value={formatNumber(rollup.ac)} />
-        <RollupTile label="SV (人日)" value={formatNumber(rollup.sv)} tone={rollup.sv < 0 ? "risk" : "ok"} />
-        <RollupTile label="CV (人日)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
-        <RollupTile label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
-        <RollupTile label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
+        <RollupMetric label="BAC (人日)" value={formatNumber(rollup.bac)} />
+        <RollupMetric label="PV (人日)" value={formatNumber(rollup.pv)} />
+        <RollupMetric label="EV (人日)" value={formatNumber(rollup.ev)} />
+        <RollupMetric label="AC (人日)" value={formatNumber(rollup.ac)} />
+        <RollupMetric label="SV (人日)" value={formatNumber(rollup.sv)} tone={rollup.sv < 0 ? "risk" : "ok"} />
+        <RollupMetric label="CV (人日)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
+        <RollupMetric label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
+        <RollupMetric label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
       </section>
 
       <section className="toolbar" aria-label="表示切り替え" data-testid="view-toolbar">
@@ -1389,9 +1436,25 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           style={{ height: rowVirtualizer.getTotalSize(), width: dayVirtualizer.getTotalSize() }}
         >
           <div className="grid-header" style={{ width: dayVirtualizer.getTotalSize(), height: HEADER_H }}>
+            {/* Top band row: grouped EVM headers over the meta columns. Only banded
+                non-pinned columns get a band; every other column's band area stays
+                blank. Bands scroll horizontally with the meta columns they cover. */}
+            {BANDS.map((band) => (
+              <div
+                key={band.id}
+                className={`head-band head-band--${band.id}`}
+                style={{ left: band.left, width: band.width, height: BAND_H }}
+                title={band.label}
+              >
+                <span className="head-band-label">{band.label}</span>
+              </div>
+            ))}
+            {/* Name row: the pinned group stays full-height (opaque, sticky-left) so
+                it covers band/name cells scrolling underneath, with its labels
+                bottom-aligned into the name row below the band strip. */}
             <div className="pinned-group pinned-group--header" style={{ width: PINNED_WIDTH }}>
               {PINNED.map((column) => (
-                <div key={column.id} className="head-cell" style={{ width: column.width }} title={column.header}>
+                <div key={column.id} className="head-cell" style={{ width: column.width, height: HEAD_NAME_H }} title={column.header}>
                   <span className="head-label">{column.header}</span>
                 </div>
               ))}
@@ -1400,7 +1463,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               <div
                 key={column.id}
                 className="head-cell head-cell--abs"
-                style={{ left: NON_PINNED_LEFT[index], width: column.width }}
+                style={{ left: NON_PINNED_LEFT[index], width: column.width, top: BAND_H, height: HEAD_NAME_H }}
                 title={column.header}
               >
                 <span className="head-label">{column.header}</span>
@@ -1412,7 +1475,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 <div
                   key={virtualDay.key}
                   className="head-cell head-cell--day"
-                  style={{ left: virtualDay.start, width: DAILY_COL_W }}
+                  style={{ left: virtualDay.start, width: DAILY_COL_W, top: BAND_H, height: HEAD_NAME_H }}
                   title={date}
                 >
                   {date.slice(5)}
@@ -1571,11 +1634,13 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   );
 }
 
-function RollupTile({ label, value, tone }: { readonly label: string; readonly value: string; readonly tone?: "ok" | "risk" }) {
+// One label→value pair in the compact totals strip (a dense spreadsheet-style
+// summary row, not a KPI card). `risk` tone reddens a negative SV/CV value.
+function RollupMetric({ label, value, tone }: { readonly label: string; readonly value: string; readonly tone?: "ok" | "risk" }) {
   return (
-    <div className={`rollup-tile ${tone === "risk" ? "rollup-tile--risk" : ""}`}>
-      <span className="rollup-label">{label}</span>
-      <strong className="rollup-value">{value}</strong>
+    <div className={`rollup-metric ${tone === "risk" ? "rollup-metric--risk" : ""}`}>
+      <span className="rollup-metric-label">{label}</span>
+      <span className="rollup-metric-value">{value}</span>
     </div>
   );
 }

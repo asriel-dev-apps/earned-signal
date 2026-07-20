@@ -51,6 +51,22 @@
   --overload-line: #e3a09c;
   --overload-ink: #b23b36;
 
+  /* Grouped EVM header bands. Soft, restrained spreadsheet-header fills — the spec
+     fixes PV=green, EV=yellow, AC=orange, CV=magenta; 見積り/BAC stay neutral
+     (slate / light blue). Label ink stays legible on its fill. */
+  --band-estimate-bg: #e9ebf0;
+  --band-estimate-ink: #4b5563;
+  --band-bac-bg: #e0eaf7;
+  --band-bac-ink: #2f5b93;
+  --band-pv-bg: #dcefe2;
+  --band-pv-ink: #256b45;
+  --band-ev-bg: #f8eecb;
+  --band-ev-ink: #866612;
+  --band-ac-bg: #f8e3cd;
+  --band-ac-ink: #995a1f;
+  --band-cv-bg: #f4dbee;
+  --band-cv-ink: #8f3573;
+
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ring: 0 0 0 1.5px var(--accent);
@@ -97,6 +113,19 @@
     --overload-bg: #35201f;
     --overload-line: #6e3a37;
     --overload-ink: #f0736a;
+
+    --band-estimate-bg: #262a31;
+    --band-estimate-ink: #b7bdc9;
+    --band-bac-bg: #1c2b3f;
+    --band-bac-ink: #90b5e0;
+    --band-pv-bg: #163020;
+    --band-pv-ink: #7ccf9c;
+    --band-ev-bg: #33290f;
+    --band-ev-ink: #e0c072;
+    --band-ac-bg: #33220f;
+    --band-ac-ink: #e0a266;
+    --band-cv-bg: #331c2c;
+    --band-cv-ink: #dd93c4;
   }
 }
 
@@ -158,42 +187,43 @@ body {
 .save-badge--saving { background: var(--status-doing-bg); color: var(--status-doing-ink); }
 .save-badge--saved { background: var(--status-done-bg); color: var(--status-done-ink); }
 
-/* ── KPI strip ──────────────────────────────────────────────────────── */
+/* ── Totals strip ───────────────────────────────────────────────────── */
+/* A compact spreadsheet-style summary row of label→value pairs, not KPI cards. */
 .rollup {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 20px;
+  align-items: stretch;
+  gap: 0;
+  padding: 5px 20px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
-.rollup-tile {
+.rollup-metric {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 92px;
-  padding: 7px 12px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel-2);
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 12px;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
 }
-.rollup-tile--risk { border-color: var(--risk); background: var(--risk-soft); }
-.rollup-label {
+.rollup-metric:first-child { padding-left: 0; }
+.rollup-metric:last-child { border-right: none; }
+.rollup-metric-label {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--muted);
 }
-.rollup-value {
-  font-size: 18px;
+.rollup-metric-value {
+  font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   font-family: var(--mono);
   color: var(--ink);
-  line-height: 1.15;
+  line-height: 1.2;
 }
-.rollup-tile--risk .rollup-value { color: var(--risk); }
+.rollup-metric--risk .rollup-metric-value { color: var(--risk); }
 
 /* ── Notice / toolbars ──────────────────────────────────────────────── */
 .notice {
@@ -381,6 +411,41 @@ body {
   overflow: hidden;
 }
 
+/* Top grouped-EVM band row. Each band is absolutely positioned over the columns
+   it covers and scrolls with them; the pinned group (full-height, opaque, above)
+   hides any band that scrolls under the frozen columns. */
+.head-band {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
+  overflow: hidden;
+}
+.head-band-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.head-band--estimate { background: var(--band-estimate-bg); }
+.head-band--estimate .head-band-label { color: var(--band-estimate-ink); }
+.head-band--bac { background: var(--band-bac-bg); }
+.head-band--bac .head-band-label { color: var(--band-bac-ink); }
+.head-band--pv { background: var(--band-pv-bg); }
+.head-band--pv .head-band-label { color: var(--band-pv-ink); }
+.head-band--ev { background: var(--band-ev-bg); }
+.head-band--ev .head-band-label { color: var(--band-ev-ink); }
+.head-band--ac { background: var(--band-ac-bg); }
+.head-band--ac .head-band-label { color: var(--band-ac-ink); }
+.head-band--cv { background: var(--band-cv-bg); }
+.head-band--cv .head-band-label { color: var(--band-cv-ink); }
+
 .pinned-group {
   position: sticky;
   left: 0;
@@ -389,7 +454,9 @@ body {
   height: 100%;
   background: var(--panel);
 }
-.pinned-group--header { z-index: 40; background: var(--header-bg); }
+/* Full-height, bottom-aligned so the band strip above the frozen columns stays
+   blank header space while the pinned labels sit in the name row. */
+.pinned-group--header { z-index: 40; background: var(--header-bg); align-items: flex-end; }
 
 /* ── Rows ───────────────────────────────────────────────────────────── */
 .grid-row {

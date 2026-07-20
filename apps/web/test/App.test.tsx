@@ -82,8 +82,8 @@ describe("App WBS grid", () => {
     expect(screen.getByText("タスク・サブタスク")).toBeTruthy();
     expect(screen.getByText("進捗率")).toBeTruthy();
     expect(screen.getByTestId("rollup")).toBeTruthy();
-    // BAC/PV/EV/AC/SV/CV/SPI/CPI tiles.
-    expect(screen.getByTestId("rollup").querySelectorAll(".rollup-tile").length).toBe(8);
+    // BAC/PV/EV/AC/SV/CV/SPI/CPI totals cells.
+    expect(screen.getByTestId("rollup").querySelectorAll(".rollup-metric").length).toBe(8);
     expect(screen.getByTestId("save-state").textContent).toBe("saved");
   });
 
