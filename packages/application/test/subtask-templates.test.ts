@@ -18,8 +18,6 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     name: "Task",
     process: "",
     product: "",
-    reviewRef: "",
-    changeRef: "",
     note: "",
     contract: "",
     assigneeMemberId: null,

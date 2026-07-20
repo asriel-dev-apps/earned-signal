@@ -978,8 +978,6 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         name: "New task",
         process: "",
         product: "",
-        reviewRef: "",
-        changeRef: "",
         note: "",
         contract: "",
         assigneeMemberId: null,

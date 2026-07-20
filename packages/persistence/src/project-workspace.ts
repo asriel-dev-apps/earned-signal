@@ -50,8 +50,6 @@ export function toProjectState(record: PersistedProjectRecord): ProjectState {
       name: task.name,
       process: task.process,
       product: task.product,
-      reviewRef: task.reviewRef,
-      changeRef: task.changeRef,
       note: task.note,
       contract: task.contract,
       assigneeMemberId: task.assigneeMemberId,

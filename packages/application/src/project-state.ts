@@ -34,8 +34,6 @@ export interface ProjectTask {
   readonly name: string;
   readonly process: string;
   readonly product: string;
-  readonly reviewRef: string;
-  readonly changeRef: string;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
@@ -311,8 +309,6 @@ function generateSubtaskTasks(
     name: step.name,
     process: "",
     product: "",
-    reviewRef: "",
-    changeRef: "",
     note: "",
     contract: "",
     assigneeMemberId: parent.assigneeMemberId,

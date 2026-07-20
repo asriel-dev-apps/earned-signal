@@ -201,8 +201,6 @@ export const tasks = pgTable(
     name: text().notNull(),
     process: text().notNull().default(""),
     product: text().notNull().default(""),
-    reviewRef: text("review_ref").notNull().default(""),
-    changeRef: text("change_ref").notNull().default(""),
     note: text().notNull().default(""),
     contract: text().notNull().default(""),
     assigneeMemberId: uuid("assignee_member_id"),

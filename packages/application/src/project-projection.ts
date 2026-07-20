@@ -68,8 +68,6 @@ export interface WbsGridTaskRow {
   readonly name: string;
   readonly process: string;
   readonly product: string;
-  readonly reviewRef: string;
-  readonly changeRef: string;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
@@ -168,8 +166,6 @@ export function projectWbsGrid(
         name: task.name,
         process: task.process,
         product: task.product,
-        reviewRef: task.reviewRef,
-        changeRef: task.changeRef,
         note: task.note,
         contract: task.contract,
         assigneeMemberId: task.assigneeMemberId,

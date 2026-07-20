@@ -26,8 +26,6 @@ const initialProject: ProjectState = {
       name: "Subtask",
       process: "Phase A",
       product: "Product 1",
-      reviewRef: "",
-      changeRef: "",
       note: "",
       contract: "",
       assigneeMemberId: null,

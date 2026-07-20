@@ -44,8 +44,6 @@ export interface TaskRecord {
   readonly name: string;
   readonly process: string;
   readonly product: string;
-  readonly reviewRef: string;
-  readonly changeRef: string;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
