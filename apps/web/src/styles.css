@@ -42,6 +42,15 @@
   --daily-fill-bg: #eaeafb;
   --daily-fill-ink: #4b47c4;
 
+  /* Cross-project ("other PJ") load overlay + capacity-overflow alert. The
+     non-overflow bar is a quiet background context (low alpha); the overflow bar
+     stays saturated so the red alert stands out against the calm baseline. */
+  --load-overlay: rgba(91, 87, 214, 0.16);
+  --overload-overlay: rgba(214, 69, 63, 0.34);
+  --overload-bg: #fdecec;
+  --overload-line: #e3a09c;
+  --overload-ink: #b23b36;
+
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ring: 0 0 0 1.5px var(--accent);
@@ -82,6 +91,12 @@
 
     --daily-fill-bg: #23234a;
     --daily-fill-ink: #b4b1fb;
+
+    --load-overlay: rgba(139, 135, 245, 0.24);
+    --overload-overlay: rgba(240, 115, 106, 0.42);
+    --overload-bg: #35201f;
+    --overload-line: #6e3a37;
+    --overload-ink: #f0736a;
   }
 }
 
@@ -245,6 +260,31 @@ body {
   border-color: var(--line-strong);
 }
 .toolbar-button--ghost:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); filter: none; }
+.toolbar-button--ghost.toolbar-button--on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* Cross-project overflow summary badge. */
+.load-summary {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 4px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+.load-summary--risk {
+  background: var(--overload-bg);
+  color: var(--overload-ink);
+  border: 1px solid var(--overload-line);
+}
+.load-summary--ok {
+  background: var(--status-done-bg);
+  color: var(--status-done-ink);
+}
 
 .toolbar-hint {
   font-size: 12px;
@@ -522,6 +562,39 @@ body {
 .grid-row--locked .daily-cell { background: var(--locked-bg); color: var(--status-doing-ink); }
 .grid-row--locked .daily-cell--filled { background: var(--status-doing-bg); color: var(--status-doing-ink); }
 .daily-cell-editor { text-align: center; box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Cross-project load overlay (half-transparent bar behind the day value) and the
+   1-day capacity-overflow highlight. The bar height encodes the assignee's
+   other-project minutes as a fraction of their daily capacity; the value sits
+   above it. Overload cells win their background over the locked/parent tints, so
+   this block is defined last. */
+.daily-cell-value {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.daily-load-overlay {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 0;
+  z-index: 0;
+  min-height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--load-overlay);
+  pointer-events: none;
+}
+.daily-load-overlay--overload { background: var(--overload-overlay); }
+.daily-cell.daily-cell--overload,
+.grid-row--locked .daily-cell.daily-cell--overload {
+  background: var(--overload-bg);
+  box-shadow: inset 0 0 0 1px var(--overload-line);
+}
+.daily-cell--overload .daily-cell-value { color: var(--overload-ink); font-weight: 700; }
 
 /* ── Tree affordances (name cell) ───────────────────────────────────── */
 .tree-affordance {

@@ -41,6 +41,14 @@ import {
 } from "@vecta/application";
 import type { TaskStatus } from "@vecta/domain";
 import { createDemoProject } from "./demo-project";
+import {
+  detectOverloads,
+  externalMinutesFor,
+  overloadKey,
+  synthesizeExternalLoad,
+  type ExternalLoad,
+  type OverloadEntry,
+} from "./cross-project-load";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 
 const HEADER_H = 46;
@@ -494,6 +502,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [dailyEditValue, setDailyEditValue] = useState("");
   const [templateId, setTemplateId] = useState<string>(SUBTASK_TEMPLATES[0]?.id ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>("flat");
+  // Feature #6: overlay each assignee's other-project daily load behind the day
+  // columns and flag the days where this-project + other-project effort exceeds
+  // the member's daily capacity. Default on so the cross-project signal is
+  // visible; the toggle returns the grid to its plain day-plot view.
+  const [showExternalLoad, setShowExternalLoad] = useState(true);
   // Expanded state. Default `true` = every parent expanded (the spike's initial
   // all-expanded worst case), independent of async load timing; a per-row
   // collapse or "Collapse all" narrows it to a record.
@@ -520,6 +533,47 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     }
     return [...set].sort();
   }, [rows]);
+
+  // Feature #6 — cross-project load. `externalLoad` is the synthetic "other PJ"
+  // daily commitment behind the seam (swapped for a real read in Phase 2); it is
+  // always computed but only surfaced when the toggle is on. `overloads` are the
+  // (member, date) pairs whose this-project + other-project total exceeds the
+  // member's daily capacity, keyed for O(1) day-cell lookup and named for the
+  // summary breakdown.
+  const externalLoad = useMemo<ExternalLoad>(
+    () => synthesizeExternalLoad(project.members, days),
+    [project.members, days],
+  );
+  const capacityByMember = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const member of project.members) {
+      if (typeof member.dailyCapacityMinutes === "number") map.set(member.id, member.dailyCapacityMinutes);
+    }
+    return map;
+  }, [project.members]);
+  const overloads = useMemo<OverloadEntry[]>(
+    () =>
+      showExternalLoad
+        ? detectOverloads({ rows, external: externalLoad, members: project.members })
+        : [],
+    [showExternalLoad, rows, externalLoad, project.members],
+  );
+  const overloadByKey = useMemo(() => {
+    const map = new Map<string, OverloadEntry>();
+    for (const entry of overloads) map.set(overloadKey(entry.memberId, entry.date), entry);
+    return map;
+  }, [overloads]);
+  const overloadSummary = useMemo(() => {
+    if (overloads.length === 0) return null;
+    const nameById = new Map(project.members.map((member) => [member.id, member.name]));
+    const lines = overloads.slice(0, 8).map((entry) => {
+      const name = nameById.get(entry.memberId) ?? entry.memberId;
+      return `${name} · ${entry.date.slice(5)}  +${formatNumber(entry.overflowMinutes / 60)}h 超過（本PJ ${formatNumber(entry.projectMinutes / 60)}h + 他PJ ${formatNumber(entry.externalMinutes / 60)}h ＞ 上限 ${formatNumber(entry.capacityMinutes / 60)}h）`;
+    });
+    const remainder = overloads.length - lines.length;
+    const title = remainder > 0 ? `${lines.join("\n")}\n…ほか ${remainder} 件` : lines.join("\n");
+    return { count: overloads.length, title };
+  }, [overloads, project.members]);
 
   // For each row, the immediately-preceding/following sibling id (same parentId),
   // or null at a group edge. `rows` is already sorted by (sortOrder, id) — the
@@ -1294,6 +1348,40 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         </span>
       </section>
 
+      <section className="toolbar" aria-label="他プロジェクト負荷" data-testid="load-toolbar">
+        <button
+          type="button"
+          className={`toolbar-button toolbar-button--ghost ${showExternalLoad ? "toolbar-button--on" : ""}`}
+          data-testid="toggle-external-load"
+          aria-pressed={showExternalLoad}
+          onClick={() => setShowExternalLoad((on) => !on)}
+        >
+          {showExternalLoad ? "他PJ負荷: 表示" : "他PJ負荷: 非表示"}
+        </button>
+        {showExternalLoad &&
+          (overloadSummary === null ? (
+            <span
+              className="load-summary load-summary--ok"
+              data-testid="overload-summary"
+              data-overload-count={0}
+            >
+              工数超過なし
+            </span>
+          ) : (
+            <span
+              className="load-summary load-summary--risk"
+              data-testid="overload-summary"
+              data-overload-count={overloadSummary.count}
+              title={overloadSummary.title}
+            >
+              ⚠ {overloadSummary.count.toLocaleString()} 件の工数超過
+            </span>
+          ))}
+        <span className="toolbar-hint">
+          半透明の帯は担当者が他PJで埋まっている時間。赤いセルはその日の合計工数がキャパ超過。
+        </span>
+      </section>
+
       {notice !== null && <div className="notice" role="alert">{notice}</div>}
 
       {/* DndContext stays mounted in both modes so the scroller never remounts on
@@ -1415,9 +1503,25 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   const cellEditable = locked && editable;
                   const isEditing =
                     dailyEditing?.rowId === row.id && dailyEditing.date === date;
+                  // Cross-project overlay + overflow, per the row's assignee.
+                  const assignee = row.assigneeMemberId;
+                  const externalMinutes =
+                    showExternalLoad && assignee !== null
+                      ? externalMinutesFor(externalLoad, assignee, date)
+                      : 0;
+                  const capacity = assignee !== null ? capacityByMember.get(assignee) : undefined;
+                  const loadFraction =
+                    externalMinutes > 0 && capacity !== undefined
+                      ? Math.min(1, externalMinutes / capacity)
+                      : 0;
+                  const overloadEntry =
+                    showExternalLoad && assignee !== null
+                      ? overloadByKey.get(overloadKey(assignee, date))
+                      : undefined;
                   const classes = ["daily-cell"];
                   if (minutes > 0) classes.push("daily-cell--filled");
                   classes.push(cellEditable ? "daily-cell--editable" : "daily-cell--readonly");
+                  if (overloadEntry !== undefined) classes.push("daily-cell--overload");
                   return (
                     <div
                       key={virtualDay.key}
@@ -1425,30 +1529,45 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       style={{ left: virtualDay.start, width: DAILY_COL_W }}
                       data-daily-row={row.id}
                       data-daily-date={date}
+                      data-overload={overloadEntry !== undefined ? "true" : undefined}
                       aria-readonly={cellEditable ? undefined : true}
                       title={
-                        locked
-                          ? cellEditable
-                            ? "手入力の日別計画 — ダブルクリックで編集"
-                            : "手入力の日別計画"
-                          : "自動スケジュール — タスクをロックすると手入力できます"
+                        overloadEntry !== undefined
+                          ? `⚠ 工数超過 ${date.slice(5)}: 合計 ${formatNumber(overloadEntry.totalMinutes / 60)}h（本PJ ${formatNumber(overloadEntry.projectMinutes / 60)}h + 他PJ ${formatNumber(overloadEntry.externalMinutes / 60)}h）＞ 上限 ${formatNumber(overloadEntry.capacityMinutes / 60)}h`
+                          : externalMinutes > 0
+                            ? `他PJ負荷 ${formatNumber(externalMinutes / 60)}h`
+                            : locked
+                              ? cellEditable
+                                ? "手入力の日別計画 — ダブルクリックで編集"
+                                : "手入力の日別計画"
+                              : "自動スケジュール — タスクをロックすると手入力できます"
                       }
                       onDoubleClick={() => beginDailyEdit(row, date)}
                     >
-                      {isEditing ? (
-                        <input
-                          className="cell-editor daily-cell-editor"
-                          autoFocus
-                          value={dailyEditValue}
-                          onChange={(event) => setDailyEditValue(event.target.value)}
-                          onBlur={() => finishDailyEdit(true)}
-                          onKeyDown={onDailyEditorKeyDown}
+                      {loadFraction > 0 && (
+                        <div
+                          className={`daily-load-overlay${overloadEntry !== undefined ? " daily-load-overlay--overload" : ""}`}
+                          style={{ height: `${Math.round(loadFraction * 100)}%` }}
+                          data-testid="daily-load-overlay"
+                          aria-hidden
                         />
-                      ) : minutes > 0 ? (
-                        formatNumber(minutes / 60)
-                      ) : (
-                        ""
                       )}
+                      <span className="daily-cell-value">
+                        {isEditing ? (
+                          <input
+                            className="cell-editor daily-cell-editor"
+                            autoFocus
+                            value={dailyEditValue}
+                            onChange={(event) => setDailyEditValue(event.target.value)}
+                            onBlur={() => finishDailyEdit(true)}
+                            onKeyDown={onDailyEditorKeyDown}
+                          />
+                        ) : minutes > 0 ? (
+                          formatNumber(minutes / 60)
+                        ) : (
+                          ""
+                        )}
+                      </span>
                     </div>
                   );
                 })}
