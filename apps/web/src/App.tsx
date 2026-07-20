@@ -1181,8 +1181,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <div>
           <h1>VECTA</h1>
           <p className="app-subtitle">
-            出来高・コスト・工数の統合分析
-            {project.name ? ` · ${project.name}` : ""} · 基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {days.length} 計画日
+            {project.name ? `${project.name} · ` : ""}基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {days.length} 計画日
           </p>
         </div>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
