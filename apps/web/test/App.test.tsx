@@ -93,3 +93,114 @@ describe("App WBS grid", () => {
     );
   });
 });
+
+describe("App daily-plan lock and hand editing", () => {
+  // The seeded fixture makes the first parent unlocked (auto-scheduled) and its
+  // first leaf the locked showcase row with a hand plan starting 2026-01-05.
+  const parentTask = project.tasks[0]!;
+  const lockedLeaf = project.tasks[1]!;
+  const unlockedLeaf = project.tasks[2]!;
+
+  async function ready(): Promise<void> {
+    await waitFor(() => {
+      expect(document.querySelector('[data-col="name"]')).not.toBeNull();
+      expect(screen.getByTestId("save-state").textContent).toBe("saved");
+    });
+  }
+
+  // Daily columns sit past the frozen meta columns, so the horizontal
+  // virtualizer only materializes them after a scroll into that region.
+  async function revealDailyColumns(): Promise<void> {
+    const scroller = screen.getByTestId("wbs-grid") as HTMLDivElement;
+    scroller.scrollLeft = 2532;
+    fireEvent.scroll(scroller);
+    await waitFor(() => {
+      expect(document.querySelector("[data-daily-date]")).not.toBeNull();
+    });
+  }
+
+  it("seeds a locked showcase leaf and an unlocked (scheduler-owned) parent", () => {
+    expect(lockedLeaf.dailyPlanLocked).toBe(true);
+    expect(lockedLeaf.dailyPlan["2026-01-05"]).toBe(240);
+    expect(parentTask.dailyPlanLocked).toBe(false);
+    expect(unlockedLeaf.dailyPlanLocked).toBe(false);
+  });
+
+  it("toggles dailyPlanLocked through the lock control as a task.update", async () => {
+    const { client, execute } = fakeClient();
+    render(<App client={client} />);
+    await ready();
+
+    const toggle = document.querySelector(
+      `[data-testid="lock-toggle"][data-task-id="${parentTask.id}"]`,
+    ) as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.getAttribute("data-locked")).toBe("false");
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(execute).toHaveBeenCalledWith(
+      { type: "task.update", taskId: parentTask.id, changes: { dailyPlanLocked: true } },
+      "7",
+    );
+  });
+
+  it("keeps an unlocked task's daily cell read-only (no inline editor opens)", async () => {
+    const { client, execute } = fakeClient();
+    render(<App client={client} />);
+    await ready();
+    await revealDailyColumns();
+
+    const cell = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-daily-row="${parentTask.id}"][data-daily-date="2026-01-05"]`,
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(cell.getAttribute("aria-readonly")).toBe("true");
+    fireEvent.doubleClick(cell);
+    expect(cell.querySelector("input")).toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("hand-edits a locked task's daily cell and re-asserts the lock in the command", async () => {
+    const { client, execute } = fakeClient();
+    render(<App client={client} />);
+    await ready();
+    await revealDailyColumns();
+
+    const cell = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-daily-row="${lockedLeaf.id}"][data-daily-date="2026-01-05"]`,
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    fireEvent.doubleClick(cell);
+    const editor = cell.querySelector("input.daily-cell-editor") as HTMLInputElement;
+    expect(editor).not.toBeNull();
+    fireEvent.change(editor, { target: { value: "5" } });
+    fireEvent.blur(editor);
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    // The edit replaces the full plan (01-05 → 5h = 300m, other days verbatim)
+    // and re-asserts the lock — the D17 "hand-edit is manual-lock" invariant.
+    expect(execute).toHaveBeenCalledWith(
+      {
+        type: "task.update",
+        taskId: lockedLeaf.id,
+        changes: {
+          dailyPlan: {
+            "2026-01-05": 300,
+            "2026-01-06": 240,
+            "2026-01-07": 180,
+            "2026-01-09": 120,
+          },
+          dailyPlanLocked: true,
+        },
+      },
+      "7",
+    );
+  });
+});

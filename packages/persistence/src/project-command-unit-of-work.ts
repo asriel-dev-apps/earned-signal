@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  applyEffortSchedule,
   IdempotencyConflictError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
@@ -230,7 +231,11 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         })),
       };
 
-      const next = transition(current);
+      // Apply the validated command, then re-run the deterministic capacity-aware
+      // scheduler so every unlocked task's daily plan is auto-placed (D17) before
+      // it is persisted. Locked tasks keep their hand-edited plan. This keeps
+      // M = Σ daily and P/Q consistent with the effort EVM projection.
+      const next = applyEffortSchedule(transition(current));
       const nextTaskById = new Map(next.tasks.map((task) => [task.id, task]));
       const nextMemberById = new Map(next.members.map((member) => [member.id, member]));
       const currentMemberIds = new Set(memberRows.map((member) => member.id));
