@@ -65,7 +65,6 @@ const SUBTASK_TEMPLATES = listSubtaskTemplates();
 
 interface MetaColumn {
   readonly id: string;
-  readonly letter: string;
   readonly header: string;
   readonly width: number;
   readonly pinned: boolean;
@@ -75,32 +74,35 @@ interface MetaColumn {
   readonly field?: keyof WbsGridTaskRow;
 }
 
+// Japanese column headers follow the source worksheet. Numeric EVM columns spell
+// out the metric in Japanese with its unit in parentheses; the PV/EV/AC/CV
+// abbreviations survive only in the top rollup tiles.
 const META: readonly MetaColumn[] = [
-  { id: "lock", letter: "🔒", header: "Lock", width: 44, pinned: true, editable: false, kind: "lock" },
-  { id: "no", letter: "A", header: "No.", width: 60, pinned: true, editable: false, kind: "index" },
-  { id: "process", letter: "B", header: "Process", width: 128, pinned: true, editable: true, kind: "text", field: "process" },
-  { id: "name", letter: "D/F", header: "Task / Subtask", width: 240, pinned: true, editable: true, kind: "text", field: "name" },
-  { id: "assignee", letter: "J", header: "Assignee", width: 132, pinned: true, editable: true, kind: "assignee", field: "assigneeMemberId" },
-  { id: "product", letter: "C", header: "Product", width: 120, pinned: false, editable: true, kind: "text", field: "product" },
-  { id: "reviewRef", letter: "E", header: "Review", width: 110, pinned: false, editable: true, kind: "text", field: "reviewRef" },
-  { id: "changeRef", letter: "G", header: "Change", width: 110, pinned: false, editable: true, kind: "text", field: "changeRef" },
-  { id: "note", letter: "H", header: "Note", width: 160, pinned: false, editable: true, kind: "text", field: "note" },
-  { id: "contract", letter: "I", header: "Contract", width: 120, pinned: false, editable: true, kind: "text", field: "contract" },
-  { id: "plannedEffortDays", letter: "K", header: "Effort (pd)", width: 84, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedEffortMinutes", letter: "L", header: "Effort (ph)", width: 90, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes" },
-  { id: "prorationWeightBp", letter: "Wt", header: "Weight (bp)", width: 92, pinned: false, editable: true, kind: "weight", field: "prorationWeightBp" },
-  { id: "plannedEffortHours", letter: "M", header: "PV (ph)", width: 88, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedEarnedHours", letter: "N", header: "Earned (ph)", width: 92, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "plannedProgress", letter: "O", header: "Plan %", width: 78, pinned: false, editable: false, kind: "derivedPercent" },
-  { id: "plannedStart", letter: "P", header: "Plan start", width: 100, pinned: false, editable: false, kind: "derivedDate" },
-  { id: "plannedFinish", letter: "Q", header: "Plan finish", width: 100, pinned: false, editable: false, kind: "derivedDate" },
-  { id: "actualStart", letter: "R", header: "Act. start", width: 104, pinned: false, editable: true, kind: "date", field: "actualStart" },
-  { id: "actualFinish", letter: "S", header: "Act. finish", width: 104, pinned: false, editable: true, kind: "date", field: "actualFinish" },
-  { id: "progress", letter: "T", header: "Progress", width: 88, pinned: false, editable: true, kind: "progress", field: "progressBasisPoints" },
-  { id: "status", letter: "U", header: "Status", width: 112, pinned: false, editable: false, kind: "status" },
-  { id: "earnedEffortHours", letter: "V", header: "EV (ph)", width: 88, pinned: false, editable: false, kind: "derivedNum" },
-  { id: "actualEffortMinutes", letter: "W", header: "AC (ph)", width: 90, pinned: false, editable: true, kind: "hours", field: "actualEffortMinutes" },
-  { id: "costVarianceHours", letter: "X", header: "CV (ph)", width: 90, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "lock", header: "ロック", width: 44, pinned: true, editable: false, kind: "lock" },
+  { id: "no", header: "No.", width: 72, pinned: true, editable: false, kind: "index" },
+  { id: "process", header: "工程", width: 104, pinned: true, editable: true, kind: "text", field: "process" },
+  { id: "name", header: "タスク・サブタスク", width: 240, pinned: true, editable: true, kind: "text", field: "name" },
+  { id: "assignee", header: "担当", width: 120, pinned: true, editable: true, kind: "assignee", field: "assigneeMemberId" },
+  { id: "product", header: "プロダクト", width: 108, pinned: false, editable: true, kind: "text", field: "product" },
+  { id: "reviewRef", header: "レビュー管理No", width: 116, pinned: false, editable: true, kind: "text", field: "reviewRef" },
+  { id: "changeRef", header: "変更管理", width: 96, pinned: false, editable: true, kind: "text", field: "changeRef" },
+  { id: "note", header: "備考", width: 140, pinned: false, editable: true, kind: "text", field: "note" },
+  { id: "contract", header: "契約", width: 96, pinned: false, editable: true, kind: "text", field: "contract" },
+  { id: "plannedEffortDays", header: "工数(人日)", width: 92, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "plannedEffortMinutes", header: "工数(人時)", width: 92, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes" },
+  { id: "prorationWeightBp", header: "重み", width: 72, pinned: false, editable: true, kind: "weight", field: "prorationWeightBp" },
+  { id: "plannedEffortHours", header: "計画工数(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "plannedEarnedHours", header: "計画進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "plannedProgress", header: "進捗率(計画)", width: 96, pinned: false, editable: false, kind: "derivedPercent" },
+  { id: "plannedStart", header: "開始予定", width: 92, pinned: false, editable: false, kind: "derivedDate" },
+  { id: "plannedFinish", header: "終了予定", width: 92, pinned: false, editable: false, kind: "derivedDate" },
+  { id: "actualStart", header: "開始日", width: 88, pinned: false, editable: true, kind: "date", field: "actualStart" },
+  { id: "actualFinish", header: "終了日", width: 88, pinned: false, editable: true, kind: "date", field: "actualFinish" },
+  { id: "progress", header: "進捗率", width: 84, pinned: false, editable: true, kind: "progress", field: "progressBasisPoints" },
+  { id: "status", header: "ステータス", width: 96, pinned: false, editable: false, kind: "status" },
+  { id: "earnedEffortHours", header: "実績進捗工数(人時)", width: 116, pinned: false, editable: false, kind: "derivedNum" },
+  { id: "actualEffortMinutes", header: "実績投入工数(人時)", width: 116, pinned: false, editable: true, kind: "hours", field: "actualEffortMinutes" },
+  { id: "costVarianceHours", header: "コスト差異(人時)", width: 108, pinned: false, editable: false, kind: "derivedNum" },
 ];
 
 const PINNED = META.filter((column) => column.pinned);
@@ -122,9 +124,9 @@ const NON_PINNED_LEFT: readonly number[] = (() => {
 })();
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
-  NOT_STARTED: "Not started",
-  IN_PROGRESS: "In progress",
-  DONE: "Done",
+  NOT_STARTED: "未着手",
+  IN_PROGRESS: "着手中",
+  DONE: "完了",
 };
 
 function formatNumber(value: number): string {
@@ -519,6 +521,31 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return [...set].sort();
   }, [rows]);
 
+  // For each row, the immediately-preceding/following sibling id (same parentId),
+  // or null at a group edge. `rows` is already sorted by (sortOrder, id) — the
+  // same order the projection renders and the tree nests — so grouping by
+  // parentId preserves each sibling run's display order. Powers the row reorder
+  // controls: "move up" swaps sortOrder with prevId, "move down" with nextId, and
+  // an edge (null) disables the button.
+  const siblingBounds = useMemo(() => {
+    const byParent = new Map<string | null, WbsGridTaskRow[]>();
+    for (const row of rows) {
+      const group = byParent.get(row.parentId) ?? [];
+      group.push(row);
+      byParent.set(row.parentId, group);
+    }
+    const bounds = new Map<string, { prevId: string | null; nextId: string | null }>();
+    for (const group of byParent.values()) {
+      group.forEach((row, index) => {
+        bounds.set(row.id, {
+          prevId: index > 0 ? group[index - 1]!.id : null,
+          nextId: index < group.length - 1 ? group[index + 1]!.id : null,
+        });
+      });
+    }
+    return bounds;
+  }, [rows]);
+
   const treeMode = viewMode === "tree";
   const treeData = useMemo(() => buildTree(rows), [rows]);
   // Tree mode nests rows under parentId; flat mode feeds the projection rows
@@ -624,14 +651,20 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     setPendingAddedTaskId(null);
   }, [modelRows, pendingAddedTaskId, rowVirtualizer]);
 
-  const executeCommand = useCallback(
-    (command: ProjectCommand): boolean => {
+  // Apply one or more commands as a single atomic edit. Multi-command batches
+  // (e.g. a sibling reorder that swaps two rows' sortOrder) fold through the same
+  // optimistic-apply → save → reload pipeline as a single edit: the whole batch
+  // is applied locally first, then dispatched to the backend in order, chaining
+  // each command onto the revision returned by the previous one.
+  const executeCommands = useCallback(
+    (commands: readonly ProjectCommand[]): boolean => {
+      if (commands.length === 0) return false;
       if (saving.current) return false;
       const previousProject = project;
       const previousGrid = grid;
-      let candidate: ProjectState;
+      let candidate: ProjectState = project;
       try {
-        candidate = applyProjectCommand(project, command);
+        for (const command of commands) candidate = applyProjectCommand(candidate, command);
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "The edit could not be applied");
         return false;
@@ -650,17 +683,25 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       setGrid(projectWbsGrid(optimistic));
       setNotice(null);
       if (client !== undefined && revision !== null) {
+        const backend = client;
         saving.current = true;
         setSaveState("saving");
-        client
-          .execute(command, revision)
-          .then(async (result) => {
-            setRevision(result.revision);
+        const dispatch = async (): Promise<string> => {
+          let currentRevision = revision;
+          for (const command of commands) {
+            const result = await backend.execute(command, currentRevision);
+            currentRevision = result.revision;
+          }
+          return currentRevision;
+        };
+        dispatch()
+          .then(async (nextRevision) => {
+            setRevision(nextRevision);
             setSaveState("saved");
             try {
               await reload();
             } catch {
-              setNotice(`Saved at revision ${result.revision}, but the grid could not be refreshed. Reload to retrieve derived values.`);
+              setNotice(`Saved at revision ${nextRevision}, but the grid could not be refreshed. Reload to retrieve derived values.`);
             }
           })
           .catch(async (error: unknown) => {
@@ -685,6 +726,30 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       return true;
     },
     [client, grid, project, reload, revision],
+  );
+
+  const executeCommand = useCallback(
+    (command: ProjectCommand): boolean => executeCommands([command]),
+    [executeCommands],
+  );
+
+  // Swap a row's sortOrder with an adjacent sibling's (same parentId), moving it
+  // up or down within its sibling run without touching the parent hierarchy. The
+  // two swapped values are read up front, so the batch is a true exchange; the
+  // projection re-sorts by (sortOrder, id) and the two rows trade places, leaving
+  // every other row's order untouched. Works identically in flat and tree modes.
+  const reorderSibling = useCallback(
+    (rowId: string, neighborId: string) => {
+      if (!editable) return;
+      const row = rows.find((candidate) => candidate.id === rowId);
+      const neighbor = rows.find((candidate) => candidate.id === neighborId);
+      if (row === undefined || neighbor === undefined) return;
+      executeCommands([
+        { type: "task.update", taskId: row.id, changes: { sortOrder: neighbor.sortOrder } },
+        { type: "task.update", taskId: neighbor.id, changes: { sortOrder: row.sortOrder } },
+      ]);
+    },
+    [editable, executeCommands, rows],
   );
 
   const generateSubtasks = useCallback(
@@ -954,13 +1019,67 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             data-task-id={row.id}
             data-locked={locked ? "true" : "false"}
             aria-pressed={locked}
-            aria-label={locked ? "Locked — daily plan is hand-edited; click to unlock" : "Auto-scheduled — click to lock for hand editing"}
-            title={locked ? "Locked: daily plan is hand-edited. Click to hand back to the scheduler." : "Auto-scheduled. Click to lock and hand-edit the daily plan."}
+            aria-label={locked ? "ロック中 — 日別計画は手入力。クリックで解除" : "自動スケジュール — クリックしてロックし手入力"}
+            title={locked ? "ロック中: 日別計画は手入力です。クリックでスケジューラに戻します。" : "自動スケジュール。クリックでロックして日別計画を手入力します。"}
             disabled={!editable}
             onClick={() => toggleLock(row)}
           >
             {locked ? "🔒" : "🔓"}
           </button>
+        </div>
+      );
+    }
+    if (column.kind === "index") {
+      const bounds = siblingBounds.get(row.id);
+      const canMoveUp = editable && bounds?.prevId != null;
+      const canMoveDown = editable && bounds?.nextId != null;
+      const indexSelected = selected.rowIndex === rowIndex && selected.colIndex === colIndex;
+      const indexClasses = ["cell", "cell--index"];
+      if (indexSelected) indexClasses.push("cell--selected");
+      return (
+        <div
+          key={column.id}
+          className={indexClasses.join(" ")}
+          style={{ width: column.width }}
+          role="gridcell"
+          data-col={column.id}
+          onMouseDown={() => setSelected({ rowIndex, colIndex })}
+        >
+          <span className="row-no">{rowIndex + 1}</span>
+          <span className="reorder">
+            <button
+              type="button"
+              className="reorder-button"
+              data-testid="move-up"
+              data-task-id={row.id}
+              aria-label="ひとつ上の兄弟と入れ替え"
+              title="上へ移動"
+              disabled={!canMoveUp}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (bounds?.prevId != null) reorderSibling(row.id, bounds.prevId);
+              }}
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              className="reorder-button"
+              data-testid="move-down"
+              data-task-id={row.id}
+              aria-label="ひとつ下の兄弟と入れ替え"
+              title="下へ移動"
+              disabled={!canMoveDown}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (bounds?.nextId != null) reorderSibling(row.id, bounds.nextId);
+              }}
+            >
+              ▼
+            </button>
+          </span>
         </div>
       );
     }
@@ -975,7 +1094,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     }
     const style: CSSProperties =
       column.id === "process"
-        ? { width: column.width, borderLeft: `4px solid hsl(${processHue(row.process)} 60% 52%)` }
+        ? { width: column.width, borderLeft: `3px solid hsl(${processHue(row.process)} 50% 55%)` }
         : { width: column.width };
     return (
       <div
@@ -1013,7 +1132,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               className="drag-grip"
               data-testid="drag-grip"
               data-task-id={row.id}
-              title="Drag to re-parent"
+              title="ドラッグで親を付け替え"
               {...(tree.dragListeners ?? {})}
               {...(tree.dragAttributes ?? {})}
             >
@@ -1032,7 +1151,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 onBlur={() => finishEdit(true)}
                 onKeyDown={onEditorKeyDown}
               >
-                <option value="">— Unassigned —</option>
+                <option value="">— 未割り当て —</option>
                 {memberOptions.map((member) => (
                   <option key={member.id} value={member.id}>{member.name}</option>
                 ))}
@@ -1062,26 +1181,26 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <div>
           <h1>VECTA</h1>
           <p className="app-subtitle">
-            Earned Value, Cost & Timeline Analytics
-            {project.name ? ` · ${project.name}` : ""} · status date {grid.statusDate} · {rows.length.toLocaleString()} tasks · {days.length} plan days
+            出来高・コスト・工数の統合分析
+            {project.name ? ` · ${project.name}` : ""} · 基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {days.length} 計画日
           </p>
         </div>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
       </header>
 
-      <section className="rollup" aria-label="Project rollup" data-testid="rollup">
-        <RollupTile label="BAC (pd)" value={formatNumber(rollup.bac)} />
-        <RollupTile label="PV (pd)" value={formatNumber(rollup.pv)} />
-        <RollupTile label="EV (pd)" value={formatNumber(rollup.ev)} />
-        <RollupTile label="AC (pd)" value={formatNumber(rollup.ac)} />
-        <RollupTile label="SV (pd)" value={formatNumber(rollup.sv)} tone={rollup.sv < 0 ? "risk" : "ok"} />
-        <RollupTile label="CV (pd)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
+      <section className="rollup" aria-label="プロジェクト集計" data-testid="rollup">
+        <RollupTile label="BAC (人日)" value={formatNumber(rollup.bac)} />
+        <RollupTile label="PV (人日)" value={formatNumber(rollup.pv)} />
+        <RollupTile label="EV (人日)" value={formatNumber(rollup.ev)} />
+        <RollupTile label="AC (人日)" value={formatNumber(rollup.ac)} />
+        <RollupTile label="SV (人日)" value={formatNumber(rollup.sv)} tone={rollup.sv < 0 ? "risk" : "ok"} />
+        <RollupTile label="CV (人日)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
         <RollupTile label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
         <RollupTile label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
       </section>
 
-      <section className="toolbar" aria-label="Hierarchy view" data-testid="view-toolbar">
-        <div className="view-toggle" role="group" aria-label="Row layout" data-testid="view-toggle">
+      <section className="toolbar" aria-label="表示切り替え" data-testid="view-toolbar">
+        <div className="view-toggle" role="group" aria-label="行レイアウト" data-testid="view-toggle">
           <button
             type="button"
             className={`view-toggle-button ${treeMode ? "" : "view-toggle-button--active"}`}
@@ -1089,7 +1208,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             aria-pressed={!treeMode}
             onClick={() => setViewMode("flat")}
           >
-            Flat
+            フラット
           </button>
           <button
             type="button"
@@ -1098,9 +1217,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             aria-pressed={treeMode}
             onClick={() => setViewMode("tree")}
           >
-            Tree
+            ツリー
           </button>
         </div>
+        <span className="toolbar-hint">No. 列の ▲ ▼ で同じ親の兄弟どうしを並べ替え</span>
         {treeMode && (
           <>
             <button
@@ -1109,7 +1229,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               data-testid="expand-all"
               onClick={() => table.toggleAllRowsExpanded(true)}
             >
-              Expand all
+              すべて展開
             </button>
             <button
               type="button"
@@ -1117,14 +1237,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               data-testid="collapse-all"
               onClick={() => table.toggleAllRowsExpanded(false)}
             >
-              Collapse all
+              すべて折りたたむ
             </button>
-            <span className="toolbar-hint">Drag a row’s ⠿ handle onto another task to re-parent it</span>
+            <span className="toolbar-hint">行の ⠿ ハンドルを別のタスクにドラッグすると親を付け替え</span>
           </>
         )}
       </section>
 
-      <section className="toolbar" aria-label="Subtask generation" data-testid="subtask-toolbar">
+      <section className="toolbar" aria-label="サブタスク生成" data-testid="subtask-toolbar">
         <button
           type="button"
           className="toolbar-button"
@@ -1132,7 +1252,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           disabled={!editable}
           onClick={() => addTask(selectedRow?.parentId ?? null)}
         >
-          Add task
+          タスク追加
         </button>
         {client === undefined && (
           <button
@@ -1141,11 +1261,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             data-testid="reset-to-demo"
             onClick={resetToDemo}
           >
-            Reset to demo
+            デモに戻す
           </button>
         )}
         <label className="toolbar-field">
-          <span className="toolbar-label">Template</span>
+          <span className="toolbar-label">テンプレート</span>
           <select
             className="toolbar-select"
             data-testid="template-select"
@@ -1166,12 +1286,12 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           disabled={!editable || selectedRow === undefined}
           onClick={() => selectedRow !== undefined && generateSubtasks(selectedRow.id)}
         >
-          Generate subtasks
+          サブタスク生成
         </button>
         <span className="toolbar-hint">
           {selectedRow === undefined
-            ? "Select a task row to generate under"
-            : `Prorates the parent's effort across the template into “${selectedRow.name}”`}
+            ? "生成先となるタスク行を選択してください"
+            : `親の工数をテンプレートに沿って「${selectedRow.name}」へ按分します`}
         </span>
       </section>
 
@@ -1203,8 +1323,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           <div className="grid-header" style={{ width: dayVirtualizer.getTotalSize(), height: HEADER_H }}>
             <div className="pinned-group pinned-group--header" style={{ width: PINNED_WIDTH }}>
               {PINNED.map((column) => (
-                <div key={column.id} className="head-cell" style={{ width: column.width }}>
-                  <span className="head-letter">{column.letter}</span>
+                <div key={column.id} className="head-cell" style={{ width: column.width }} title={column.header}>
                   <span className="head-label">{column.header}</span>
                 </div>
               ))}
@@ -1214,8 +1333,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 key={column.id}
                 className="head-cell head-cell--abs"
                 style={{ left: NON_PINNED_LEFT[index], width: column.width }}
+                title={column.header}
               >
-                <span className="head-letter">{column.letter}</span>
                 <span className="head-label">{column.header}</span>
               </div>
             ))}
@@ -1311,9 +1430,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       title={
                         locked
                           ? cellEditable
-                            ? "Hand-edited daily plan — double-click to edit"
-                            : "Hand-edited daily plan"
-                          : "Auto-scheduled — lock the task to hand-edit"
+                            ? "手入力の日別計画 — ダブルクリックで編集"
+                            : "手入力の日別計画"
+                          : "自動スケジュール — タスクをロックすると手入力できます"
                       }
                       onDoubleClick={() => beginDailyEdit(row, date)}
                     >
