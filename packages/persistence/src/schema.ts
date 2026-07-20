@@ -210,6 +210,7 @@ export const tasks = pgTable(
     plannedEffortMinutes: integer("planned_effort_minutes").notNull().default(0),
     progressBasisPoints: integer("progress_basis_points").notNull().default(0),
     actualEffortMinutes: integer("actual_effort_minutes").notNull().default(0),
+    prorationWeightBp: integer("proration_weight_bp"),
     dailyPlan: jsonb("daily_plan").notNull().default(sql`'{}'::jsonb`),
     dailyPlanLocked: boolean("daily_plan_locked").notNull().default(false),
     actualStart: date("actual_start", { mode: "string" }),
@@ -243,6 +244,10 @@ export const tasks = pgTable(
     check(
       "tasks_progress_range",
       sql`${table.progressBasisPoints} between 0 and 10000`,
+    ),
+    check(
+      "tasks_proration_weight_range",
+      sql`${table.prorationWeightBp} is null or ${table.prorationWeightBp} between 0 and 10000`,
     ),
     check(
       "tasks_not_own_parent",

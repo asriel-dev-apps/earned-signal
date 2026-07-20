@@ -3,7 +3,7 @@ import {
   type EffortRollup,
   type TaskStatus,
 } from "@earned-signal/domain";
-import type { ProjectState } from "./project-state.js";
+import { leafTaskIds, type ProjectState } from "./project-state.js";
 
 /**
  * Viewer role for the WBS-grid projection. The projection is the single choke
@@ -31,6 +31,7 @@ export interface WbsGridTaskRow {
   readonly plannedEffortMinutes: number;
   readonly progressBasisPoints: number;
   readonly actualEffortMinutes: number;
+  readonly prorationWeightBp: number | null;
   readonly actualStart: string | null;
   readonly actualFinish: string | null;
   readonly dailyPlan: Readonly<Record<string, number>>;
@@ -67,6 +68,7 @@ export function projectWbsGrid(
   const role = options.role ?? "PRIVILEGED";
   const memberNameById = new Map(project.members.map((member) => [member.id, member.name]));
 
+  const leaves = leafTaskIds(project.tasks);
   const effort = calculateEffortEvm({
     statusDate: project.statusDate,
     tasks: project.tasks.map((task) => ({
@@ -75,6 +77,7 @@ export function projectWbsGrid(
       progressBasisPoints: task.progressBasisPoints,
       actualEffortMinutes: task.actualEffortMinutes,
       dailyPlan: task.dailyPlan,
+      isLeaf: leaves.has(task.id),
     })),
   });
   const metricsById = new Map(effort.tasks.map((metrics) => [metrics.id, metrics]));
@@ -104,6 +107,7 @@ export function projectWbsGrid(
         plannedEffortMinutes: task.plannedEffortMinutes,
         progressBasisPoints: task.progressBasisPoints,
         actualEffortMinutes: task.actualEffortMinutes,
+        prorationWeightBp: task.prorationWeightBp,
         actualStart: task.actualStart,
         actualFinish: task.actualFinish,
         dailyPlan: task.dailyPlan,

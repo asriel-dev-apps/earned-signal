@@ -128,6 +128,25 @@ describe("project REST API", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("executes a task.generateSubtasks command", async () => {
+    const execute = vi.fn(async () => ({ projectId: PROJECT_ID, revision: 8n, replayed: false }));
+    const { app } = fakeApp({ execute });
+    const response = await app.request(
+      `${BASE}/commands`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "key-gen" },
+        body: JSON.stringify({
+          expectedRevision: "7",
+          command: { type: "task.generateSubtasks", parentTaskId: PROJECT_ID, templateId: "standard-build" },
+        }),
+      },
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("rejects a malformed command with 400", async () => {
     const { app } = fakeApp();
     const response = await app.request(

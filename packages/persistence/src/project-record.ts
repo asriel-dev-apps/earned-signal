@@ -52,6 +52,8 @@ export interface TaskRecord {
   readonly plannedEffortMinutes: number;
   readonly progressBasisPoints: number;
   readonly actualEffortMinutes: number;
+  /** Basis-point proration weight (0–10000) for template-generated subtasks; null otherwise. */
+  readonly prorationWeightBp: number | null;
   readonly dailyPlan: Readonly<Record<string, number>>;
   readonly dailyPlanLocked: boolean;
   readonly actualStart: string | null;

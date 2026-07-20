@@ -1,5 +1,5 @@
 import { scheduleEffortDailyPlans } from "@earned-signal/domain";
-import type { ProjectState } from "./project-state.js";
+import { leafTaskIds, type ProjectState } from "./project-state.js";
 
 /**
  * Recompute the daily plan of every **unlocked** task from the deterministic
@@ -12,6 +12,7 @@ import type { ProjectState } from "./project-state.js";
  * grid projection always agree.
  */
 export function applyEffortSchedule(project: ProjectState): ProjectState {
+  const leaves = leafTaskIds(project.tasks);
   const result = scheduleEffortDailyPlans({
     projectStart: project.projectStart,
     defaultCalendarId: project.defaultCalendarId,
@@ -33,6 +34,7 @@ export function applyEffortSchedule(project: ProjectState): ProjectState {
       dailyPlan: task.dailyPlan,
       dailyPlanLocked: task.dailyPlanLocked,
       dependencies: task.dependencies,
+      isLeaf: leaves.has(task.id),
     })),
   });
 

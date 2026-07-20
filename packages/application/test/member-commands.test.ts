@@ -28,6 +28,7 @@ const project: ProjectState = {
       plannedEffortMinutes: 480,
       progressBasisPoints: 0,
       actualEffortMinutes: 0,
+      prorationWeightBp: null,
       dailyPlan: {},
       dailyPlanLocked: false,
       actualStart: null,

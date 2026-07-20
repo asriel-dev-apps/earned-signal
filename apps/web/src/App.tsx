@@ -16,6 +16,7 @@ import {
 import {
   applyEffortSchedule,
   applyProjectCommand,
+  listSubtaskTemplates,
   projectWbsGrid,
   type ProjectCommand,
   type ProjectState,
@@ -37,12 +38,15 @@ type ColKind =
   | "text"
   | "assignee"
   | "hours"
+  | "weight"
   | "progress"
   | "date"
   | "derivedNum"
   | "derivedPercent"
   | "derivedDate"
   | "status";
+
+const SUBTASK_TEMPLATES = listSubtaskTemplates();
 
 interface MetaColumn {
   readonly id: string;
@@ -69,6 +73,7 @@ const META: readonly MetaColumn[] = [
   { id: "contract", letter: "I", header: "Contract", width: 120, pinned: false, editable: true, kind: "text", field: "contract" },
   { id: "plannedEffortDays", letter: "K", header: "Effort (pd)", width: 84, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedEffortMinutes", letter: "L", header: "Effort (ph)", width: 90, pinned: false, editable: true, kind: "hours", field: "plannedEffortMinutes" },
+  { id: "prorationWeightBp", letter: "Wt", header: "Weight (bp)", width: 92, pinned: false, editable: true, kind: "weight", field: "prorationWeightBp" },
   { id: "plannedEffortHours", letter: "M", header: "PV (ph)", width: 88, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedEarnedHours", letter: "N", header: "Earned (ph)", width: 92, pinned: false, editable: false, kind: "derivedNum" },
   { id: "plannedProgress", letter: "O", header: "Plan %", width: 78, pinned: false, editable: false, kind: "derivedPercent" },
@@ -129,6 +134,8 @@ function displayValue(column: MetaColumn, row: WbsGridTaskRow, index: number): s
       return row.assigneeName ?? "";
     case "hours":
       return formatNumber((row[column.field as keyof WbsGridTaskRow] as number) / 60);
+    case "weight":
+      return row.prorationWeightBp === null ? "" : String(row.prorationWeightBp);
     case "progress":
       return row.progress.toFixed(2);
     case "date":
@@ -175,6 +182,15 @@ function buildChanges(
       const hours = Number(trimmed);
       if (!Number.isFinite(hours) || hours < 0) return null;
       return { actualEffortMinutes: Math.round(hours * 60) };
+    }
+    case "prorationWeightBp": {
+      // Basis points (0–10000). Empty clears the weight (un-prorates the task); a
+      // valid whole number re-weights it, and the shared re-proration keeps the
+      // parent's effort split across its weighted children.
+      if (trimmed === "") return { prorationWeightBp: null };
+      const bp = Number(trimmed);
+      if (!Number.isInteger(bp) || bp < 0 || bp > 10_000) return null;
+      return { prorationWeightBp: bp };
     }
     case "progress": {
       const fraction = Number(trimmed);
@@ -268,6 +284,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [editValue, setEditValue] = useState("");
   const [dailyEditing, setDailyEditing] = useState<DailyCellAddress | null>(null);
   const [dailyEditValue, setDailyEditValue] = useState("");
+  const [templateId, setTemplateId] = useState<string>(SUBTASK_TEMPLATES[0]?.id ?? "");
   const saving = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -354,8 +371,13 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         return false;
       }
       // Optimistic recompute of the derived columns via the shared effort module.
-      setProject(candidate);
-      setGrid(projectWbsGrid(candidate));
+      // In preview (no backend) also run the deterministic scheduler so generated
+      // subtasks are auto-placed exactly as the server write path does
+      // (applyProjectCommand → applyEffortSchedule); with a backend the reload
+      // after the command restores the server-scheduled plans.
+      const optimistic = client === undefined ? applyEffortSchedule(candidate) : candidate;
+      setProject(optimistic);
+      setGrid(projectWbsGrid(optimistic));
       setNotice(null);
       if (client !== undefined && revision !== null) {
         saving.current = true;
@@ -393,6 +415,17 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       return true;
     },
     [client, grid, project, reload, revision],
+  );
+
+  const generateSubtasks = useCallback(
+    (parentTaskId: string) => {
+      if (!editable || templateId === "") return;
+      // Runs the same command the API accepts; the shared re-proration splits the
+      // parent's effort across the template's weighted children, and the scheduler
+      // auto-places each new leaf in dependency order (④).
+      executeCommand({ type: "task.generateSubtasks", parentTaskId, templateId });
+    },
+    [editable, executeCommand, templateId],
   );
 
   const commit = useCallback(
@@ -629,6 +662,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   };
 
   const rollup = grid.rollup;
+  const selectedRow = rows[selected.rowIndex];
 
   return (
     <div className="app-shell">
@@ -651,6 +685,38 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <RollupTile label="CV (pd)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
         <RollupTile label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
         <RollupTile label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
+      </section>
+
+      <section className="toolbar" aria-label="Subtask generation" data-testid="subtask-toolbar">
+        <label className="toolbar-field">
+          <span className="toolbar-label">Template</span>
+          <select
+            className="toolbar-select"
+            data-testid="template-select"
+            value={templateId}
+            disabled={!editable}
+            onChange={(event) => setTemplateId(event.target.value)}
+          >
+            {SUBTASK_TEMPLATES.map((template) => (
+              <option key={template.id} value={template.id}>{template.name}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="toolbar-button"
+          data-testid="generate-subtasks"
+          data-selected-task-id={selectedRow?.id ?? ""}
+          disabled={!editable || selectedRow === undefined}
+          onClick={() => selectedRow !== undefined && generateSubtasks(selectedRow.id)}
+        >
+          Generate subtasks
+        </button>
+        <span className="toolbar-hint">
+          {selectedRow === undefined
+            ? "Select a task row to generate under"
+            : `Prorates the parent's effort across the template into “${selectedRow.name}”`}
+        </span>
       </section>
 
       {notice !== null && <div className="notice" role="alert">{notice}</div>}

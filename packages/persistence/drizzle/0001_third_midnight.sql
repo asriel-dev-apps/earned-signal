@@ -1,0 +1,2 @@
+ALTER TABLE "tasks" ADD COLUMN "proration_weight_bp" integer;--> statement-breakpoint
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_proration_weight_range" CHECK ("tasks"."proration_weight_bp" is null or "tasks"."proration_weight_bp" between 0 and 10000);

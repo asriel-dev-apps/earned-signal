@@ -37,6 +37,7 @@ function task(
     dailyPlan: overrides.dailyPlan ?? {},
     dailyPlanLocked: overrides.dailyPlanLocked ?? false,
     dependencies: overrides.dependencies ?? [],
+    isLeaf: overrides.isLeaf ?? true,
   };
 }
 
@@ -203,6 +204,22 @@ describe("scheduleEffortDailyPlans", () => {
       ],
     });
     expect(plans.get("T2")).toEqual({ "2026-01-06": 480 });
+  });
+
+  it("(9) skips non-leaf summary rows, placing and leveling only their leaves", () => {
+    // P is a non-leaf summary row that still carries planned effort. It must not
+    // be placed (empty plan) nor charge its assignee's ledger — otherwise its 960
+    // would consume 01-05/01-06 and push the leaf. With leaf-only placement C fills
+    // 01-05 immediately and P stays empty.
+    const plans = run({
+      members: [member("m1", 480)],
+      tasks: [
+        task("P", { sortOrder: 1, assigneeMemberId: "m1", plannedEffortMinutes: 960, isLeaf: false }),
+        task("C", { sortOrder: 2, assigneeMemberId: "m1", plannedEffortMinutes: 480, isLeaf: true }),
+      ],
+    });
+    expect(plans.get("P")).toEqual({}); // summary row: no own daily plan
+    expect(plans.get("C")).toEqual({ "2026-01-05": 480 });
   });
 
   it("is deterministic across repeated runs", () => {

@@ -58,6 +58,7 @@ export function toProjectState(record: PersistedProjectRecord): ProjectState {
       plannedEffortMinutes: task.plannedEffortMinutes,
       progressBasisPoints: task.progressBasisPoints,
       actualEffortMinutes: task.actualEffortMinutes,
+      prorationWeightBp: task.prorationWeightBp,
       dailyPlan: task.dailyPlan,
       dailyPlanLocked: task.dailyPlanLocked,
       actualStart: task.actualStart,

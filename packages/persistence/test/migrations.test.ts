@@ -133,6 +133,28 @@ describe("persistence migrations", () => {
         [tenantId, projectId, "c0000000-0000-4000-8000-0000000000ff"],
       ),
     ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, proration_weight_bp) values ($1, $2, 'Bad', 10001)",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("accepts a null or in-range proration weight from the additive migration", async () => {
+    await client.query(
+      "insert into tasks (tenant_id, project_id, name, proration_weight_bp) values ($1, $2, 'Weighted subtask', 2500)",
+      [tenantId, projectId],
+    );
+    const weighted = await client.query<{ proration_weight_bp: number | null }>(
+      "select proration_weight_bp from tasks where name = 'Weighted subtask'",
+    );
+    expect(weighted.rows[0]?.proration_weight_bp).toBe(2500);
+    const seeded = await client.query<{ proration_weight_bp: number | null }>(
+      "select proration_weight_bp from tasks where id = $1",
+      [taskId],
+    );
+    expect(seeded.rows[0]?.proration_weight_bp).toBeNull();
   });
 
   it("enforces member capacity and task-dependency invariants", async () => {

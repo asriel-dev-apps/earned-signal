@@ -54,6 +54,13 @@ export interface EffortScheduleTaskInput {
   readonly dailyPlan: Readonly<Record<string, number>>;
   readonly dailyPlanLocked: boolean;
   readonly dependencies: readonly EffortScheduleDependencyInput[];
+  /**
+   * Whether this task is a leaf — a task no other task names as its parent. Only
+   * leaves are placed; a non-leaf summary row (`false`) carries no own daily plan
+   * (its effort lives in its leaf children) and is emitted with an empty plan.
+   * Absent means leaf, so a flat task list schedules unchanged.
+   */
+  readonly isLeaf?: boolean;
 }
 
 export interface EffortScheduleInput {
@@ -407,18 +414,27 @@ export function scheduleEffortDailyPlans(input: EffortScheduleInput): EffortSche
     }
   };
 
-  // Pass A — locked tasks are immovable facts: record their P/Q and pre-charge
-  // their assignee's ledger before any unlocked task is placed.
+  // Pass A — locked leaf tasks are immovable facts: record their P/Q and pre-charge
+  // their assignee's ledger before any unlocked task is placed. Non-leaf summary
+  // rows carry no own plan, so they neither span nor charge.
   const spanById = new Map<string, PlannedSpan>();
   for (const task of input.tasks) {
-    if (!task.dailyPlanLocked) continue;
+    if (!task.dailyPlanLocked || task.isLeaf === false) continue;
     spanById.set(task.id, spanOf(task.dailyPlan));
     if (task.assigneeMemberId !== null) consume(task.assigneeMemberId, task.dailyPlan);
   }
 
-  // Pass B — place unlocked tasks in dependency-topological order.
+  // Pass B — place unlocked leaf tasks in dependency-topological order.
   const dailyPlans = new Map<string, Record<string, number>>();
   for (const task of topologicalOrder(input.tasks)) {
+    if (task.isLeaf === false) {
+      // Non-leaf summary row: emit an empty plan (so its own daily plot is cleared)
+      // and an empty span (so dependents never anchor on it) without charging the
+      // ledger. Its effort is scheduled through its leaf children.
+      spanById.set(task.id, { start: null, finish: null });
+      dailyPlans.set(task.id, {});
+      continue;
+    }
     if (task.dailyPlanLocked) continue;
 
     const calendar = calendarForMember(task.assigneeMemberId);

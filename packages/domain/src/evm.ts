@@ -20,6 +20,13 @@ export interface EffortTaskInput {
   readonly actualEffortMinutes: number;
   /** Daily planned-value plot: sparse ISO-date → person-minutes map. */
   readonly dailyPlan: Readonly<Record<string, number>>;
+  /**
+   * Whether this task is a leaf — a task no other task names as its parent.
+   * Only leaves contribute to the project rollup; non-leaf summary rows (`false`)
+   * aggregate their children and would otherwise double-count. Absent means leaf,
+   * so a flat task list rolls up unchanged.
+   */
+  readonly isLeaf?: boolean;
 }
 
 export interface EffortInput {
@@ -139,16 +146,21 @@ export function calculateTaskEffort(
 export function calculateEffortEvm(input: EffortInput): EffortResult {
   const tasks = input.tasks.map((task) => calculateTaskEffort(task, input.statusDate));
 
+  // Leaf-only rollup. A non-leaf task is a summary row whose effort is carried by
+  // its leaf children; summing it as well would double-count. Per-task metrics are
+  // still computed for every row above so per-row display is unchanged.
   let bac = 0;
   let pv = 0;
   let ev = 0;
   let ac = 0;
-  for (const task of tasks) {
-    bac += hoursToDays(task.plannedEffortHours);
-    pv += hoursToDays(task.plannedEarnedHours);
-    ev += hoursToDays(task.earnedEffortHours);
-    ac += hoursToDays(task.actualEffortHours);
-  }
+  input.tasks.forEach((task, index) => {
+    if (task.isLeaf === false) return;
+    const metrics = tasks[index]!;
+    bac += hoursToDays(metrics.plannedEffortHours);
+    pv += hoursToDays(metrics.plannedEarnedHours);
+    ev += hoursToDays(metrics.earnedEffortHours);
+    ac += hoursToDays(metrics.actualEffortHours);
+  });
 
   return {
     tasks,

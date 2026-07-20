@@ -127,6 +127,57 @@ describe("calculateEffortEvm", () => {
     expect(result.tasks.map((task) => task.id)).toEqual(["T1", "T2"]);
   });
 
+  it("sums only leaf tasks, excluding non-leaf summary rows (no double count)", () => {
+    // A generated parent keeps its own (stale) M/EV/AC after its children take
+    // over the effort. With isLeaf:false it must be excluded from the rollup so a
+    // parent worth 960 min is not counted on top of its children that already
+    // sum to it — otherwise BAC would double from 2 to 4 person-days.
+    const result = calculateEffortEvm({
+      statusDate: "2026-01-05",
+      tasks: [
+        {
+          id: "P",
+          plannedEffortMinutes: 960,
+          progressBasisPoints: 10_000, // stale progress on the summary row
+          actualEffortMinutes: 960,
+          dailyPlan: { "2026-01-05": 960 }, // M = 16 h, would inflate BAC/EV/AC
+          isLeaf: false,
+        },
+        {
+          id: "C1",
+          plannedEffortMinutes: 480,
+          progressBasisPoints: 0,
+          actualEffortMinutes: 0,
+          dailyPlan: { "2026-01-05": 480 }, // M = 8 h, N = 8 h (on status date)
+          isLeaf: true,
+        },
+        {
+          id: "C2",
+          plannedEffortMinutes: 480,
+          progressBasisPoints: 0,
+          actualEffortMinutes: 0,
+          dailyPlan: { "2026-01-06": 480 }, // M = 8 h, N = 0 (after status date)
+          isLeaf: true,
+        },
+      ],
+    });
+
+    // Only the two children roll up: BAC = (8+8)/8 = 2; PV = (8+0)/8 = 1; EV/AC = 0.
+    expect(result.rollup).toEqual({
+      bac: 2,
+      pv: 1,
+      ev: 0,
+      ac: 0,
+      sv: -1,
+      cv: 0,
+      spi: 0, // EV / PV = 0 / 1
+      cpi: "-", // AC = 0 → div0
+    });
+    // Per-row metrics still exist for the summary row (per-row display unchanged).
+    expect(result.tasks.map((task) => task.id)).toEqual(["P", "C1", "C2"]);
+    expect(result.tasks[0]!.plannedEffortHours).toBe(16);
+  });
+
   it("returns '-' for SPI/CPI when PV/AC are zero (div0 → '-')", () => {
     const result = calculateEffortEvm({ statusDate: "2026-07-13", tasks: [] });
     expect(result.rollup).toEqual({
