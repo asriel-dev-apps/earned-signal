@@ -68,6 +68,17 @@ Done + committed (all `pnpm check`-green for lint/typecheck/test; `apps/web` onl
   holiday columns greyed + non-editable, per-assignee paid-leave in violet + non-editable.
   Editability gate is `locked && editable && !nonWorking && !paidLeave` (composes with C-2's
   lock removal). Synthetic demo holidays/paid-leave added so all states show in preview.
+- **C-2 core** `14c6b6c` — retired the daily-plan lock + continuous scheduler. Daily plans
+  are placed once at `task.generateSubtasks` (scoped to the new children via set-diff) and
+  hand-edited thereafter; the write path (`project-command-unit-of-work`) and preview
+  (`App.executeCommands`) only reschedule for that command. `dailyPlanLocked` removed across
+  all layers + the ロック grid column/toggle/gate; daily cell editable = `editable &&
+  !nonWorking && !paidLeave`. Destructive **migration 0002** drops `daily_plan_locked`
+  (generated + snapshot; NOT run on live Neon). Domain scheduler keeps an internal
+  `fixedDailyPlan` input (a fixed-fact plan that anchors placement — not a user lock).
+  Non-blocking row warnings added: projection flags `parentEffortMismatch` (summary L ≠ Σ
+  children L) + `estimateVsDailyMismatch` (leaf L ≠ Σ daily); grid shows ⚠ in the No. column
+  + amber row tint for those rows or a capacity-overloaded assignee. All 216 tests green.
 
 User decisions this session (final): band map above = correct; **C-2** = implement code +
 local migration/tests now, run the live Neon migration at deploy separately (Neon password
@@ -80,9 +91,15 @@ a hand plan (demo `2026-01-07`). If the sheet expects a **continuous calendar ax
 weekend columns visible), change the `days` memo in `App.tsx` from union-of-plan-dates to a
 continuous min→max range (watch the knock-on to `synthesizeExternalLoad`/`detectOverloads`).
 
-Remaining P0: **C-2** (per decision above) → **D-1+C-1+C-4+C-5** → **A-1** last (A-1 removes
-preview, which breaks local screenshotting — gate preview behind a dev env flag, e.g.
-`VITE_VECTA_PREVIEW`, off in prod, on for the screenshot build).
+Remaining P0: **C-2 review/change field removal** (the one C-2 sub-item still open — drop
+`review_ref`/`change_ref` from schema/records/contract/api/workspace/UoW/projection/demo/
+tests via a migration `0003`; NOTE the conflict to resolve first: design 0002 §2 models col
+E=`review_ref` and col G=`change_ref` as real worksheet columns and keeps `change_ref` as a
+"Phase-2 change-rollup key", whereas 0003 §B-1 says both were added without authorization and
+are not in the sheet — 0003 is newer + user-driven, so removal is intended, but confirm) →
+**D-1+C-1+C-4+C-5** (full toolbar overhaul; the current UI still shows every toolbar) →
+**A-1** last (A-1 removes preview, which breaks local screenshotting — gate preview behind a
+dev env flag, e.g. `VITE_VECTA_PREVIEW`, off in prod, on for the screenshot build).
 
 Local screenshot pipeline (the Cloudflare vite plugin needs local Postgres so `pnpm dev`
 fails): a React-only build of the preview `App` renders without a backend —
