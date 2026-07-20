@@ -559,7 +559,35 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [project.members],
   );
 
+  // Continuous calendar axis: every ISO date from the first to the last planned
+  // day inclusive, so weekends/holidays appear as columns (greyed, non-editable
+  // by the shared-non-working test below) rather than being skipped. Empty when
+  // no task carries a plan yet.
   const days = useMemo(() => {
+    let min: string | null = null;
+    let max: string | null = null;
+    for (const row of rows) {
+      for (const date of Object.keys(row.dailyPlan)) {
+        if (min === null || date < min) min = date;
+        if (max === null || date > max) max = date;
+      }
+    }
+    if (min === null || max === null) return [];
+    const result: string[] = [];
+    const cursor = new Date(`${min}T00:00:00Z`);
+    const end = new Date(`${max}T00:00:00Z`);
+    while (cursor.getTime() <= end.getTime()) {
+      result.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return result;
+  }, [rows]);
+
+  // The sparse set of dates that actually carry a plan (the "planning days").
+  // The cross-project load/overload signal is computed over these, not the full
+  // calendar axis, so weekend/holiday columns never manufacture load, and the
+  // synthetic seam stays identical to the pre-continuous-axis behaviour.
+  const planDays = useMemo(() => {
     const set = new Set<string>();
     for (const row of rows) {
       for (const date of Object.keys(row.dailyPlan)) set.add(date);
@@ -626,8 +654,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   // member's daily capacity, keyed for O(1) day-cell lookup and named for the
   // summary breakdown.
   const externalLoad = useMemo<ExternalLoad>(
-    () => synthesizeExternalLoad(project.members, days),
-    [project.members, days],
+    () => synthesizeExternalLoad(project.members, planDays),
+    [project.members, planDays],
   );
   const capacityByMember = useMemo(() => {
     const map = new Map<string, number>();
@@ -1344,7 +1372,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <div>
           <h1>VECTA</h1>
           <p className="app-subtitle">
-            {project.name ? `${project.name} · ` : ""}基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {days.length} 計画日
+            {project.name ? `${project.name} · ` : ""}基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {planDays.length} 計画日
           </p>
         </div>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
