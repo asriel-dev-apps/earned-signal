@@ -48,6 +48,18 @@ const PER_DAY_MINUTES = [60, 120, 180, 240, 300, 360, 420, 480] as const;
 // locked plan is preserved verbatim and a holiday leaves unlocked cells blank.
 const DEMO_HOLIDAYS = ["2026-01-07", "2026-01-08"] as const;
 
+// Individual paid-leave (有給) days for the members given their own calendar
+// below. 01-06 and 01-09 coincide with the locked showcase row's columns, so
+// those columns exist regardless of scheduling and the violet paid-leave tint is
+// guaranteed to show on the paid-leave members' rows; 01-13 adds a third within
+// the same early-January window. All synthetic and unrelated to real people.
+const DEMO_PAID_LEAVE = ["2026-01-06", "2026-01-09", "2026-01-13"] as const;
+
+// A couple of member array indexes that take an individual calendar (the default
+// working week plus DEMO_PAID_LEAVE). Absent in the tiny test fixtures (few
+// members), so they only surface in the full preview.
+const DEMO_PAID_LEAVE_MEMBER_INDEXES = [3, 7] as const;
+
 // One deterministic locked showcase leaf (the very first subtask). Its plan is
 // hand-entered — including effort on a holiday the scheduler would never fill —
 // so applyEffortSchedule leaves it untouched and its FS successors shift after
@@ -85,12 +97,29 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
   const workingDays = buildWorkingDays(projectStart, horizon);
   const statusDate = workingDays[130]!;
 
-  const members: ProjectMember[] = Array.from({ length: memberCount }, (_, index) => ({
-    id: makeUuid("c", index + 1),
-    name: `Member ${(index + 1).toString().padStart(2, "0")}`,
-    calendarId: "standard",
-    dailyCapacityMinutes: 480,
-  }));
+  // A couple of members take an individual (paid-leave) calendar so the preview
+  // shows the distinct violet 有給 tint alongside the shared grey weekend/holiday
+  // cells. Guarded by memberCount so tiny fixtures keep every member on standard.
+  const paidLeaveMembers = DEMO_PAID_LEAVE_MEMBER_INDEXES.filter((index) => index < memberCount).map(
+    (index) => ({
+      index,
+      memberId: makeUuid("c", index + 1),
+      calendarId: `leave-${(index + 1).toString().padStart(2, "0")}`,
+    }),
+  );
+  const paidLeaveCalendarByMemberId = new Map(
+    paidLeaveMembers.map((entry) => [entry.memberId, entry.calendarId]),
+  );
+
+  const members: ProjectMember[] = Array.from({ length: memberCount }, (_, index) => {
+    const id = makeUuid("c", index + 1);
+    return {
+      id,
+      name: `Member ${(index + 1).toString().padStart(2, "0")}`,
+      calendarId: paidLeaveCalendarByMemberId.get(id) ?? "standard",
+      dailyCapacityMinutes: 480,
+    };
+  });
 
   const tasks: ProjectTask[] = [];
   let sortOrder = 0;
@@ -190,6 +219,14 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
         workingWeekdays: [1, 2, 3, 4, 5],
         nonWorkingDates: [...DEMO_HOLIDAYS],
       },
+      // Per-member paid-leave calendars: the standard week plus each member's own
+      // 有給 days, so those members' rows tint violet on DEMO_PAID_LEAVE dates.
+      ...paidLeaveMembers.map((entry) => ({
+        id: entry.calendarId,
+        name: `Personal calendar ${entry.index + 1}`,
+        workingWeekdays: [1, 2, 3, 4, 5],
+        nonWorkingDates: [...DEMO_HOLIDAYS, ...DEMO_PAID_LEAVE],
+      })),
     ],
     members,
     tasks,

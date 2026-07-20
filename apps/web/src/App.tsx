@@ -193,6 +193,16 @@ function processHue(process: string): number {
   return Math.abs(hash) % 360;
 }
 
+/**
+ * ISO weekday (1=Mon … 7=Sun) of an ISO date, computed deterministically in UTC
+ * so it never depends on the runtime's local timezone. Matches the domain
+ * scheduler's own weekday convention (`workingWeekdays` uses 1=Mon..7=Sun).
+ */
+function isoWeekday(date: string): number {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay(); // 0=Sun … 6=Sat
+  return day === 0 ? 7 : day;
+}
+
 type ViewMode = "flat" | "tree";
 
 /**
@@ -561,6 +571,58 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     }
     return [...set].sort();
   }, [rows]);
+
+  // Non-working-day model for the daily plot. Two O(1) lookups are built once per
+  // project change and reused per cell (never re-scanning nonWorkingDates per
+  // cell): `calendarsById` resolves a calendar id to {weekdays, holidays} sets,
+  // and `memberCalendarId` resolves a row's assignee to its calendar id. The
+  // project default calendar drives the *shared* weekend/holiday state.
+  const defaultCalendar = useMemo(
+    () => project.calendars.find((calendar) => calendar.id === project.defaultCalendarId),
+    [project.calendars, project.defaultCalendarId],
+  );
+  const calendarsById = useMemo(() => {
+    const map = new Map<string, { workingWeekdays: Set<number>; nonWorkingDates: Set<string> }>();
+    for (const calendar of project.calendars) {
+      map.set(calendar.id, {
+        workingWeekdays: new Set(calendar.workingWeekdays),
+        nonWorkingDates: new Set(calendar.nonWorkingDates),
+      });
+    }
+    return map;
+  }, [project.calendars]);
+  const memberCalendarId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of project.members) map.set(member.id, member.calendarId);
+    return map;
+  }, [project.members]);
+  // The subset of visible day columns that are shared non-working days (weekend
+  // per the default calendar's workingWeekdays, or a default-calendar holiday).
+  // Greyed and non-editable in every row. Computed over `days` (O(days)) so the
+  // per-cell test is a single Set lookup.
+  const sharedNonWorkingDates = useMemo(() => {
+    const set = new Set<string>();
+    if (defaultCalendar === undefined) return set;
+    const working = new Set(defaultCalendar.workingWeekdays);
+    const holidays = new Set(defaultCalendar.nonWorkingDates);
+    for (const date of days) {
+      if (!working.has(isoWeekday(date)) || holidays.has(date)) set.add(date);
+    }
+    return set;
+  }, [days, defaultCalendar]);
+  // Paid-leave (有給 / individual non-working) test for one row's assignee on one
+  // date: the assignee-calendar lists it as non-working, but it is not already a
+  // shared weekend/holiday (which takes visual precedence). O(1) per call.
+  const isPaidLeave = useCallback(
+    (assigneeMemberId: string | null, date: string): boolean => {
+      if (assigneeMemberId === null || sharedNonWorkingDates.has(date)) return false;
+      const calendarId = memberCalendarId.get(assigneeMemberId);
+      if (calendarId === undefined) return false;
+      const calendar = calendarsById.get(calendarId);
+      return calendar !== undefined && calendar.nonWorkingDates.has(date);
+    },
+    [calendarsById, memberCalendarId, sharedNonWorkingDates],
+  );
 
   // Feature #6 — cross-project load. `externalLoad` is the synthetic "other PJ"
   // daily commitment behind the seam (swapped for a real read in Phase 2); it is
@@ -954,13 +1016,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const beginDailyEdit = useCallback(
     (row: WbsGridTaskRow, date: string) => {
       // Only locked tasks may hand-edit their daily plot; unlocked cells belong
-      // to the scheduler and stay read-only (ADR 0011 Decision 3).
+      // to the scheduler and stay read-only (ADR 0011 Decision 3). A non-working
+      // day (shared weekend/holiday or the assignee's paid leave) never opens the
+      // editor, mirroring the cellEditable gate.
       if (!editable || !row.dailyPlanLocked) return;
+      if (sharedNonWorkingDates.has(date) || isPaidLeave(row.assigneeMemberId, date)) return;
       setDailyEditing({ rowId: row.id, date });
       const minutes = row.dailyPlan[date] ?? 0;
       setDailyEditValue(minutes > 0 ? formatNumber(minutes / 60) : "");
     },
-    [editable],
+    [editable, isPaidLeave, sharedNonWorkingDates],
   );
 
   const finishDailyEdit = useCallback(
@@ -1168,7 +1233,6 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     const isSelected = selected.rowIndex === rowIndex && selected.colIndex === colIndex;
     const isEditing = editing?.rowIndex === rowIndex && editing.colIndex === colIndex;
     const classes = ["cell", `cell--${column.kind}`];
-    if (column.band !== undefined) classes.push(`cell--band-${column.band}`);
     if (column.editable) classes.push(editable ? "cell--editable" : "cell--locked");
     if (isSelected) classes.push("cell--selected");
     if (column.kind === "status") classes.push(`status--${row.status.toLowerCase()}`);
@@ -1257,6 +1321,23 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
 
   const rollup = grid.rollup;
   const selectedRow = modelRows[selected.rowIndex]?.original;
+
+  // Month band over the day columns: group the currently-visible virtualized days
+  // into contiguous YYYY-MM runs. Each band's left is its first day's virtual
+  // start and its width spans to the last day's right edge. Derived from the
+  // visible virtual items every render, so it re-lays-out as the day columns
+  // scroll horizontally.
+  const monthBands: { key: string; month: string; left: number; width: number }[] = [];
+  for (const item of dayVirtualizer.getVirtualItems()) {
+    const month = days[item.index]!.slice(0, 7);
+    const right = item.start + DAILY_COL_W;
+    const previous = monthBands[monthBands.length - 1];
+    if (previous !== undefined && previous.month === month) {
+      previous.width = right - previous.left;
+    } else {
+      monthBands.push({ key: `${month}-${item.index}`, month, left: item.start, width: DAILY_COL_W });
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -1463,23 +1544,38 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             {NON_PINNED.map((column, index) => (
               <div
                 key={column.id}
-                className="head-cell head-cell--abs"
+                className={`head-cell head-cell--abs${column.band !== undefined ? ` head-cell--band-${column.band}` : ""}`}
                 style={{ left: NON_PINNED_LEFT[index], width: column.width, top: BAND_H, height: HEAD_NAME_H }}
                 title={column.header}
               >
                 <span className="head-label">{column.header}</span>
               </div>
             ))}
+            {/* Top row: one neutral band per distinct month among the visible days,
+                aligned with the META header's band row. */}
+            {monthBands.map((band) => (
+              <div
+                key={band.key}
+                className="head-band head-month"
+                style={{ left: band.left, width: band.width, height: BAND_H }}
+                title={band.month}
+              >
+                <span className="head-band-label">{band.month}</span>
+              </div>
+            ))}
+            {/* Bottom row: the day-of-month, greyed on shared weekend/holiday
+                columns so the header reads like the body below it. */}
             {dayVirtualizer.getVirtualItems().map((virtualDay) => {
               const date = days[virtualDay.index]!;
+              const nonWorking = sharedNonWorkingDates.has(date);
               return (
                 <div
                   key={virtualDay.key}
-                  className="head-cell head-cell--day"
+                  className={`head-cell head-cell--day${nonWorking ? " head-cell--nonworking" : ""}`}
                   style={{ left: virtualDay.start, width: DAILY_COL_W, top: BAND_H, height: HEAD_NAME_H }}
                   title={date}
                 >
-                  {date.slice(5)}
+                  {date.slice(8)}
                 </div>
               );
             })}
@@ -1545,7 +1641,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   const date = days[virtualDay.index]!;
                   const minutes = row.dailyPlan[date] ?? 0;
                   const locked = row.dailyPlanLocked;
-                  const cellEditable = locked && editable;
+                  // Shared weekend/holiday (grey) takes precedence over the
+                  // assignee's paid leave (violet); either blocks editing.
+                  const nonWorking = sharedNonWorkingDates.has(date);
+                  const paidLeave = !nonWorking && isPaidLeave(row.assigneeMemberId, date);
+                  const cellEditable = locked && editable && !nonWorking && !paidLeave;
                   const isEditing =
                     dailyEditing?.rowId === row.id && dailyEditing.date === date;
                   // Cross-project overlay + overflow, per the row's assignee.
@@ -1565,6 +1665,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       : undefined;
                   const classes = ["daily-cell"];
                   if (minutes > 0) classes.push("daily-cell--filled");
+                  if (nonWorking) classes.push("daily-cell--nonworking");
+                  else if (paidLeave) classes.push("daily-cell--leave");
                   classes.push(cellEditable ? "daily-cell--editable" : "daily-cell--readonly");
                   if (overloadEntry !== undefined) classes.push("daily-cell--overload");
                   return (

@@ -42,6 +42,15 @@
   --daily-fill-bg: #eaeafb;
   --daily-fill-ink: #4b47c4;
 
+  /* Date-header month band (neutral) and non-working day tints. Shared
+     weekend/holiday cells are a plain grey; individual paid-leave (有給) cells a
+     soft violet, kept clearly distinct from the daily-fill blue above. */
+  --month-band-bg: #e9ebef;
+  --month-band-ink: #4b5563;
+  --daily-nonworking-bg: #e4e6ea;
+  --daily-leave-bg: #efe1f6;
+  --daily-leave-ink: #82409e;
+
   /* Cross-project ("other PJ") load overlay + capacity-overflow alert. The
      non-overflow bar is a quiet background context (low alpha); the overflow bar
      stays saturated so the red alert stands out against the calm baseline. */
@@ -66,16 +75,6 @@
   --band-ac-ink: #995a1f;
   --band-cv-bg: #f4dbee;
   --band-cv-ink: #8f3573;
-
-  /* Body-cell wash: a much lighter tint of each band so the columns read as
-     belonging to their header band. Softer than the header fill; overridden by
-     parent/hover/selected/locked row states. */
-  --band-estimate-cell-bg: #f4f5f8;
-  --band-bac-cell-bg: #f1f6fc;
-  --band-pv-cell-bg: #f0f8f3;
-  --band-ev-cell-bg: #fdf9ec;
-  --band-ac-cell-bg: #fdf4ea;
-  --band-cv-cell-bg: #fbf1f8;
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -118,6 +117,12 @@
     --daily-fill-bg: #23234a;
     --daily-fill-ink: #b4b1fb;
 
+    --month-band-bg: #1e2128;
+    --month-band-ink: #b7bdc9;
+    --daily-nonworking-bg: #1c1f26;
+    --daily-leave-bg: #2c2140;
+    --daily-leave-ink: #cbaef0;
+
     --load-overlay: rgba(139, 135, 245, 0.24);
     --overload-overlay: rgba(240, 115, 106, 0.42);
     --overload-bg: #35201f;
@@ -136,13 +141,6 @@
     --band-ac-ink: #e0a266;
     --band-cv-bg: #331c2c;
     --band-cv-ink: #dd93c4;
-
-    --band-estimate-cell-bg: #1c1e24;
-    --band-bac-cell-bg: #14202f;
-    --band-pv-cell-bg: #10251a;
-    --band-ev-cell-bg: #241d0e;
-    --band-ac-cell-bg: #241a0e;
-    --band-cv-cell-bg: #241521;
   }
 }
 
@@ -417,6 +415,18 @@ body {
   font-size: 10px;
   font-family: var(--mono);
 }
+/* Day-of-month header cell on a shared weekend/holiday column reads like the
+   greyed body cells below it. */
+.head-cell--day.head-cell--nonworking { background: var(--daily-nonworking-bg); }
+/* Column-name header cell directly under each EVM band carries the band colour,
+   so the band label and its column headers read as one coloured header block.
+   The body data cells stay neutral. */
+.head-cell--band-estimate { background: var(--band-estimate-bg); }
+.head-cell--band-bac { background: var(--band-bac-bg); }
+.head-cell--band-pv { background: var(--band-pv-bg); }
+.head-cell--band-ev { background: var(--band-ev-bg); }
+.head-cell--band-ac { background: var(--band-ac-bg); }
+.head-cell--band-cv { background: var(--band-cv-bg); }
 .head-label {
   font-weight: 600;
   line-height: 1.15;
@@ -462,6 +472,9 @@ body {
 .head-band--ac .head-band-label { color: var(--band-ac-ink); }
 .head-band--cv { background: var(--band-cv-bg); }
 .head-band--cv .head-band-label { color: var(--band-cv-ink); }
+/* Neutral month band over the day columns (shares the .head-band geometry). */
+.head-month { background: var(--month-band-bg); }
+.head-month .head-band-label { color: var(--month-band-ink); }
 
 .pinned-group {
   position: sticky;
@@ -527,15 +540,6 @@ body {
 .cell--index,
 .cell--status { background: var(--derived-bg); color: var(--ink-soft); }
 .cell--derivedDate { font-family: var(--mono); font-size: 11px; }
-/* Body-cell band wash — overrides the grey derived-bg for banded columns so the
-   column matches its header band; ordered before parent/hover/selected/status so
-   those still win. */
-.cell--band-estimate { background: var(--band-estimate-cell-bg); }
-.cell--band-bac { background: var(--band-bac-cell-bg); }
-.cell--band-pv { background: var(--band-pv-cell-bg); }
-.cell--band-ev { background: var(--band-ev-cell-bg); }
-.cell--band-ac { background: var(--band-ac-cell-bg); }
-.cell--band-cv { background: var(--band-cv-cell-bg); }
 .cell--editable { cursor: cell; }
 .cell--editable:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .cell--locked { color: var(--muted); }
@@ -589,11 +593,9 @@ body {
 
 /* Status chips. */
 .cell--status { font-weight: 600; }
-/* Status keeps its semantic hue as text only, so the EV band wash shows through
-   the cell (the whole 実績/EV block reads as one band). */
-.status--not_started { color: var(--status-todo-ink); }
-.status--in_progress { color: var(--status-doing-ink); }
-.status--done { color: var(--status-done-ink); }
+.status--not_started { background: var(--status-todo-bg); color: var(--status-todo-ink); }
+.status--in_progress { background: var(--status-doing-bg); color: var(--status-doing-ink); }
+.status--done { background: var(--status-done-bg); color: var(--status-done-ink); }
 
 .cell-editor {
   width: 100%;
@@ -651,11 +653,29 @@ body {
 .daily-cell--filled { background: var(--daily-fill-bg); color: var(--daily-fill-ink); font-weight: 600; }
 .daily-cell--editable { cursor: cell; }
 .daily-cell--editable:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
-.grid-row:hover .daily-cell:not(.daily-cell--filled) { background: var(--panel-2); }
+.grid-row:hover .daily-cell:not(.daily-cell--filled):not(.daily-cell--nonworking):not(.daily-cell--leave) { background: var(--panel-2); }
 .grid-row--parent .daily-cell { background: var(--parent-bg); }
 .grid-row--locked .daily-cell { background: var(--locked-bg); color: var(--status-doing-ink); }
 .grid-row--locked .daily-cell--filled { background: var(--status-doing-bg); color: var(--status-doing-ink); }
 .daily-cell-editor { text-align: center; box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Non-working day tints. A shared weekend/holiday cell is greyed (grey wins over
+   paid-leave); an assignee's paid-leave cell is soft violet. Both are
+   non-editable and keep any planned value visible. Defined after the
+   parent/locked/hover fills (equal specificity, so source order wins) but before
+   the overload alert, which stays the strongest signal. */
+.daily-cell.daily-cell--nonworking,
+.grid-row--parent .daily-cell.daily-cell--nonworking,
+.grid-row--locked .daily-cell.daily-cell--nonworking {
+  background: var(--daily-nonworking-bg);
+  color: var(--muted);
+}
+.daily-cell.daily-cell--leave,
+.grid-row--parent .daily-cell.daily-cell--leave,
+.grid-row--locked .daily-cell.daily-cell--leave {
+  background: var(--daily-leave-bg);
+  color: var(--daily-leave-ink);
+}
 
 /* Cross-project load overlay (half-transparent bar behind the day value) and the
    1-day capacity-overflow highlight. The bar height encodes the assignee's

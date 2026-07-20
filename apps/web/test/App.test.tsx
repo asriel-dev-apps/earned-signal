@@ -277,6 +277,30 @@ describe("App daily-plan lock and hand editing", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("greys and freezes a locked cell on a shared holiday, keeping its value visible", async () => {
+    const { client, execute } = fakeClient();
+    render(<App client={client} />);
+    await ready();
+    await revealDailyColumns();
+
+    // 2026-01-07 is a default-calendar holiday. Even though the locked showcase
+    // leaf hand-entered 3h (180m) there, the cell is greyed and non-editable —
+    // but the planned value stays visible (only editing is blocked, per §B-5).
+    const cell = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-daily-row="${lockedLeaf.id}"][data-daily-date="2026-01-07"]`,
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(cell.className).toContain("daily-cell--nonworking");
+    expect(cell.getAttribute("aria-readonly")).toBe("true");
+    expect(cell.textContent).toContain("3");
+    fireEvent.doubleClick(cell);
+    expect(cell.querySelector("input")).toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("hand-edits a locked task's daily cell and re-asserts the lock in the command", async () => {
     const { client, execute } = fakeClient();
     render(<App client={client} />);
