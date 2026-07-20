@@ -1,0 +1,4 @@
+# Makes this spike its own pnpm workspace root so `pnpm install` here does NOT
+# walk up to the earned-signal root workspace (apps/*, packages/*). No child
+# packages — just this single standalone app.
+packages: []

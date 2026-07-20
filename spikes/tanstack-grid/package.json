@@ -1,0 +1,27 @@
+{
+  "name": "spike-tanstack-grid",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Throwaway spike: can a headless virtualized grid (TanStack Table v8 + TanStack Virtual v3) handle the harsh WBS grid workload? GO/NO-GO for ADR 0011 step 1.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.13.12",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
