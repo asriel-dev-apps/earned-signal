@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
-  boolean,
   char,
   check,
   date,
@@ -212,7 +211,6 @@ export const tasks = pgTable(
     actualEffortMinutes: integer("actual_effort_minutes").notNull().default(0),
     prorationWeightBp: integer("proration_weight_bp"),
     dailyPlan: jsonb("daily_plan").notNull().default(sql`'{}'::jsonb`),
-    dailyPlanLocked: boolean("daily_plan_locked").notNull().default(false),
     actualStart: date("actual_start", { mode: "string" }),
     actualFinish: date("actual_finish", { mode: "string" }),
     createdAt: auditTimestamp("created_at").notNull().defaultNow(),

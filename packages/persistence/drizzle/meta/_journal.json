@@ -15,6 +15,13 @@
       "when": 1784544696478,
       "tag": "0001_third_midnight",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784590007641,
+      "tag": "0002_drop_daily_plan_locked",
+      "breakpoints": true
     }
   ]
 }

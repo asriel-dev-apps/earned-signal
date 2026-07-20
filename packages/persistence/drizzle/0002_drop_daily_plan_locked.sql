@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" DROP COLUMN "daily_plan_locked";

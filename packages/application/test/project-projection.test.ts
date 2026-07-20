@@ -24,7 +24,6 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     actualEffortMinutes: 0,
     prorationWeightBp: null,
     dailyPlan: {},
-    dailyPlanLocked: false,
     actualStart: null,
     actualFinish: null,
     dependencies: [],
@@ -110,6 +109,35 @@ describe("projectWbsGrid", () => {
     for (const row of general.rows) {
       expect("dailyCapacityMinutes" in row).toBe(false);
     }
+  });
+
+  it("flags a leaf whose L disagrees with Σ daily, and a summary whose L disagrees with Σ children", () => {
+    // The fixture leaf (task-2) has L = 480 and Σ daily = 480 (consistent), and
+    // its parent (task-1) has L = 0 while its only child carries 480 — so the
+    // parent is the estimate-vs-children mismatch and the leaf is clean.
+    const consistent = projectWbsGrid(project);
+    const parent = consistent.rows.find((row) => row.id === "task-1")!;
+    const leaf = consistent.rows.find((row) => row.id === "task-2")!;
+    expect(parent.parentEffortMismatch).toBe(true); // 0 ≠ Σ children (480)
+    expect(parent.estimateVsDailyMismatch).toBe(false); // summary row: not checked
+    expect(leaf.parentEffortMismatch).toBe(false); // leaf: not checked
+    expect(leaf.estimateVsDailyMismatch).toBe(false); // L = Σ daily = 480
+
+    // Now break the leaf's estimate-vs-daily agreement (L = 600 ≠ Σ daily 480),
+    // and align the parent's L with its child so its mismatch clears.
+    const edited: ProjectState = {
+      ...project,
+      tasks: project.tasks.map((task) =>
+        task.id === "task-1"
+          ? { ...task, plannedEffortMinutes: 600 }
+          : task.id === "task-2"
+            ? { ...task, plannedEffortMinutes: 600 }
+            : task,
+      ),
+    };
+    const rows = projectWbsGrid(edited).rows;
+    expect(rows.find((row) => row.id === "task-1")!.parentEffortMismatch).toBe(false); // 600 = Σ children
+    expect(rows.find((row) => row.id === "task-2")!.estimateVsDailyMismatch).toBe(true); // 600 ≠ Σ daily 480
   });
 });
 

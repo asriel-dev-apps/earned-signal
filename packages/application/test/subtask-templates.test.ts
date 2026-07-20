@@ -28,7 +28,6 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     actualEffortMinutes: 0,
     prorationWeightBp: null,
     dailyPlan: {},
-    dailyPlanLocked: false,
     actualStart: null,
     actualFinish: null,
     dependencies: [],
@@ -249,14 +248,18 @@ describe("leaf-only rollup holds through subtask generation (no double count)", 
     const bacBefore = projectWbsGrid(before).rollup.bac;
     expect(bacBefore).toBe(2_400 / 60 / 8); // 5 person-days
 
-    // Generate, then re-run the scheduler exactly as the write path does.
-    const generated = applyEffortSchedule(
-      applyProjectCommand(baseProject(2_400), {
-        type: "task.generateSubtasks",
-        parentTaskId: "parent-1",
-        templateId: "standard-build",
-      }),
+    // Generate, then place only the new leaf children exactly as the write path
+    // does (Design 0003 §C-2): the one-shot scheduler runs for the generated
+    // children and leaves every pre-existing plan untouched.
+    const generatedState = applyProjectCommand(baseProject(2_400), {
+      type: "task.generateSubtasks",
+      parentTaskId: "parent-1",
+      templateId: "standard-build",
+    });
+    const newChildIds = new Set(
+      generatedState.tasks.filter((task) => task.parentId === "parent-1").map((task) => task.id),
     );
+    const generated = applyEffortSchedule(generatedState, newChildIds);
     const grid = projectWbsGrid(generated);
 
     // The parent is now a non-leaf summary row: its own daily plan is emptied

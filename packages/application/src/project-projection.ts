@@ -82,7 +82,12 @@ export interface WbsGridTaskRow {
   readonly actualStart: string | null;
   readonly actualFinish: string | null;
   readonly dailyPlan: Readonly<Record<string, number>>;
-  readonly dailyPlanLocked: boolean;
+  // Non-blocking consistency flags (Design 0003 §C-2). Computed purely from the
+  // tree; the grid surfaces them as row-level warnings and never overwrites.
+  /** Summary (non-leaf) task whose L ≠ Σ of its direct children's L. */
+  readonly parentEffortMismatch: boolean;
+  /** Leaf task whose L ≠ Σ of its daily-plan minutes. */
+  readonly estimateVsDailyMismatch: boolean;
   // Derived columns K/M/N/O/P/Q/T/U/V/W(hours)/X (from the effort EVM module).
   readonly plannedEffortDays: number;
   readonly plannedEffortHours: number;
@@ -122,6 +127,16 @@ export function projectWbsGrid(
   const memberNameById = new Map(scopedMembers.map((member) => [member.id, member.name]));
 
   const leaves = leafTaskIds(project.tasks);
+  // Σ of each parent's direct children's planned effort, for the parent-vs-child
+  // consistency flag. Built once over the flat task list (O(tasks)).
+  const directChildEffortByParent = new Map<string, number>();
+  for (const task of project.tasks) {
+    if (task.parentId === null) continue;
+    directChildEffortByParent.set(
+      task.parentId,
+      (directChildEffortByParent.get(task.parentId) ?? 0) + task.plannedEffortMinutes,
+    );
+  }
   const effort = calculateEffortEvm({
     statusDate: project.statusDate,
     tasks: project.tasks.map((task) => ({
@@ -141,6 +156,11 @@ export function projectWbsGrid(
       if (metrics === undefined) {
         throw new Error(`Missing effort metrics for task ${task.id}`);
       }
+      const isLeaf = leaves.has(task.id);
+      const dailyPlanMinutes = Object.values(task.dailyPlan).reduce(
+        (sum, minutes) => sum + minutes,
+        0,
+      );
       return {
         id: task.id,
         parentId: task.parentId,
@@ -164,7 +184,10 @@ export function projectWbsGrid(
         actualStart: task.actualStart,
         actualFinish: task.actualFinish,
         dailyPlan: task.dailyPlan,
-        dailyPlanLocked: task.dailyPlanLocked,
+        parentEffortMismatch:
+          !isLeaf &&
+          task.plannedEffortMinutes !== (directChildEffortByParent.get(task.id) ?? 0),
+        estimateVsDailyMismatch: isLeaf && task.plannedEffortMinutes !== dailyPlanMinutes,
         plannedEffortDays: metrics.plannedEffortDays,
         plannedEffortHours: metrics.plannedEffortHours,
         plannedEarnedHours: metrics.plannedEarnedHours,

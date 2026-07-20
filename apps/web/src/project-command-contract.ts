@@ -37,7 +37,6 @@ const TaskFieldsSchema = z.object({
   actualEffortMinutes: EffortMinutesSchema,
   prorationWeightBp: ProrationWeightSchema,
   dailyPlan: DailyPlanSchema,
-  dailyPlanLocked: z.boolean(),
   actualStart: IsoDateSchema.nullable(),
   actualFinish: IsoDateSchema.nullable(),
   dependencies: z.array(DependencySchema).max(200),
@@ -93,7 +92,6 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
     actualEffortMinutes: task.actualEffortMinutes,
     prorationWeightBp: task.prorationWeightBp,
     dailyPlan: { ...task.dailyPlan },
-    dailyPlanLocked: task.dailyPlanLocked,
     actualStart: task.actualStart,
     actualFinish: task.actualFinish,
     dependencies: task.dependencies.map((dependency) => ({ ...dependency })),
@@ -129,9 +127,6 @@ function toTaskChanges(
       ? {}
       : { prorationWeightBp: changes.prorationWeightBp }),
     ...(changes.dailyPlan === undefined ? {} : { dailyPlan: { ...changes.dailyPlan } }),
-    ...(changes.dailyPlanLocked === undefined
-      ? {}
-      : { dailyPlanLocked: changes.dailyPlanLocked }),
     ...(changes.actualStart === undefined ? {} : { actualStart: changes.actualStart }),
     ...(changes.actualFinish === undefined ? {} : { actualFinish: changes.actualFinish }),
     ...(changes.dependencies === undefined
@@ -192,7 +187,6 @@ function fromTask(task: ProjectTask): z.infer<typeof TaskSchema> {
     actualEffortMinutes: task.actualEffortMinutes,
     prorationWeightBp: task.prorationWeightBp,
     dailyPlan: { ...task.dailyPlan },
-    dailyPlanLocked: task.dailyPlanLocked,
     actualStart: task.actualStart,
     actualFinish: task.actualFinish,
     dependencies: task.dependencies.map((dependency) => ({ ...dependency })),
@@ -228,9 +222,6 @@ function fromTaskChanges(
       ? {}
       : { prorationWeightBp: changes.prorationWeightBp }),
     ...(changes.dailyPlan === undefined ? {} : { dailyPlan: { ...changes.dailyPlan } }),
-    ...(changes.dailyPlanLocked === undefined
-      ? {}
-      : { dailyPlanLocked: changes.dailyPlanLocked }),
     ...(changes.actualStart === undefined ? {} : { actualStart: changes.actualStart }),
     ...(changes.actualFinish === undefined ? {} : { actualFinish: changes.actualFinish }),
     ...(changes.dependencies === undefined

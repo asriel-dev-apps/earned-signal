@@ -24,7 +24,6 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     actualEffortMinutes: 0,
     prorationWeightBp: null,
     dailyPlan: {},
-    dailyPlanLocked: false,
     actualStart: null,
     actualFinish: null,
     dependencies: [],

@@ -121,7 +121,6 @@ export function createSeedProjectRecord(
       actualEffortMinutes: 0,
       prorationWeightBp: null,
       dailyPlan: {},
-      dailyPlanLocked: false,
       actualStart: null,
       actualFinish: null,
     });
@@ -165,7 +164,6 @@ export function createSeedProjectRecord(
         actualEffortMinutes,
         prorationWeightBp: null,
         dailyPlan,
-        dailyPlanLocked: false,
         actualStart,
         actualFinish,
       });

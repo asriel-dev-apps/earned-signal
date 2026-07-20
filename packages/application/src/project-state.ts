@@ -49,7 +49,6 @@ export interface ProjectTask {
    */
   readonly prorationWeightBp: number | null;
   readonly dailyPlan: Readonly<Record<string, number>>;
-  readonly dailyPlanLocked: boolean;
   readonly actualStart: string | null;
   readonly actualFinish: string | null;
   readonly dependencies: readonly ProjectDependency[];
@@ -322,7 +321,6 @@ function generateSubtaskTasks(
     actualEffortMinutes: 0,
     prorationWeightBp: step.weightBp,
     dailyPlan: {},
-    dailyPlanLocked: false,
     actualStart: null,
     actualFinish: null,
     dependencies:

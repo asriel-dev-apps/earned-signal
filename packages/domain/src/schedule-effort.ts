@@ -4,7 +4,7 @@
 // dependencies (FS/SS/FF/SF with working-day lag), the members' daily capacity
 // and calendars, and the project calendar, this module places L greedily across
 // working days in dependency-topological order and returns a sparse daily plan
-// (ISO-date → person-minutes) for every unlocked task.
+// (ISO-date → person-minutes) for every task whose plan is not already fixed.
 //
 // Emergent duration: there is no stored duration. The window each task occupies
 // emerges from L, the assignee's remaining daily capacity, and the calendar.
@@ -50,9 +50,16 @@ export interface EffortScheduleTaskInput {
   readonly assigneeMemberId: string | null;
   /** L — planned effort, person-minutes. */
   readonly plannedEffortMinutes: number;
-  /** Existing plan; authoritative (and left untouched) when the task is locked. */
+  /** Existing plan; authoritative (and left untouched) when the plan is fixed. */
   readonly dailyPlan: Readonly<Record<string, number>>;
-  readonly dailyPlanLocked: boolean;
+  /**
+   * Whether this task's existing daily plan is a fixed fact: the scheduler does
+   * not re-place it, but it still pre-charges the assignee's capacity ledger and
+   * anchors dependents on its P/Q. Absent/false means the task is (re)placed. This
+   * is how one-shot generation places only the new leaves while every pre-existing
+   * plan stays put and still constrains the placement.
+   */
+  readonly fixedDailyPlan?: boolean;
   readonly dependencies: readonly EffortScheduleDependencyInput[];
   /**
    * Whether this task is a leaf — a task no other task names as its parent. Only
@@ -75,8 +82,8 @@ export interface EffortScheduleInput {
 
 export interface EffortScheduleResult {
   /**
-   * Recomputed sparse daily plan (ISO-date → minutes) per **unlocked** task.
-   * Locked tasks are absent; their existing plan is authoritative and unchanged.
+   * Recomputed sparse daily plan (ISO-date → minutes) per **placed** task.
+   * Fixed-plan tasks are absent; their existing plan is authoritative and unchanged.
    */
   readonly dailyPlans: ReadonlyMap<string, Readonly<Record<string, number>>>;
 }
@@ -414,17 +421,17 @@ export function scheduleEffortDailyPlans(input: EffortScheduleInput): EffortSche
     }
   };
 
-  // Pass A — locked leaf tasks are immovable facts: record their P/Q and pre-charge
-  // their assignee's ledger before any unlocked task is placed. Non-leaf summary
-  // rows carry no own plan, so they neither span nor charge.
+  // Pass A — fixed-plan leaf tasks are immovable facts: record their P/Q and
+  // pre-charge their assignee's ledger before any placed task is scheduled.
+  // Non-leaf summary rows carry no own plan, so they neither span nor charge.
   const spanById = new Map<string, PlannedSpan>();
   for (const task of input.tasks) {
-    if (!task.dailyPlanLocked || task.isLeaf === false) continue;
+    if (task.fixedDailyPlan !== true || task.isLeaf === false) continue;
     spanById.set(task.id, spanOf(task.dailyPlan));
     if (task.assigneeMemberId !== null) consume(task.assigneeMemberId, task.dailyPlan);
   }
 
-  // Pass B — place unlocked leaf tasks in dependency-topological order.
+  // Pass B — place non-fixed leaf tasks in dependency-topological order.
   const dailyPlans = new Map<string, Record<string, number>>();
   for (const task of topologicalOrder(input.tasks)) {
     if (task.isLeaf === false) {
@@ -435,7 +442,7 @@ export function scheduleEffortDailyPlans(input: EffortScheduleInput): EffortSche
       dailyPlans.set(task.id, {});
       continue;
     }
-    if (task.dailyPlanLocked) continue;
+    if (task.fixedDailyPlan === true) continue;
 
     const calendar = calendarForMember(task.assigneeMemberId);
     const dailyCapacity = capacityForMember(task.assigneeMemberId);

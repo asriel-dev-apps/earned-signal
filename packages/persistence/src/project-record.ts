@@ -55,7 +55,6 @@ export interface TaskRecord {
   /** Basis-point proration weight (0–10000) for template-generated subtasks; null otherwise. */
   readonly prorationWeightBp: number | null;
   readonly dailyPlan: Readonly<Record<string, number>>;
-  readonly dailyPlanLocked: boolean;
   readonly actualStart: string | null;
   readonly actualFinish: string | null;
 }

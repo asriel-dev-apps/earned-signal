@@ -60,6 +60,10 @@
   --overload-line: #e3a09c;
   --overload-ink: #b23b36;
 
+  /* Row-level validation warning (§C-2): a quiet amber row tint + ⚠ marker ink. */
+  --warning-bg: #fdf4e1;
+  --warning-ink: #a86a11;
+
   /* Grouped EVM header bands. Soft, restrained spreadsheet-header fills — the spec
      fixes PV=green, EV=yellow, AC=orange, CV=magenta; 見積り/BAC stay neutral
      (slate / light blue). Label ink stays legible on its fill. */
@@ -128,6 +132,9 @@
     --overload-bg: #35201f;
     --overload-line: #6e3a37;
     --overload-ink: #f0736a;
+
+    --warning-bg: #302711;
+    --warning-ink: #e2b360;
 
     --band-estimate-bg: #262a31;
     --band-estimate-ink: #b7bdc9;
@@ -609,31 +616,22 @@ body {
   background: var(--panel);
 }
 
-.cell--lock {
-  justify-content: center;
-  padding: 0;
-  background: var(--derived-bg);
-}
-.lock-toggle {
+/* Row-level validation warning (Design 0003 §C-2). Non-blocking: a subtle amber
+   tint plus a ⚠ marker hosted in the No. column flags a row whose estimate
+   disagrees with its children or daily plot, or whose assignee is
+   capacity-overloaded on one of its days. Same visual language as the per-cell
+   overload signal; it never prevents saving. */
+.grid-row--warning .pinned-group,
+.grid-row--warning .cell { background: var(--warning-bg); }
+.row-warning {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1;
-  cursor: pointer;
+  color: var(--warning-ink);
+  cursor: help;
 }
-.lock-toggle:disabled { cursor: default; opacity: 0.5; }
-.lock-toggle--unlocked { filter: grayscale(1); opacity: 0.4; }
-.lock-toggle--unlocked:hover:not(:disabled) { opacity: 0.85; background: var(--panel-2); }
-.lock-toggle--locked { border-color: var(--locked-line); background: var(--locked-bg); opacity: 1; }
-.grid-row--locked .pinned-group,
-.grid-row--locked .cell:not(.cell--lock) { background: var(--locked-bg); }
 
 /* ── Daily plot cells ───────────────────────────────────────────────── */
 .daily-cell {
@@ -655,24 +653,22 @@ body {
 .daily-cell--editable:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .grid-row:hover .daily-cell:not(.daily-cell--filled):not(.daily-cell--nonworking):not(.daily-cell--leave) { background: var(--panel-2); }
 .grid-row--parent .daily-cell { background: var(--parent-bg); }
-.grid-row--locked .daily-cell { background: var(--locked-bg); color: var(--status-doing-ink); }
-.grid-row--locked .daily-cell--filled { background: var(--status-doing-bg); color: var(--status-doing-ink); }
 .daily-cell-editor { text-align: center; box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* Non-working day tints. A shared weekend/holiday cell is greyed (grey wins over
    paid-leave); an assignee's paid-leave cell is soft violet. Both are
    non-editable and keep any planned value visible. Defined after the
-   parent/locked/hover fills (equal specificity, so source order wins) but before
+   parent/warning/hover fills (equal specificity, so source order wins) but before
    the overload alert, which stays the strongest signal. */
 .daily-cell.daily-cell--nonworking,
 .grid-row--parent .daily-cell.daily-cell--nonworking,
-.grid-row--locked .daily-cell.daily-cell--nonworking {
+.grid-row--warning .daily-cell.daily-cell--nonworking {
   background: var(--daily-nonworking-bg);
   color: var(--muted);
 }
 .daily-cell.daily-cell--leave,
 .grid-row--parent .daily-cell.daily-cell--leave,
-.grid-row--locked .daily-cell.daily-cell--leave {
+.grid-row--warning .daily-cell.daily-cell--leave {
   background: var(--daily-leave-bg);
   color: var(--daily-leave-ink);
 }
@@ -680,7 +676,7 @@ body {
 /* Cross-project load overlay (half-transparent bar behind the day value) and the
    1-day capacity-overflow highlight. The bar height encodes the assignee's
    other-project minutes as a fraction of their daily capacity; the value sits
-   above it. Overload cells win their background over the locked/parent tints, so
+   above it. Overload cells win their background over the warning/parent tints, so
    this block is defined last. */
 .daily-cell-value {
   position: relative;
@@ -704,7 +700,7 @@ body {
 }
 .daily-load-overlay--overload { background: var(--overload-overlay); }
 .daily-cell.daily-cell--overload,
-.grid-row--locked .daily-cell.daily-cell--overload {
+.grid-row--warning .daily-cell.daily-cell--overload {
   background: var(--overload-bg);
   box-shadow: inset 0 0 0 1px var(--overload-line);
 }

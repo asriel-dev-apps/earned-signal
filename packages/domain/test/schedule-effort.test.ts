@@ -35,7 +35,7 @@ function task(
     assigneeMemberId: overrides.assigneeMemberId ?? null,
     plannedEffortMinutes: overrides.plannedEffortMinutes ?? 0,
     dailyPlan: overrides.dailyPlan ?? {},
-    dailyPlanLocked: overrides.dailyPlanLocked ?? false,
+    fixedDailyPlan: overrides.fixedDailyPlan ?? false,
     dependencies: overrides.dependencies ?? [],
     isLeaf: overrides.isLeaf ?? true,
   };
@@ -123,9 +123,9 @@ describe("scheduleEffortDailyPlans", () => {
     expect(plans.get("T2")).toEqual({ "2026-01-05": 240, "2026-01-06": 240 });
   });
 
-  it("(5) keeps a locked task fixed while its P/Q and capacity still constrain others", () => {
-    // T1 locked on 01-05 (Q = 01-05). T2 FS on T1 ⇒ starts 01-06. T3 (no deps,
-    // same member) is pushed to 01-07 because 01-05 (locked) and 01-06 (T2) are full.
+  it("(5) keeps a fixed-plan task in place while its P/Q and capacity still constrain others", () => {
+    // T1 fixed on 01-05 (Q = 01-05). T2 FS on T1 ⇒ starts 01-06. T3 (no deps,
+    // same member) is pushed to 01-07 because 01-05 (fixed) and 01-06 (T2) are full.
     const plans = run({
       members: [member("m1", 480)],
       tasks: [
@@ -134,7 +134,7 @@ describe("scheduleEffortDailyPlans", () => {
           assigneeMemberId: "m1",
           plannedEffortMinutes: 480,
           dailyPlan: { "2026-01-05": 480 },
-          dailyPlanLocked: true,
+          fixedDailyPlan: true,
         }),
         task("T2", {
           sortOrder: 2,
@@ -145,7 +145,7 @@ describe("scheduleEffortDailyPlans", () => {
         task("T3", { sortOrder: 3, assigneeMemberId: "m1", plannedEffortMinutes: 480 }),
       ],
     });
-    expect(plans.has("T1")).toBe(false); // locked plan untouched, not re-emitted
+    expect(plans.has("T1")).toBe(false); // fixed plan untouched, not re-emitted
     expect(plans.get("T2")).toEqual({ "2026-01-06": 480 });
     expect(plans.get("T3")).toEqual({ "2026-01-07": 480 });
   });

@@ -225,18 +225,31 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           actualEffortMinutes: task.actualEffortMinutes,
           prorationWeightBp: task.prorationWeightBp,
           dailyPlan: task.dailyPlan as Record<string, number>,
-          dailyPlanLocked: task.dailyPlanLocked,
           actualStart: task.actualStart,
           actualFinish: task.actualFinish,
           dependencies: dependenciesByTask.get(task.id) ?? [],
         })),
       };
 
-      // Apply the validated command, then re-run the deterministic capacity-aware
-      // scheduler so every unlocked task's daily plan is auto-placed (D17) before
-      // it is persisted. Locked tasks keep their hand-edited plan. This keeps
-      // M = Σ daily and P/Q consistent with the effort EVM projection.
-      const next = applyEffortSchedule(transition(current));
+      // Apply the validated command. The deterministic scheduler runs only for
+      // `task.generateSubtasks`, and even then it places daily plans for just the
+      // newly-created leaf children as initial values (Design 0003 §C-2); every
+      // pre-existing task's daily plan is left untouched. All other commands
+      // persist the transitioned state verbatim — nothing auto-overwrites a hand
+      // edit, and consistency is surfaced as non-blocking validation warnings.
+      const transitioned = transition(current);
+      let next: ProjectState;
+      if (request.command.type === "task.generateSubtasks") {
+        const existingTaskIds = new Set(current.tasks.map((task) => task.id));
+        const newTaskIds = new Set(
+          transitioned.tasks
+            .filter((task) => !existingTaskIds.has(task.id))
+            .map((task) => task.id),
+        );
+        next = applyEffortSchedule(transitioned, newTaskIds);
+      } else {
+        next = transitioned;
+      }
       const nextTaskById = new Map(next.tasks.map((task) => [task.id, task]));
       const nextMemberById = new Map(next.members.map((member) => [member.id, member]));
       const currentMemberIds = new Set(memberRows.map((member) => member.id));
@@ -333,7 +346,6 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           actualEffortMinutes: task.actualEffortMinutes,
           prorationWeightBp: task.prorationWeightBp,
           dailyPlan: task.dailyPlan,
-          dailyPlanLocked: task.dailyPlanLocked,
           actualStart: task.actualStart,
           actualFinish: task.actualFinish,
         };

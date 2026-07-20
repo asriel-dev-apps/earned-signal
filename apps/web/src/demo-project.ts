@@ -43,14 +43,13 @@ const PHASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const PER_DAY_MINUTES = [60, 120, 180, 240, 300, 360, 420, 480] as const;
 
 // Two mid-week holidays early in the horizon. The scheduler skips them, so
-// auto-placed rows leave those day columns empty while the seeded locked row
-// (below) keeps hand-entered effort on one of them — a visible proof that a
-// locked plan is preserved verbatim and a holiday leaves unlocked cells blank.
+// placed rows leave those day columns empty while the showcase row (below) keeps
+// its hand-entered early-January plan — a stable anchor for the daily-cell tests.
 const DEMO_HOLIDAYS = ["2026-01-07", "2026-01-08"] as const;
 
 // Individual paid-leave (有給) days for the members given their own calendar
-// below. 01-06 and 01-09 coincide with the locked showcase row's columns, so
-// those columns exist regardless of scheduling and the violet paid-leave tint is
+// below. 01-06 and 01-09 coincide with the showcase row's columns, so those
+// columns exist regardless of scheduling and the violet paid-leave tint is
 // guaranteed to show on the paid-leave members' rows; 01-13 adds a third within
 // the same early-January window. All synthetic and unrelated to real people.
 const DEMO_PAID_LEAVE = ["2026-01-06", "2026-01-09", "2026-01-13"] as const;
@@ -60,18 +59,18 @@ const DEMO_PAID_LEAVE = ["2026-01-06", "2026-01-09", "2026-01-13"] as const;
 // members), so they only surface in the full preview.
 const DEMO_PAID_LEAVE_MEMBER_INDEXES = [3, 7] as const;
 
-// One deterministic locked showcase leaf (the very first subtask). Its plan is
-// hand-entered — including effort on a holiday the scheduler would never fill —
-// so applyEffortSchedule leaves it untouched and its FS successors shift after
-// its finish. Σ daily = plannedEffortMinutes so K/M start consistent.
-const LOCKED_DEMO_PLAN: Readonly<Record<string, number>> = {
+// One deterministic showcase leaf (the very first subtask) with a hand-entered
+// early-January plan. It gives the preview and the daily-cell tests a stable,
+// known set of columns (including effort on a holiday the scheduler never fills).
+// Σ daily = plannedEffortMinutes so its estimate and daily plot stay consistent.
+const SHOWCASE_DEMO_PLAN: Readonly<Record<string, number>> = {
   "2026-01-05": 240,
   "2026-01-06": 240,
   "2026-01-07": 180,
   "2026-01-09": 120,
 };
-const LOCKED_DEMO_MINUTES = Object.values(LOCKED_DEMO_PLAN).reduce((sum, value) => sum + value, 0);
-const LOCKED_DEMO_START = "2026-01-05";
+const SHOWCASE_DEMO_MINUTES = Object.values(SHOWCASE_DEMO_PLAN).reduce((sum, value) => sum + value, 0);
+const SHOWCASE_DEMO_START = "2026-01-05";
 
 function buildWorkingDays(start: string, count: number): string[] {
   const days: string[] = [];
@@ -146,7 +145,6 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       actualEffortMinutes: 0,
       prorationWeightBp: null,
       dailyPlan: {},
-      dailyPlanLocked: false,
       actualStart: null,
       actualFinish: null,
       dependencies: [],
@@ -156,8 +154,8 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
     for (let subtaskIndex = 0; subtaskIndex < subtasksPerParent; subtaskIndex += 1) {
       leafCounter += 1;
       const leafId = makeUuid("e", leafCounter);
-      // The first leaf of the first parent is the locked showcase row.
-      const lockedDemo = parentIndex === 0 && subtaskIndex === 0;
+      // The first leaf of the first parent is the deterministic showcase row.
+      const showcaseDemo = parentIndex === 0 && subtaskIndex === 0;
       const span = 1 + Math.floor(random() * 8);
       const perDay = pick(PER_DAY_MINUTES, random);
       const startIndex = Math.floor(random() * (horizon - span));
@@ -165,9 +163,9 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       for (let day = 0; day < span; day += 1) {
         scheduledPlan[workingDays[startIndex + day]!] = perDay;
       }
-      const dailyPlan = lockedDemo ? { ...LOCKED_DEMO_PLAN } : scheduledPlan;
-      const plannedEffortMinutes = lockedDemo ? LOCKED_DEMO_MINUTES : perDay * span;
-      const progressBasisPoints = lockedDemo ? 4_000 : Math.floor(random() * 10_001);
+      const dailyPlan = showcaseDemo ? { ...SHOWCASE_DEMO_PLAN } : scheduledPlan;
+      const plannedEffortMinutes = showcaseDemo ? SHOWCASE_DEMO_MINUTES : perDay * span;
+      const progressBasisPoints = showcaseDemo ? 4_000 : Math.floor(random() * 10_001);
       const actualEffortMinutes = Math.round(
         (plannedEffortMinutes * progressBasisPoints) / 10_000,
       );
@@ -188,7 +186,7 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
         product,
         reviewRef: `REV-${(parentIndex + 1).toString().padStart(4, "0")}`,
         changeRef: `CHG-${(parentIndex + 1).toString().padStart(4, "0")}`,
-        note: lockedDemo ? "Locked plan (hand-edited)" : subtaskIndex % 3 === 0 ? `Note ${leafCounter}` : "",
+        note: showcaseDemo ? "Hand-entered plan" : subtaskIndex % 3 === 0 ? `Note ${leafCounter}` : "",
         contract: `Contract ${(parentIndex % 4) + 1}`,
         assigneeMemberId: members[leafCounter % memberCount]!.id,
         plannedEffortMinutes,
@@ -196,9 +194,8 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
         actualEffortMinutes,
         prorationWeightBp: null,
         dailyPlan,
-        dailyPlanLocked: lockedDemo,
-        actualStart: lockedDemo ? LOCKED_DEMO_START : actualStart,
-        actualFinish: lockedDemo ? null : actualFinish,
+        actualStart: showcaseDemo ? SHOWCASE_DEMO_START : actualStart,
+        actualFinish: showcaseDemo ? null : actualFinish,
         dependencies,
       });
       previousLeafId = leafId;

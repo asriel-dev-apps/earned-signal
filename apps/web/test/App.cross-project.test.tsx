@@ -55,7 +55,7 @@ const seed: ProjectState = (() => {
     if (index === 1) return { ...task, dailyPlan: {} }; // first leaf: no plan
     if (index === 2) {
       // Second leaf → assignee is member index 2 (the synthesizer's loaded member).
-      return { ...task, dailyPlan: capacityPlan, dailyPlanLocked: true };
+      return { ...task, dailyPlan: capacityPlan };
     }
     return task;
   });

@@ -207,12 +207,11 @@ describe("App add task (flat mode)", () => {
   });
 });
 
-describe("App daily-plan lock and hand editing", () => {
-  // The seeded fixture makes the first parent unlocked (auto-scheduled) and its
-  // first leaf the locked showcase row with a hand plan starting 2026-01-05.
-  const parentTask = project.tasks[0]!;
-  const lockedLeaf = project.tasks[1]!;
-  const unlockedLeaf = project.tasks[2]!;
+describe("App daily-plan hand editing (Design 0003 §C-2)", () => {
+  // There is no lock concept anymore: every working-day daily cell is hand-edited
+  // directly. The seeded fixture's first leaf is the deterministic showcase row
+  // with a known early-January plan starting 2026-01-05.
+  const showcaseLeaf = project.tasks[1]!;
 
   async function ready(): Promise<void> {
     await waitFor(() => {
@@ -232,33 +231,15 @@ describe("App daily-plan lock and hand editing", () => {
     });
   }
 
-  it("seeds a locked showcase leaf and an unlocked (scheduler-owned) parent", () => {
-    expect(lockedLeaf.dailyPlanLocked).toBe(true);
-    expect(lockedLeaf.dailyPlan["2026-01-05"]).toBe(240);
-    expect(parentTask.dailyPlanLocked).toBe(false);
-    expect(unlockedLeaf.dailyPlanLocked).toBe(false);
-  });
-
-  it("toggles dailyPlanLocked through the lock control as a task.update", async () => {
-    const { client, execute } = fakeClient();
+  it("has no lock column or lock toggle control", async () => {
+    const { client } = fakeClient();
     render(<App client={client} />);
     await ready();
-
-    const toggle = document.querySelector(
-      `[data-testid="lock-toggle"][data-task-id="${parentTask.id}"]`,
-    ) as HTMLButtonElement;
-    expect(toggle).not.toBeNull();
-    expect(toggle.getAttribute("data-locked")).toBe("false");
-    fireEvent.click(toggle);
-
-    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    expect(execute).toHaveBeenCalledWith(
-      { type: "task.update", taskId: parentTask.id, changes: { dailyPlanLocked: true } },
-      "7",
-    );
+    expect(document.querySelector('[data-testid="lock-toggle"]')).toBeNull();
+    expect(document.querySelector('[data-col="lock"]')).toBeNull();
   });
 
-  it("keeps an unlocked task's daily cell read-only (no inline editor opens)", async () => {
+  it("edits a working-day leaf cell directly and dispatches a task.update with the new plan and no lock flag", async () => {
     const { client, execute } = fakeClient();
     render(<App client={client} />);
     await ready();
@@ -266,29 +247,51 @@ describe("App daily-plan lock and hand editing", () => {
 
     const cell = await waitFor(() => {
       const found = document.querySelector(
-        `[data-daily-row="${parentTask.id}"][data-daily-date="2026-01-05"]`,
+        `[data-daily-row="${showcaseLeaf.id}"][data-daily-date="2026-01-05"]`,
       );
       expect(found).not.toBeNull();
       return found as HTMLElement;
     });
-    expect(cell.getAttribute("aria-readonly")).toBe("true");
+    // Working day ⇒ editable (no aria-readonly), an inline editor opens.
+    expect(cell.getAttribute("aria-readonly")).toBeNull();
     fireEvent.doubleClick(cell);
-    expect(cell.querySelector("input")).toBeNull();
-    expect(execute).not.toHaveBeenCalled();
+    const editor = cell.querySelector("input.daily-cell-editor") as HTMLInputElement;
+    expect(editor).not.toBeNull();
+    fireEvent.change(editor, { target: { value: "5" } });
+    fireEvent.blur(editor);
+
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    // The edit writes the full replacement plan (01-05 → 5h = 300m, other days
+    // verbatim) with NO dailyPlanLocked — every daily cell is hand-edited now.
+    expect(execute).toHaveBeenCalledWith(
+      {
+        type: "task.update",
+        taskId: showcaseLeaf.id,
+        changes: {
+          dailyPlan: {
+            "2026-01-05": 300,
+            "2026-01-06": 240,
+            "2026-01-07": 180,
+            "2026-01-09": 120,
+          },
+        },
+      },
+      "7",
+    );
   });
 
-  it("greys and freezes a locked cell on a shared holiday, keeping its value visible", async () => {
+  it("greys and freezes a leaf cell on a shared holiday, keeping its value visible", async () => {
     const { client, execute } = fakeClient();
     render(<App client={client} />);
     await ready();
     await revealDailyColumns();
 
-    // 2026-01-07 is a default-calendar holiday. Even though the locked showcase
-    // leaf hand-entered 3h (180m) there, the cell is greyed and non-editable —
-    // but the planned value stays visible (only editing is blocked, per §B-5).
+    // 2026-01-07 is a default-calendar holiday. The showcase leaf plans 3h (180m)
+    // there, but the cell is greyed and non-editable — the planned value stays
+    // visible (only editing is blocked, per §B-5).
     const cell = await waitFor(() => {
       const found = document.querySelector(
-        `[data-daily-row="${lockedLeaf.id}"][data-daily-date="2026-01-07"]`,
+        `[data-daily-row="${showcaseLeaf.id}"][data-daily-date="2026-01-07"]`,
       );
       expect(found).not.toBeNull();
       return found as HTMLElement;
@@ -301,43 +304,34 @@ describe("App daily-plan lock and hand editing", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("hand-edits a locked task's daily cell and re-asserts the lock in the command", async () => {
-    const { client, execute } = fakeClient();
+  it("shows a non-blocking row warning when a leaf's estimate disagrees with its daily plot", async () => {
+    // Break the showcase leaf's estimate-vs-daily agreement (L ≠ Σ daily) and
+    // serve that grid: the row must surface a ⚠ marker in its No. column, and
+    // saving is never prevented (the warning is advisory only).
+    const mismatched: ProjectState = {
+      ...project,
+      tasks: project.tasks.map((task) =>
+        task.id === showcaseLeaf.id
+          ? { ...task, plannedEffortMinutes: task.plannedEffortMinutes + 60 }
+          : task,
+      ),
+    };
+    const mismatchedGrid = projectWbsGrid(mismatched);
+    const client: ProjectApiClient = {
+      load: async () => ({ revision: "7", current: mismatched }),
+      grid: async () => mismatchedGrid,
+      execute: vi.fn(async () => ({ revision: "8", replayed: false })),
+    };
     render(<App client={client} />);
     await ready();
-    await revealDailyColumns();
 
-    const cell = await waitFor(() => {
+    const warning = await waitFor(() => {
       const found = document.querySelector(
-        `[data-daily-row="${lockedLeaf.id}"][data-daily-date="2026-01-05"]`,
+        `[data-testid="row-warning"][data-task-id="${showcaseLeaf.id}"]`,
       );
       expect(found).not.toBeNull();
       return found as HTMLElement;
     });
-    fireEvent.doubleClick(cell);
-    const editor = cell.querySelector("input.daily-cell-editor") as HTMLInputElement;
-    expect(editor).not.toBeNull();
-    fireEvent.change(editor, { target: { value: "5" } });
-    fireEvent.blur(editor);
-
-    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    // The edit replaces the full plan (01-05 → 5h = 300m, other days verbatim)
-    // and re-asserts the lock — the D17 "hand-edit is manual-lock" invariant.
-    expect(execute).toHaveBeenCalledWith(
-      {
-        type: "task.update",
-        taskId: lockedLeaf.id,
-        changes: {
-          dailyPlan: {
-            "2026-01-05": 300,
-            "2026-01-06": 240,
-            "2026-01-07": 180,
-            "2026-01-09": 120,
-          },
-          dailyPlanLocked: true,
-        },
-      },
-      "7",
-    );
+    expect(warning.getAttribute("title")).toContain("日別計画");
   });
 });
