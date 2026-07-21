@@ -363,7 +363,7 @@ function validateProject(project: ProjectState): void {
         dependency.lagWorkingDays,
         `Task ${task.id} dependency lag must be a whole number >= 0`,
       );
-      const edge = `${dependency.predecessorId} ${dependency.type}`;
+      const edge = `${dependency.predecessorId}\u0000${dependency.type}`;
       if (seenEdges.has(edge)) {
         throw new Error(`Task ${task.id} has a duplicate dependency edge`);
       }
