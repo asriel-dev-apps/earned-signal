@@ -7,12 +7,14 @@ import {
 } from "@vecta/application";
 import { createDemoProject } from "./demo-project";
 import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
+import { TemplateSection } from "./TemplateSection";
 
-// The master edit screen (Design 0003 §E-2): 工程 / プロダクト / メンバー masters.
-// 工程 and プロダクト are name-only lists (add / rename / delete); メンバー reuses
-// the existing member fields. Every change dispatches the same project command
-// through the same API client the grid uses, so the two screens stay in sync via
-// the server (the single source of truth in connected mode).
+// The master edit screen (Design 0003 §E-2 / §E-1): 工程 / プロダクト / メンバー /
+// サブタスクテンプレート masters. 工程 and プロダクト are name-only lists (add /
+// rename / delete); メンバー reuses the existing member fields; サブタスクテンプレート
+// reuses the shared TemplateSection. Every change dispatches the same project
+// command through the same API client the grid uses, so the screens stay in sync
+// via the server (the single source of truth in connected mode).
 
 type SaveState = "preview" | "loading" | "saved" | "saving" | "error";
 
@@ -343,52 +345,56 @@ export function MasterScreen({ client }: { readonly client?: ProjectApiClient })
   return (
     <div className="app-shell master-shell">
       <header className="app-header">
-        <div>
-          <h1>VECTA</h1>
-          <p className="app-subtitle">マスタ管理 · 工程 / プロダクト / メンバー</p>
-        </div>
+        <p className="app-subtitle">マスタ管理 · 工程 / プロダクト / メンバー / サブタスクテンプレート</p>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
       </header>
       {notice !== null && (
         <div className="master-notice" role="alert" data-testid="master-notice">{notice}</div>
       )}
       <div className="master-body" data-testid="master-screen">
-        <MasterList
-          title="工程"
-          addLabel="工程を追加…"
-          items={project.processes}
+        <div className="master-grid">
+          <MasterList
+            title="工程"
+            addLabel="工程を追加…"
+            items={project.processes}
+            editable={editable}
+            onAdd={(name) =>
+              executeCommand({
+                type: "process.add",
+                process: { id: crypto.randomUUID(), name, sortOrder: nextSortOrder(project.processes) },
+              })
+            }
+            onRename={(id, name) => executeCommand({ type: "process.update", processId: id, changes: { name } })}
+            onDelete={(id) => executeCommand({ type: "process.delete", processId: id })}
+          />
+          <MasterList
+            title="プロダクト"
+            addLabel="プロダクトを追加…"
+            items={project.products}
+            editable={editable}
+            onAdd={(name) =>
+              executeCommand({
+                type: "product.add",
+                product: { id: crypto.randomUUID(), name, sortOrder: nextSortOrder(project.products) },
+              })
+            }
+            onRename={(id, name) => executeCommand({ type: "product.update", productId: id, changes: { name } })}
+            onDelete={(id) => executeCommand({ type: "product.delete", productId: id })}
+          />
+          <MemberList
+            members={project.members}
+            calendars={project.calendars}
+            defaultCalendarId={project.defaultCalendarId}
+            editable={editable}
+            onAdd={(member) => executeCommand({ type: "member.add", member })}
+            onUpdate={(memberId, changes) => executeCommand({ type: "member.update", memberId, changes })}
+            onDelete={(memberId) => executeCommand({ type: "member.delete", memberId })}
+          />
+        </div>
+        <TemplateSection
+          templates={project.templates}
           editable={editable}
-          onAdd={(name) =>
-            executeCommand({
-              type: "process.add",
-              process: { id: crypto.randomUUID(), name, sortOrder: nextSortOrder(project.processes) },
-            })
-          }
-          onRename={(id, name) => executeCommand({ type: "process.update", processId: id, changes: { name } })}
-          onDelete={(id) => executeCommand({ type: "process.delete", processId: id })}
-        />
-        <MasterList
-          title="プロダクト"
-          addLabel="プロダクトを追加…"
-          items={project.products}
-          editable={editable}
-          onAdd={(name) =>
-            executeCommand({
-              type: "product.add",
-              product: { id: crypto.randomUUID(), name, sortOrder: nextSortOrder(project.products) },
-            })
-          }
-          onRename={(id, name) => executeCommand({ type: "product.update", productId: id, changes: { name } })}
-          onDelete={(id) => executeCommand({ type: "product.delete", productId: id })}
-        />
-        <MemberList
-          members={project.members}
-          calendars={project.calendars}
-          defaultCalendarId={project.defaultCalendarId}
-          editable={editable}
-          onAdd={(member) => executeCommand({ type: "member.add", member })}
-          onUpdate={(memberId, changes) => executeCommand({ type: "member.update", memberId, changes })}
-          onDelete={(memberId) => executeCommand({ type: "member.delete", memberId })}
+          executeCommand={executeCommand}
         />
       </div>
     </div>

@@ -1,53 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  applyProjectCommand,
-  type DependencyType,
-  type ProjectCommand,
-  type ProjectState,
-  type SubtaskTemplate,
-  type SubtaskTemplateStep,
+import { useState } from "react";
+import type {
+  DependencyType,
+  ProjectCommand,
+  SubtaskTemplate,
+  SubtaskTemplateStep,
 } from "@vecta/application";
-import { createDemoProject } from "./demo-project";
-import { ProjectApiError, type ProjectApiClient } from "./project-api-client";
 
-// The subtask-template management screen (Design 0003 §E-1). Templates are a
-// project-scoped master: a name plus an ordered list of steps (名称 / 重み% /
-// 依存 / ラグ). Every edit dispatches the same project command the grid uses, so
-// generation (row menu → テンプレートから生成…) and this editor stay in sync via
-// the server (the single source of truth in connected mode). Preview mode edits
-// an in-memory demo without a backend.
-
-type SaveState = "preview" | "loading" | "saved" | "saving" | "error";
+// The subtask-template master (Design 0003 §E-1), rendered as a section inside the
+// マスタ screen. Templates are a project-scoped master: a name plus an ordered list
+// of steps (名称 / 重み% / 依存 / ラグ). Every edit dispatches the same project
+// command the grid uses, so generation (row menu → テンプレートから生成…) and this
+// editor stay in sync via the server (the single source of truth in connected mode).
+// The host screen owns the project state, revision, save lifecycle, and command
+// dispatch; this section is a pure view over `templates` + `executeCommand`.
 
 const DEPENDENCY_TYPES: readonly DependencyType[] = ["FS", "SS", "FF", "SF"];
-
-// Preview (dev/demo only): a small in-memory demo so the template list and its
-// steps are populated without a backend.
-function demoTemplateProject(): ProjectState {
-  return createDemoProject({ parentCount: 8, subtasksPerParent: 3, memberCount: 8 });
-}
-
-const EMPTY_PROJECT: ProjectState = {
-  id: "00000000-0000-4000-8000-000000000000",
-  name: "",
-  projectStart: "2026-01-01",
-  statusDate: "2026-01-01",
-  currency: "JPY",
-  defaultCalendarId: "standard",
-  calendars: [
-    { id: "standard", name: "Standard", workingWeekdays: [1, 2, 3, 4, 5], nonWorkingDates: [] },
-  ],
-  members: [],
-  processes: [],
-  products: [],
-  templates: [],
-  tasks: [],
-};
 
 function orderedTemplates(templates: readonly SubtaskTemplate[]): readonly SubtaskTemplate[] {
   return [...templates].sort(
     (left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id),
   );
+}
+
+function withoutDependency(step: SubtaskTemplateStep): SubtaskTemplateStep {
+  if (step.dependsOnPrev === undefined) return step;
+  return { name: step.name, weightBp: step.weightBp };
 }
 
 /** The step editor for the selected template: 名称 / 重み% / 依存 / ラグ. */
@@ -229,98 +206,27 @@ function StepEditor({
   );
 }
 
-function withoutDependency(step: SubtaskTemplateStep): SubtaskTemplateStep {
-  if (step.dependsOnPrev === undefined) return step;
-  return { name: step.name, weightBp: step.weightBp };
-}
-
-export function TemplateScreen({ client }: { readonly client?: ProjectApiClient }) {
-  const [project, setProject] = useState<ProjectState>(() =>
-    client === undefined ? demoTemplateProject() : EMPTY_PROJECT,
-  );
-  const [revision, setRevision] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>(client === undefined ? "preview" : "loading");
-  const [notice, setNotice] = useState<string | null>(null);
+/**
+ * The サブタスクテンプレート master section (Design 0003 §E-1) shown inside the マスタ
+ * screen. It renders the template list + selected template's step editor and
+ * dispatches the same `template.*` commands the standalone screen used, through the
+ * host screen's `executeCommand`. Selection and the add-draft are local view state.
+ */
+export function TemplateSection({
+  templates,
+  editable,
+  executeCommand,
+}: {
+  readonly templates: readonly SubtaskTemplate[];
+  readonly editable: boolean;
+  readonly executeCommand: (command: ProjectCommand) => void;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const saving = useRef(false);
 
-  const reload = useCallback(async () => {
-    if (client === undefined) return;
-    const workspace = await client.load();
-    setProject(workspace.current);
-    setRevision(workspace.revision);
-  }, [client]);
-
-  useEffect(() => {
-    if (client === undefined) return;
-    let active = true;
-    setSaveState("loading");
-    reload()
-      .then(() => {
-        if (active) setSaveState("saved");
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setSaveState("error");
-        setNotice(error instanceof Error ? error.message : "The project could not be loaded");
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, reload]);
-
-  const executeCommand = useCallback(
-    (command: ProjectCommand): void => {
-      if (saving.current) return;
-      const previousProject = project;
-      let candidate: ProjectState;
-      try {
-        candidate = applyProjectCommand(project, command);
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : "The edit could not be applied");
-        return;
-      }
-      setProject(candidate);
-      setNotice(null);
-      if (client !== undefined && revision !== null) {
-        const backend = client;
-        saving.current = true;
-        setSaveState("saving");
-        backend
-          .execute(command, revision)
-          .then(async (result) => {
-            setRevision(result.revision);
-            setSaveState("saved");
-            try {
-              await reload();
-            } catch {
-              setNotice("Saved, but the templates could not be refreshed. Reload to retrieve them.");
-            }
-          })
-          .catch((error: unknown) => {
-            setProject(previousProject);
-            setSaveState("error");
-            if (error instanceof ProjectApiError && error.code === "VERSION_CONFLICT") {
-              setNotice("This project changed elsewhere; your edit was not saved. Reload and retry.");
-            } else {
-              setNotice(error instanceof Error ? error.message : "The edit could not be saved");
-            }
-          })
-          .finally(() => {
-            saving.current = false;
-          });
-      }
-    },
-    [client, project, revision, reload],
-  );
-
-  const editable = saveState === "preview" || saveState === "saved";
-  const templates = orderedTemplates(project.templates);
-  const selected =
-    templates.find((template) => template.id === selectedId) ?? templates[0] ?? null;
-
-  const nextSortOrder = project.templates.reduce((max, item) => Math.max(max, item.sortOrder), -1) + 1;
+  const ordered = orderedTemplates(templates);
+  const selected = ordered.find((template) => template.id === selectedId) ?? ordered[0] ?? null;
+  const nextSortOrder = templates.reduce((max, item) => Math.max(max, item.sortOrder), -1) + 1;
 
   const commitAdd = () => {
     const name = draft.trim();
@@ -335,22 +241,13 @@ export function TemplateScreen({ client }: { readonly client?: ProjectApiClient 
   };
 
   return (
-    <div className="app-shell master-shell">
-      <header className="app-header">
-        <div>
-          <h1>VECTA</h1>
-          <p className="app-subtitle">テンプレート管理 · サブタスクテンプレート</p>
-        </div>
-        <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
-      </header>
-      {notice !== null && (
-        <div className="master-notice" role="alert" data-testid="template-notice">{notice}</div>
-      )}
+    <section className="master-section master-templates" data-testid="master-section-template">
+      <h2 className="master-title">サブタスクテンプレート</h2>
       <div className="template-body" data-testid="template-screen">
-        <section className="master-section template-list-section">
-          <h2 className="master-title">テンプレート</h2>
+        <section className="master-subsection template-list-section">
+          <h3 className="master-subtitle">テンプレート</h3>
           <ul className="master-list">
-            {templates.map((template) => (
+            {ordered.map((template) => (
               <li
                 className={`template-list-row${template.id === selected?.id ? " template-list-row--active" : ""}`}
                 key={template.id}
@@ -398,7 +295,7 @@ export function TemplateScreen({ client }: { readonly client?: ProjectApiClient 
                 </button>
               </li>
             ))}
-            {templates.length === 0 && <li className="master-empty">（未登録）</li>}
+            {ordered.length === 0 && <li className="master-empty">（未登録）</li>}
           </ul>
           <div className="master-add">
             <input
@@ -423,12 +320,12 @@ export function TemplateScreen({ client }: { readonly client?: ProjectApiClient 
             </button>
           </div>
         </section>
-        <section className="master-section template-editor-section" data-testid="template-editor">
+        <section className="master-subsection template-editor-section" data-testid="template-editor">
           {selected === null ? (
             <p className="master-empty">左のリストからテンプレートを選択してください。</p>
           ) : (
             <>
-              <h2 className="master-title">{selected.name}</h2>
+              <h3 className="master-subtitle">{selected.name}</h3>
               <StepEditor
                 steps={selected.subtasks}
                 editable={editable}
@@ -444,6 +341,6 @@ export function TemplateScreen({ client }: { readonly client?: ProjectApiClient 
           )}
         </section>
       </div>
-    </div>
+    </section>
   );
 }

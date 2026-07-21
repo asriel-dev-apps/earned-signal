@@ -162,34 +162,95 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-.app-shell {
+/* The full-viewport shell: the unified app bar sits above the active screen,
+   which fills the remaining height and owns its own scroll. */
+.app-frame {
   display: flex;
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────── */
-.app-header {
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── App bar (unified top chrome: wordmark · nav · account) ─────────────
+   One in-flow header row shared across screens (replaces the old floating auth
+   pill + per-screen wordmark). The Gantt mark + wordmark sit left, the editorial
+   nav follows a hairline divider, and the account cluster floats right. Surfaces
+   stay quiet (panel + hairline) so the data below remains the loud thing. */
+.app-bar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 20px;
+  gap: 20px;
+  height: 54px;
+  padding: 0 20px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 16px;
+.app-bar__brand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 20px;
+  border-right: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.app-bar__mark { display: block; }
+
+.app-bar__wordmark {
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.13em;
   color: var(--ink);
 }
 
+.app-bar__account {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-signout {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.auth-signout:hover { color: var(--ink); background: var(--accent-soft); }
+.auth-signout:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ── Screen context strip (subtitle + save badge) ──────────────────────
+   A recessed secondary row under the app bar; carries each screen's contextual
+   subtitle, so the wordmark can live once in the bar above it. */
+.app-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 20px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+
 .app-subtitle {
-  margin: 3px 0 0;
+  margin: 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -743,21 +804,11 @@ body {
   pointer-events: none;
 }
 
-/* ── Google auth control ────────────────────────────────────────────── */
-.auth-bar {
-  position: fixed;
-  top: 10px;
-  right: 16px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
+/* ── Google auth control (login button + app-bar identity) ─────────────── */
 .auth-identity {
   font-size: 12px;
   color: var(--muted);
-  max-width: 220px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -772,12 +823,6 @@ body {
   background: var(--accent);
   color: var(--on-accent);
   cursor: pointer;
-}
-
-.auth-button--ghost {
-  background: var(--panel);
-  color: var(--accent-strong);
-  border-color: var(--line-strong);
 }
 
 .auth-button:hover { filter: brightness(1.04); }
@@ -836,46 +881,57 @@ body {
   color: var(--muted);
 }
 
-/* ── Top-bar nav (Design 0003 §E-2) ─────────────────────────────────── */
+/* ── App-bar nav (Design 0003 §E-2): editorial underline tabs ───────────
+   Muted text with an accent underline on the active view — no solid block. The
+   strip overlaps the bar's bottom hairline so the active underline reads as a tab
+   hanging off the bar, tying the nav to the screen it reveals below. */
 .nav-tabs {
   display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--line-strong);
+  align-items: stretch;
+  gap: 22px;
+  height: 100%;
+  margin-bottom: -1px;
 }
 
 .nav-tab {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 1px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   border: none;
-  border-radius: 6px;
+  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
 }
 
-.nav-tab:hover { color: var(--accent-strong); background: var(--accent-soft); }
+.nav-tab:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+.nav-tab:focus-visible { outline: none; color: var(--ink); box-shadow: var(--ring); border-radius: 3px; }
 
-.nav-tab--active {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.nav-tab--active:hover { color: var(--on-accent); background: var(--accent); filter: brightness(1.04); }
+.nav-tab--active { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.nav-tab--active:hover { color: var(--ink); border-bottom-color: var(--accent); }
 
 /* ── Master edit screen (Design 0003 §E-2) ──────────────────────────── */
 .master-shell { overflow-y: auto; }
 
 .master-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1120px;
+}
+
+/* The name-only masters (工程 / プロダクト / メンバー) sit in a responsive row;
+   サブタスクテンプレート spans full width below them. */
+.master-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
   align-items: start;
-  padding: 20px;
-  max-width: 1120px;
 }
 
 .master-notice {
@@ -988,14 +1044,25 @@ body {
   padding: 7px 10px;
 }
 
-/* ── Template edit screen (Design 0003 §E-1) ────────────────────────── */
+/* ── サブタスクテンプレート section (Design 0003 §E-1, inside マスタ) ───────
+   The template list + selected step editor, nested as the マスタ screen's 4th
+   section. Two columns (list | editor) below the section heading. */
+.master-subsection { min-width: 0; }
+
+.master-subtitle {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
 .template-body {
   display: grid;
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
-  padding: 20px;
-  max-width: 1120px;
+  margin-top: 12px;
 }
 
 .template-list-row {

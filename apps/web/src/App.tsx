@@ -1532,12 +1532,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div>
-          <h1>VECTA</h1>
-          <p className="app-subtitle">
-            {project.name ? `${project.name} · ` : ""}基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {planDays.length} 計画日
-          </p>
-        </div>
+        <p className="app-subtitle">
+          {project.name ? `${project.name} · ` : ""}基準日 {grid.statusDate} · {rows.length.toLocaleString()} タスク · {planDays.length} 計画日
+        </p>
         <div className={`save-badge save-badge--${saveState}`} data-testid="save-state">{saveState}</div>
       </header>
 
