@@ -22,10 +22,11 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
 
 ## Current live state
 
-- **P0–P2 COMPLETE and DEPLOYED**, plus header + login redesigns and **P3 F-1**. Live:
-  **https://vecta.tt-dev.workers.dev** (worker `vecta`, worker version **`826cbd89`** = latest F-1
-  deploy). Auth = Google OIDC; persistence = Neon serverless (`DATABASE_URL` secret). After a deploy,
-  allow **~30 s propagation** before the served `index-*.js` hash matches the build.
+- **design 0003 FULLY COMPLETE and DEPLOYED** (P0–P3), plus the header + login redesigns and the
+  theme toggle. Live: **https://vecta.tt-dev.workers.dev** (worker `vecta`, worker version
+  **`13c29cb5`** = latest G-1 deploy). Auth = Google OIDC; persistence = Neon serverless
+  (`DATABASE_URL` secret). After a deploy, allow **~30 s propagation** before the served
+  `index-*.js` hash matches the build (verify the hash, not just the version id).
 - **DB schema at migration 0005** (Neon, prod): `tasks` model + `members` + project-scoped masters
   `processes`/`products` + `subtask_templates`; review/change refs and `daily_plan_locked` dropped.
 - **Prod project holds 48 synthetic test tasks** (8 phases × 5 subtasks) + 8 processes / 6 products /
@@ -46,11 +47,15 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   live Neon** (verified: 48 tasks → seq 1..48, all unique, `next_task_seq`=49); 7 migrations applied.
   Assigned at creation, never renumbered (gaps ok, structural via seq excluded from updates),
   tasks+subtasks share the counter.
-- **P3 — G-1 IN PROGRESS** (a subagent): member daily-total bottom panel (option a: rows=members,
-  day-axis heatmap aligned + horizontal-scroll synced with the grid, capacity-overflow red, toggle;
-  include ExternalLoad in the sums). Frontend-only (App.tsx/styles.css) — no schema/migration.
-- **Performance / real-time** (design 0004): DEFERRED — align with the user on the fundamentals
-  (Phase 0 free quick-wins vs Phase 1 Durable-Object real-time; cost/free tradeoff) before building.
+- **P3 — G-1 DONE + deployed** (`da764ea`, worker `13c29cb5`): member daily-total bottom panel —
+  rows=members, columns=the grid's own dayVirtualizer (pixel-aligned), per-day Σ dailyPlan +
+  ExternalLoad shown in hours, capacity-overflow red (reuses `detectOverloads`/`overloadByKey`),
+  horizontal-scroll mirrored with the grid, quiet "メンバー日次負荷" toggle (closed by default).
+- **→ design 0003 is now fully implemented + live. Remaining work is NOT in 0003:**
+- **Performance / real-time** (design 0004): the user's top priority — DEFERRED pending **detailed
+  alignment with the user on the fundamentals BEFORE building** (Phase 0 free quick-wins vs Phase 1
+  Durable-Object real-time; the "無料/最小コスト" constraint; the open questions in 0004). Their words:
+  抜本的な部分は細部まですり合わせてから、方針が決まれば最後まで走り切る。
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
   adopted (deploy is still manual). `deploy.yml` is manual-only + main-only + non-functional (needs
   GH secrets/vars).
