@@ -30,6 +30,7 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
   return {
     parentId: null,
     sortOrder: 0,
+    seq: 1,
     name: "Task",
     processId: null,
     productId: null,
@@ -74,6 +75,7 @@ function baseProject(parentEffortMinutes: number): ProjectState {
         plannedEffortMinutes: parentEffortMinutes,
       }),
     ],
+    nextTaskSeq: 2,
   };
 }
 

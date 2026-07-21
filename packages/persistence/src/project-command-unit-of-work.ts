@@ -133,6 +133,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           statusDate: projects.statusDate,
           currency: projects.currency,
           defaultCalendarId: projects.defaultCalendarId,
+          nextTaskSeq: projects.nextTaskSeq,
         })
         .from(projects)
         .where(and(eq(projects.tenantId, request.tenantId), eq(projects.id, request.projectId)))
@@ -252,10 +253,12 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           sortOrder: template.sortOrder,
           subtasks: template.subtasks as readonly SubtaskTemplateStep[],
         })),
+        nextTaskSeq: projectRow.nextTaskSeq,
         tasks: taskRows.map((task) => ({
           id: task.id,
           parentId: task.parentTaskId,
           sortOrder: task.sortOrder,
+          seq: task.seq,
           name: task.name,
           processId: task.processId,
           productId: task.productId,
@@ -498,6 +501,9 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       for (const task of next.tasks) {
         const values = {
           sortOrder: task.sortOrder,
+          // Immutable display No.: written once at insert and re-set to the same
+          // value on update, so a reorder/edit never renumbers a task (§F-1).
+          seq: task.seq,
           name: task.name,
           processId: task.processId,
           productId: task.productId,
@@ -563,9 +569,13 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       }
 
       const resultRevision = actualRevision + 1n;
+      // Advance the per-project display-No. counter transactionally alongside the
+      // revision bump, under the project row lock held above (§F-1). A task.add or
+      // generateSubtasks batch leaves `next.nextTaskSeq` ahead by the number of
+      // tasks created; every other command leaves it unchanged.
       await transaction
         .update(projects)
-        .set({ revision: resultRevision, updatedAt: sql`now()` })
+        .set({ revision: resultRevision, nextTaskSeq: next.nextTaskSeq, updatedAt: sql`now()` })
         .where(
           and(
             eq(projects.tenantId, request.tenantId),

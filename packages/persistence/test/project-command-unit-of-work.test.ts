@@ -135,7 +135,8 @@ describe("PostgresProjectCommandUnitOfWork", () => {
 
   it("adds a task with hierarchy and typed dependencies", async () => {
     const newTaskId = "e0000000-0000-4000-8000-0000000fffff";
-    const task: ProjectTask = {
+    // The client never supplies the display No.; the server assigns it (§F-1).
+    const task: Omit<ProjectTask, "seq"> = {
       id: newTaskId,
       parentId: parentTask.id,
       sortOrder: 9_000,
@@ -172,7 +173,11 @@ describe("PostgresProjectCommandUnitOfWork", () => {
       parentTaskId: parentTask.id,
       name: "Post-launch review",
       assigneeMemberId: demoProjectRecord.members[0]!.id,
+      // The server assigned the display No. from the project counter and advanced
+      // it (§F-1): the new task takes the seed's nextTaskSeq, now bumped by one.
+      seq: demoProjectRecord.project.nextTaskSeq,
     });
+    expect(reloaded?.project.nextTaskSeq).toBe(demoProjectRecord.project.nextTaskSeq + 1);
     expect(
       reloaded?.dependencies
         .filter((dependency) => dependency.successorTaskId === newTaskId)

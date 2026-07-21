@@ -40,6 +40,7 @@ const EMPTY_PROJECT: ProjectState = {
   products: [],
   templates: [],
   tasks: [],
+  nextTaskSeq: 1,
 };
 
 /** A name-only master list (工程 / プロダクト): add / rename / delete. */

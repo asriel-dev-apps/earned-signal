@@ -11,6 +11,7 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
   return {
     parentId: null,
     sortOrder: 0,
+    seq: 1,
     name: "Task",
     processId: null,
     productId: null,
@@ -46,11 +47,12 @@ const project: ProjectState = {
   products: [],
   templates: [],
   tasks: [
-    makeTask({ id: "task-1", sortOrder: 0, name: "Phase A" }),
+    makeTask({ id: "task-1", sortOrder: 0, seq: 1, name: "Phase A" }),
     makeTask({
       id: "task-2",
       parentId: "task-1",
       sortOrder: 1,
+      seq: 2,
       name: "Subtask 1.1",
       assigneeMemberId: "member-1",
       plannedEffortMinutes: 480, // L = 8 h
@@ -59,9 +61,16 @@ const project: ProjectState = {
       dailyPlan: { "2026-01-13": 240, "2026-01-14": 240 }, // M = 8 h, N = 4 h
     }),
   ],
+  nextTaskSeq: 3,
 };
 
 describe("projectWbsGrid", () => {
+  it("surfaces each task's immutable display No. on the grid row (§F-1)", () => {
+    const rows = projectWbsGrid(project).rows;
+    expect(rows.find((row) => row.id === "task-1")!.seq).toBe(1);
+    expect(rows.find((row) => row.id === "task-2")!.seq).toBe(2);
+  });
+
   it("returns one row per task with derived columns equal to the §2 formulas", () => {
     const projection = projectWbsGrid(project);
     expect(projection.rows).toHaveLength(2);

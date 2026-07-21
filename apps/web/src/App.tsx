@@ -182,6 +182,15 @@ function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/**
+ * The No. column shows the task's immutable per-project display number
+ * (Design 0003 §F-1), zero-padded to 4 digits (e.g. `0001`, `0042`) — never the
+ * render-order row position.
+ */
+function formatSeq(seq: number): string {
+  return String(seq).padStart(4, "0");
+}
+
 function processHue(process: string): number {
   let hash = 0;
   for (let index = 0; index < process.length; index += 1) {
@@ -376,10 +385,11 @@ function DndRow({
   });
 }
 
-function displayValue(column: MetaColumn, row: WbsGridTaskRow, index: number): string {
+function displayValue(column: MetaColumn, row: WbsGridTaskRow): string {
   switch (column.kind) {
     case "index":
-      return String(index + 1);
+      // The immutable display No. (§F-1), not the render-order row position.
+      return formatSeq(row.seq);
     case "text":
       return String(row[column.field as keyof WbsGridTaskRow] ?? "");
     case "assignee":
@@ -512,6 +522,7 @@ const EMPTY_PROJECT: ProjectState = {
   products: [],
   templates: [],
   tasks: [],
+  nextTaskSeq: 1,
 };
 
 function demoProjectScheduled(): ProjectState {
@@ -1050,7 +1061,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         return;
       }
       const sortOrder = rows.reduce((max, row) => Math.max(max, row.sortOrder), -1) + 1;
-      const task: ProjectTask = {
+      // The display No. (`seq`) is assigned server-authoritatively by
+      // applyProjectCommand from the project counter (§F-1) — the client never
+      // supplies it. The optimistic apply below fills in a provisional No. from
+      // the local `nextTaskSeq`, reconciled to the server's value on reload.
+      const task: Omit<ProjectTask, "seq"> = {
         id: crypto.randomUUID(),
         parentId: draft.parentId,
         sortOrder,
@@ -1230,7 +1245,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     const row = taskRowAt(selected.rowIndex);
     if (column === undefined || row === undefined || navigator.clipboard === undefined) return;
     void navigator.clipboard
-      .writeText(displayValue(column, row, selected.rowIndex))
+      .writeText(displayValue(column, row))
       .catch(() => undefined);
   }, [selected, taskRowAt]);
 
@@ -1370,7 +1385,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 ⚠
               </span>
             )}
-            <span className="row-no">{rowIndex + 1}</span>
+            <span className="row-no">{formatSeq(row.seq)}</span>
           </span>
           <button
             type="button"
@@ -1452,7 +1467,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             {rollupText}
           </span>
         ) : (
-          <span className="cell-text">{displayValue(column, row, rowIndex)}</span>
+          <span className="cell-text">{displayValue(column, row)}</span>
         )}
       </div>
     );
@@ -1479,7 +1494,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           data-col={column.id}
           onMouseDown={() => setSelected({ rowIndex, colIndex })}
         >
-          <span className="row-no">{rowIndex + 1}</span>
+          {/* A draft row has no task yet, so it carries no display No. (§F-1); the
+              number appears once the draft is committed and a task is created. */}
+          <span className="row-no" />
         </div>
       );
     }

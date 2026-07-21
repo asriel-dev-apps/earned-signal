@@ -102,6 +102,7 @@ export class ProjectRepository {
         statusDate: projects.statusDate,
         defaultCalendarId: projects.defaultCalendarId,
         revision: projects.revision,
+        nextTaskSeq: projects.nextTaskSeq,
       })
       .from(projects)
       .innerJoin(tenants, eq(tenants.id, projects.tenantId))
@@ -169,6 +170,7 @@ export class ProjectRepository {
         statusDate: projectHeader.statusDate,
         defaultCalendarId: projectHeader.defaultCalendarId,
         revision: projectHeader.revision,
+        nextTaskSeq: projectHeader.nextTaskSeq,
       },
       calendars: calendarRows.map((row) =>
         withoutGeneratedFields(row, ["createdAt", "updatedAt"]),

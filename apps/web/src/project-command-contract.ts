@@ -133,7 +133,9 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("template.delete"), templateId: UuidSchema }),
 ]);
 
-function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
+// The wire never carries `seq`: the display No. is assigned server-side from the
+// project counter (§F-1), so the command task omits it.
+function toTask(task: z.infer<typeof TaskSchema>): Omit<ProjectTask, "seq"> {
   return {
     id: task.id,
     parentId: task.parentId,
@@ -312,7 +314,7 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
   return command;
 }
 
-function fromTask(task: ProjectTask): z.infer<typeof TaskSchema> {
+function fromTask(task: Omit<ProjectTask, "seq">): z.infer<typeof TaskSchema> {
   return {
     id: task.id,
     parentId: task.parentId,

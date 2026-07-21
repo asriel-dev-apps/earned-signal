@@ -64,6 +64,8 @@ export interface WbsGridTaskRow {
   readonly id: string;
   readonly parentId: string | null;
   readonly sortOrder: number;
+  /** Immutable per-project display No. (Design 0003 §F-1); shown in the No. column. */
+  readonly seq: number;
   // Meta columns B/C/D-F/E/G/H/I/J.
   readonly name: string;
   readonly processId: string | null;
@@ -169,6 +171,7 @@ export function projectWbsGrid(
         id: task.id,
         parentId: task.parentId,
         sortOrder: task.sortOrder,
+        seq: task.seq,
         name: task.name,
         processId: task.processId,
         productId: task.productId,

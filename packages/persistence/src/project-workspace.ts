@@ -51,10 +51,12 @@ export function toProjectState(record: PersistedProjectRecord): ProjectState {
       sortOrder,
       subtasks: subtasks.map((step) => ({ ...step })),
     })),
+    nextTaskSeq: record.project.nextTaskSeq,
     tasks: record.tasks.map((task) => ({
       id: task.id,
       parentId: task.parentTaskId,
       sortOrder: task.sortOrder,
+      seq: task.seq,
       name: task.name,
       processId: task.processId,
       productId: task.productId,

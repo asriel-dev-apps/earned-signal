@@ -15,6 +15,8 @@ export interface ProjectRecord {
   readonly statusDate: string;
   readonly defaultCalendarId: string;
   readonly revision: bigint;
+  /** Next per-project display No. to hand out (Design 0003 §F-1). */
+  readonly nextTaskSeq: number;
 }
 
 export interface ProjectCalendarRecord {
@@ -76,6 +78,8 @@ export interface TaskRecord {
   readonly projectId: string;
   readonly parentTaskId: string | null;
   readonly sortOrder: number;
+  /** Immutable per-project display No. (Design 0003 §F-1). */
+  readonly seq: number;
   readonly name: string;
   readonly processId: string | null;
   readonly productId: string | null;

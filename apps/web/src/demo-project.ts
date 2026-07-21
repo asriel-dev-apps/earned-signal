@@ -181,6 +181,9 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
 
   const tasks: ProjectTask[] = [];
   let sortOrder = 0;
+  // Shared per-project display-No. counter (§F-1): every task and subtask, in
+  // creation order, takes the next value; `nextTaskSeq` below is max + 1.
+  let nextSeq = 1;
   let leafCounter = 0;
 
   for (let parentIndex = 0; parentIndex < parentCount; parentIndex += 1) {
@@ -191,6 +194,7 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       id: parentId,
       parentId: null,
       sortOrder: sortOrder++,
+      seq: nextSeq++,
       name: `Phase ${phase} deliverable ${parentIndex + 1}`,
       processId: processIdByName.get(`Phase ${phase}`)!,
       productId: productIdByName.get(product)!,
@@ -238,6 +242,7 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
         id: leafId,
         parentId,
         sortOrder: sortOrder++,
+        seq: nextSeq++,
         name: `Subtask ${parentIndex + 1}.${subtaskIndex + 1}`,
         processId: processIdByName.get(`Phase ${phase}`)!,
         productId: productIdByName.get(product)!,
@@ -285,5 +290,6 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
     products,
     templates,
     tasks,
+    nextTaskSeq: nextSeq,
   };
 }

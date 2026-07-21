@@ -20,6 +20,7 @@ const project: ProjectState = {
       id: "task-1",
       parentId: null,
       sortOrder: 0,
+      seq: 1,
       name: "Subtask 1.1",
       processId: null,
       productId: null,
@@ -36,6 +37,7 @@ const project: ProjectState = {
       dependencies: [],
     },
   ],
+  nextTaskSeq: 2,
 };
 
 describe("member commands", () => {

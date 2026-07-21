@@ -45,6 +45,14 @@ export interface ProjectTask {
   readonly id: string;
   readonly parentId: string | null;
   readonly sortOrder: number;
+  /**
+   * Immutable per-project display No. (Design 0003 §F-1). Assigned from the
+   * project's {@link ProjectState.nextTaskSeq} at creation and never renumbered
+   * on reorder or delete (gaps are allowed). Tasks and subtasks share the one
+   * per-project counter. The internal key stays {@link ProjectTask.id}; `seq` is
+   * a display number only.
+   */
+  readonly seq: number;
   readonly name: string;
   readonly processId: string | null;
   readonly productId: string | null;
@@ -79,6 +87,13 @@ export interface ProjectState {
   readonly products: readonly ProjectProduct[];
   readonly templates: readonly SubtaskTemplate[];
   readonly tasks: readonly ProjectTask[];
+  /**
+   * Next per-project display No. to hand out (Design 0003 §F-1). A task.add or
+   * each task.generateSubtasks child takes this value as its `seq`; the counter
+   * then advances by the number of tasks created, so a batch of N consumes N
+   * numbers and a delete never rewinds it (gaps persist).
+   */
+  readonly nextTaskSeq: number;
 }
 
 /**
@@ -97,13 +112,16 @@ export function leafTaskIds(tasks: readonly ProjectTask[]): ReadonlySet<string> 
 
 export interface AddTaskCommand {
   readonly type: "task.add";
-  readonly task: ProjectTask;
+  // The client never supplies `seq`: the display No. is assigned server-side from
+  // the project's counter (Design 0003 §F-1). `applyProjectCommand` fills it in.
+  readonly task: Omit<ProjectTask, "seq">;
 }
 
 export interface UpdateTaskCommand {
   readonly type: "task.update";
   readonly taskId: string;
-  readonly changes: Partial<Omit<ProjectTask, "id">>;
+  // `seq` is immutable (Design 0003 §F-1), so it can never be a change target.
+  readonly changes: Partial<Omit<ProjectTask, "id" | "seq">>;
 }
 
 export interface DeleteTaskCommand {
@@ -332,6 +350,9 @@ function validateParentHierarchy(project: ProjectState, taskIds: ReadonlySet<str
 }
 
 function validateProject(project: ProjectState): void {
+  if (!Number.isInteger(project.nextTaskSeq) || project.nextTaskSeq < 1) {
+    throw new Error("Project next display number must be a whole number >= 1");
+  }
   validateMembers(project);
   validateProcesses(project);
   validateProducts(project);
@@ -351,6 +372,9 @@ function validateProject(project: ProjectState): void {
   for (const task of project.tasks) {
     if (task.name.trim().length === 0) {
       throw new Error(`Task ${task.id} requires a name`);
+    }
+    if (!Number.isInteger(task.seq) || task.seq < 1) {
+      throw new Error(`Task ${task.id} display number must be a whole number >= 1`);
     }
     validateWholeNonNegative(task.sortOrder, `Task ${task.id} sort order must be a whole number >= 0`);
     validateWholeNonNegative(
@@ -443,7 +467,7 @@ function validateProject(project: ProjectState): void {
 function generateSubtaskTasks(
   state: ProjectState,
   command: GenerateSubtasksCommand,
-): ProjectTask[] {
+): Omit<ProjectTask, "seq">[] {
   const parent = state.tasks.find((task) => task.id === command.parentTaskId);
   if (parent === undefined) {
     throw new Error(`Unknown parent task: ${command.parentTaskId}`);
@@ -461,7 +485,7 @@ function generateSubtaskTasks(
     deriveSubtaskId(parent.id, index),
   );
 
-  return template.subtasks.map((step, index): ProjectTask => ({
+  return template.subtasks.map((step, index): Omit<ProjectTask, "seq"> => ({
     id: childIds[index]!,
     parentId: parent.id,
     sortOrder: baseSortOrder + index,
@@ -539,7 +563,15 @@ export function applyProjectCommand(
 ): ProjectState {
   let next: ProjectState;
   if (command.type === "task.add") {
-    next = { ...state, tasks: [...state.tasks, command.task] };
+    // Assign the immutable display No. from the project counter, then advance it
+    // (Design 0003 §F-1). Server-authoritative: any client-supplied value is
+    // impossible (AddTaskCommand.task omits `seq`), and the optimistic client
+    // runs this same path against its local counter for a provisional No.
+    next = {
+      ...state,
+      tasks: [...state.tasks, { ...command.task, seq: state.nextTaskSeq }],
+      nextTaskSeq: state.nextTaskSeq + 1,
+    };
   } else if (command.type === "task.delete") {
     if (!state.tasks.some((task) => task.id === command.taskId)) {
       throw new Error(`Unknown task: ${command.taskId}`);
@@ -566,7 +598,15 @@ export function applyProjectCommand(
       ),
     };
   } else if (command.type === "task.generateSubtasks") {
-    next = { ...state, tasks: [...state.tasks, ...generateSubtaskTasks(state, command)] };
+    // Each generated child draws the next display No. from the shared per-project
+    // counter (tasks and subtasks are one sequence); the counter advances by the
+    // number of children, so the batch consumes that many numbers (Design §F-1).
+    let seq = state.nextTaskSeq;
+    const children = generateSubtaskTasks(state, command).map((child): ProjectTask => ({
+      ...child,
+      seq: seq++,
+    }));
+    next = { ...state, tasks: [...state.tasks, ...children], nextTaskSeq: seq };
   } else if (command.type === "member.add") {
     next = { ...state, members: [...state.members, command.member] };
   } else if (command.type === "member.update") {

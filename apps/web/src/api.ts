@@ -116,6 +116,7 @@ const TaskResponseSchema = z.object({
   id: UuidSchema,
   parentId: UuidSchema.nullable(),
   sortOrder: z.number().int(),
+  seq: z.number().int(),
   name: z.string(),
   processId: UuidSchema.nullable(),
   productId: UuidSchema.nullable(),
@@ -144,6 +145,7 @@ const ProjectStateResponseSchema = z.object({
   products: z.array(MasterResponseSchema),
   templates: z.array(TemplateResponseSchema),
   tasks: z.array(TaskResponseSchema),
+  nextTaskSeq: z.number().int(),
 });
 
 const WorkspaceResponseSchema = z
@@ -167,6 +169,7 @@ const WbsGridRowSchema = z.object({
   id: UuidSchema,
   parentId: UuidSchema.nullable(),
   sortOrder: z.number().int(),
+  seq: z.number().int(),
   name: z.string(),
   processId: UuidSchema.nullable(),
   productId: UuidSchema.nullable(),
@@ -240,6 +243,7 @@ function projectStateResponse(project: ProjectStateView): z.infer<typeof Project
       dailyPlan: { ...task.dailyPlan },
       dependencies: task.dependencies.map((dependency) => ({ ...dependency })),
     })),
+    nextTaskSeq: project.nextTaskSeq,
   };
 }
 

@@ -156,6 +156,9 @@ export function createSeedProjectRecord(
   const tasks: TaskRecord[] = [];
   const dependencies: TaskDependencyRecord[] = [];
   let sortOrder = 0;
+  // Shared per-project display-No. counter (§F-1): every task and subtask, in
+  // creation order, takes the next value; `nextTaskSeq` below is max + 1.
+  let nextSeq = 1;
   let leafCounter = 0;
   let dependencyCounter = 0;
 
@@ -169,6 +172,7 @@ export function createSeedProjectRecord(
       projectId,
       parentTaskId: null,
       sortOrder: sortOrder++,
+      seq: nextSeq++,
       name: `Phase ${phase} deliverable ${parentIndex + 1}`,
       processId: processIdByName.get(`Phase ${phase}`)!,
       productId: productIdByName.get(product)!,
@@ -210,6 +214,7 @@ export function createSeedProjectRecord(
         projectId,
         parentTaskId: parentId,
         sortOrder: sortOrder++,
+        seq: nextSeq++,
         name: `Subtask ${parentIndex + 1}.${subtaskIndex + 1}`,
         processId: processIdByName.get(`Phase ${phase}`)!,
         productId: productIdByName.get(product)!,
@@ -267,6 +272,7 @@ export function createSeedProjectRecord(
       statusDate,
       defaultCalendarId: "standard",
       revision: 1n,
+      nextTaskSeq: nextSeq,
     },
     calendars,
     members,

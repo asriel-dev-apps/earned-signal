@@ -26,6 +26,7 @@ const initialProject: ProjectState = {
       id: "30000000-0000-4000-8000-000000000001",
       parentId: null,
       sortOrder: 0,
+      seq: 1,
       name: "Subtask",
       processId: null,
       productId: null,
@@ -42,6 +43,7 @@ const initialProject: ProjectState = {
       dependencies: [],
     },
   ],
+  nextTaskSeq: 2,
 };
 
 class InMemoryProjectCommandUnitOfWork implements ProjectCommandUnitOfWork {
