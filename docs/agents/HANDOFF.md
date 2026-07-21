@@ -202,12 +202,26 @@ Replaced with `backslash-u-0000` escapes — byte-identical at runtime, valid UT
 now clean. Note: the repo `scratchpad/` is inside `eslint .` scope, so a screenshot build's output
 must go **outside the repo** (e.g. the session scratchpad), else a built bundle there fails the gate.
 
-### Remaining backlog (design 0003) — P2 done; only deploy + P3 left
+### Deployed 2026-07-22 — P2 (E-2 + E-1) LIVE in production
 
-- **P2 = COMPLETE** (A/B/C/D in P0/P1; E-2 `ba68c6b`; E-1 `e4d54dd`). C-6 done (工程/プロダクト with
-  E-2, 担当 already a select).
-- **Deploy**: run migrations **0004 + 0005** on live Neon at the next deploy (deferred like 0002/0003),
-  then redeploy the worker (manual recipe above); this makes all of P2 user-visible in prod.
+All of P2 is live at **https://vecta.tt-dev.workers.dev** (worker `vecta`, **Version
+`03c03e79`**), via the manual recipe above. Verified post-deploy: root `/` → 200 (serves the new
+bundle); API unauthenticated → 401 "Authentication is required" (NOT 500 → schema healthy).
+- **Migrations 0004 + 0005 applied to prod Neon** (now 6 applied). **Prod was NOT empty** — it had
+  **3 real tasks** (HANDOFF's earlier "empty" note is stale). 0004 is data-preserving; a scoped
+  pre-migration backup of `tasks(id,process,product)` was taken and a post-migration diff confirmed
+  **zero data loss** (the 3 tasks had empty process/product → 0 masters seeded, `process_id`/
+  `product_id` NULL, matching the originals). 0005 seeded the two default templates into the project.
+- Deploy gotchas that bit this run: `pnpm exec vite` fails at repo root (vite lives in `apps/web`) —
+  build/screenshot configs must run from `apps/web`; the repo `scratchpad/` is inside `eslint .`
+  scope, so screenshot build output must go outside the repo; `wrangler secret`/OIDC audience were
+  already set (secret persists across deploys). The DB migrate script is `packages/persistence/
+  scripts/migrate.mjs` (pg driver, guards on `EXPECTED_DATABASE_HOST`/`NAME`).
+
+### Remaining backlog (design 0003) — P2 done + deployed; only P3 left
+
+- **P2 = COMPLETE & DEPLOYED** (A/B/C/D in P0/P1; E-2 `ba68c6b`; E-1 `e4d54dd`; live 2026-07-22).
+  C-6 done (工程/プロダクト with E-2, 担当 already a select).
 - **P3**: F-1 unique numbering (approved: internal UUID + project-scoped immutable display seq),
   G-1 member daily-total bottom panel (option a).
 
