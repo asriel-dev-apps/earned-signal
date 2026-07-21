@@ -36,6 +36,13 @@
       "when": 1784600000000,
       "tag": "0004_process_product_masters",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784700000000,
+      "tag": "0005_subtask_template_masters",
+      "breakpoints": true
     }
   ]
 }

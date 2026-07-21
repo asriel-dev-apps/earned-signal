@@ -92,6 +92,26 @@ const MasterResponseSchema = z.object({
   sortOrder: z.number().int(),
 });
 
+// Project-scoped subtask-template master (§E-1): name + ordered step array. The
+// template screen and the grid's row menu resolve/select these by id.
+const TemplateStepResponseSchema = z.object({
+  name: z.string(),
+  weightBp: z.number().int(),
+  dependsOnPrev: z
+    .object({
+      type: z.enum(["FS", "SS", "FF", "SF"]),
+      lagWorkingDays: z.number().int(),
+    })
+    .optional(),
+});
+
+const TemplateResponseSchema = z.object({
+  id: UuidSchema,
+  name: z.string(),
+  sortOrder: z.number().int(),
+  subtasks: z.array(TemplateStepResponseSchema),
+});
+
 const TaskResponseSchema = z.object({
   id: UuidSchema,
   parentId: UuidSchema.nullable(),
@@ -122,6 +142,7 @@ const ProjectStateResponseSchema = z.object({
   members: z.array(MemberResponseSchema),
   processes: z.array(MasterResponseSchema),
   products: z.array(MasterResponseSchema),
+  templates: z.array(TemplateResponseSchema),
   tasks: z.array(TaskResponseSchema),
 });
 
@@ -204,6 +225,16 @@ function projectStateResponse(project: ProjectStateView): z.infer<typeof Project
     members: project.members.map((member) => ({ ...member })),
     processes: project.processes.map((process) => ({ ...process })),
     products: project.products.map((product) => ({ ...product })),
+    templates: project.templates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      sortOrder: template.sortOrder,
+      subtasks: template.subtasks.map((step) => ({
+        name: step.name,
+        weightBp: step.weightBp,
+        ...(step.dependsOnPrev === undefined ? {} : { dependsOnPrev: { ...step.dependsOnPrev } }),
+      })),
+    })),
     tasks: project.tasks.map((task) => ({
       ...task,
       dailyPlan: { ...task.dailyPlan },

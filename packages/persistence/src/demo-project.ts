@@ -5,8 +5,10 @@ import type {
   ProcessRecord,
   ProductRecord,
   ProjectCalendarRecord,
+  SubtaskTemplateStepRecord,
   TaskDependencyRecord,
   TaskRecord,
+  TemplateRecord,
 } from "./project-record.js";
 
 // Deterministic synthetic fixtures. All labels are generic and anonymized
@@ -45,6 +47,32 @@ function pick<T>(values: readonly T[], random: () => number): T {
 
 const PHASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const PER_DAY_MINUTES = [60, 120, 180, 240, 300, 360, 420, 480] as const;
+
+// The two default subtask templates every project starts with (Design 0003 §E-1;
+// the former builtin catalog). Generic PM steps; weights are basis points summing
+// to 10000 so a freshly generated parent's children reproduce its planned effort.
+const DEFAULT_SUBTASK_TEMPLATES: readonly {
+  readonly name: string;
+  readonly subtasks: readonly SubtaskTemplateStepRecord[];
+}[] = [
+  {
+    name: "Standard build",
+    subtasks: [
+      { name: "Design", weightBp: 2_000 },
+      { name: "Review", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+      { name: "Rework", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+      { name: "Build", weightBp: 4_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+      { name: "Test", weightBp: 2_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+    ],
+  },
+  {
+    name: "Design and review",
+    subtasks: [
+      { name: "Design", weightBp: 7_000 },
+      { name: "Review", weightBp: 3_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+    ],
+  },
+];
 
 function buildWorkingDays(start: string, count: number): string[] {
   const days: string[] = [];
@@ -114,6 +142,16 @@ export function createSeedProjectRecord(
       products.push({ id, tenantId, projectId, name: productName, sortOrder: products.length });
     }
   }
+
+  // Subtask-template master seeded with the two project defaults (§E-1).
+  const templates: TemplateRecord[] = DEFAULT_SUBTASK_TEMPLATES.map((template, index) => ({
+    id: makeUuid("6", index + 1),
+    tenantId,
+    projectId,
+    name: template.name,
+    sortOrder: index,
+    subtasks: template.subtasks,
+  }));
 
   const tasks: TaskRecord[] = [];
   const dependencies: TaskDependencyRecord[] = [];
@@ -234,6 +272,7 @@ export function createSeedProjectRecord(
     members,
     processes,
     products,
+    templates,
     tasks,
     dependencies,
     auditEvents,

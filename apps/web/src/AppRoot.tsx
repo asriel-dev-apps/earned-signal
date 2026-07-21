@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { App } from "./App";
 import { MasterScreen } from "./MasterScreen";
+import { TemplateScreen } from "./TemplateScreen";
 import {
   beginGoogleSignIn,
   completeGoogleSignIn,
@@ -10,15 +11,14 @@ import {
   signOutGoogle,
   type GoogleAuthConfig,
 } from "./google-auth";
-import { createProjectApiClient } from "./project-api-client";
+import { createProjectApiClient, type ProjectApiClient } from "./project-api-client";
 
-/** The destinations of the top-bar nav for this slice (Design 0003 §E-2). */
-type View = "wbs" | "master";
+/** The destinations of the top-bar nav (Design 0003 §E-2 / §E-1). */
+type View = "wbs" | "master" | "template";
 
 /**
- * Segmented top-bar nav (Design 0003 §E-2): switches which screen renders below
- * the bar. Only WBS + マスタ for this slice — no テンプレート link (E-1 is out of
- * scope, so no dead link).
+ * Segmented top-bar nav (Design 0003 §E-2 / §E-1): switches which screen renders
+ * below the bar — WBS | マスタ | テンプレート. Same client-`useState` view switch.
  */
 function NavTabs({
   view,
@@ -49,8 +49,34 @@ function NavTabs({
       >
         マスタ
       </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "template"}
+        className={`nav-tab${view === "template" ? " nav-tab--active" : ""}`}
+        data-testid="nav-template"
+        onClick={() => onChange("template")}
+      >
+        テンプレート
+      </button>
     </div>
   );
+}
+
+/** Render the screen for the active nav view. */
+function ViewScreen({
+  view,
+  client,
+}: {
+  readonly view: View;
+  readonly client?: ProjectApiClient;
+}) {
+  // Spread the client so it is simply absent (not an explicit `undefined`) in the
+  // preview branch, matching each screen's optional `client` prop.
+  const props = client === undefined ? {} : { client };
+  if (view === "master") return <MasterScreen {...props} />;
+  if (view === "template") return <TemplateScreen {...props} />;
+  return <App {...props} />;
 }
 
 /**
@@ -137,7 +163,7 @@ export function AppRoot({
         <div className="auth-bar" data-testid="auth-bar">
           <NavTabs view={view} onChange={setView} />
         </div>
-        {view === "wbs" ? <App /> : <MasterScreen />}
+        <ViewScreen view={view} />
       </>
     );
   }
@@ -166,7 +192,7 @@ export function AppRoot({
           Sign out
         </button>
       </div>
-      {view === "wbs" ? <App client={client} /> : <MasterScreen client={client} />}
+      <ViewScreen view={view} client={client} />
     </>
   );
 }

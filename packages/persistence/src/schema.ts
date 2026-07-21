@@ -211,6 +211,30 @@ export const products = pgTable(
   ],
 );
 
+export const subtaskTemplates = pgTable(
+  "subtask_templates",
+  {
+    id: uuid().defaultRandom().notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    subtasks: jsonb().notNull(),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "subtask_templates_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("subtask_templates_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check("subtask_templates_sort_order_non_negative", sql`${table.sortOrder} >= 0`),
+  ],
+);
+
 export const projectMemberships = pgTable(
   "project_memberships",
   {
@@ -426,6 +450,7 @@ export const schema = {
   members,
   processes,
   products,
+  subtaskTemplates,
   projectMemberships,
   tasks,
   taskDependencies,

@@ -982,6 +982,116 @@ body {
 .master-add-button:hover:not(:disabled) { filter: brightness(1.04); }
 .master-add-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.row-menu-empty {
+  font-size: 12px;
+  color: var(--faint);
+  padding: 7px 10px;
+}
+
+/* ── Template edit screen (Design 0003 §E-1) ────────────────────────── */
+.template-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  padding: 20px;
+  max-width: 1120px;
+}
+
+.template-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-list-row--active .template-select { color: var(--accent-strong); font-weight: 700; }
+
+.template-select {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.template-select:hover { color: var(--accent-strong); background: var(--accent-soft); }
+
+.template-rename { flex: 1 1 auto; }
+
+.template-steps-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.template-steps-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.template-steps-sum { font-size: 11px; color: var(--muted); }
+
+.template-step-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.template-step-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.template-step-index {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.template-step-name { flex: 1 1 120px; }
+.template-step-weight { flex: 0 0 64px; text-align: right; }
+.template-step-dep { flex: 0 0 84px; }
+.template-step-dep--first { color: var(--faint); text-align: center; }
+.template-step-lag { flex: 0 0 60px; text-align: right; }
+
+.template-step-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.template-step-move {
+  font-size: 11px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.template-step-move:hover:not(:disabled) { color: var(--accent-strong); background: var(--accent-soft); }
+.template-step-move:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.template-step-add { margin-top: 4px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

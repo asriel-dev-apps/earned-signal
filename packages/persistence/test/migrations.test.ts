@@ -65,6 +65,7 @@ describe("persistence migrations", () => {
       "project_calendars",
       "project_memberships",
       "projects",
+      "subtask_templates",
       "task_dependencies",
       "tasks",
       "tenant_memberships",

@@ -36,6 +36,7 @@ const EMPTY_PROJECT: ProjectState = {
   members: [],
   processes: [],
   products: [],
+  templates: [],
   tasks: [],
 };
 

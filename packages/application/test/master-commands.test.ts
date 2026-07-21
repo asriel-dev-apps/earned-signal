@@ -14,6 +14,17 @@ const project: ProjectState = {
   members: [],
   processes: [{ id: "process-1", name: "Phase A", sortOrder: 0 }],
   products: [{ id: "product-1", name: "Product 1", sortOrder: 0 }],
+  templates: [
+    {
+      id: "template-1",
+      name: "Standard build",
+      sortOrder: 0,
+      subtasks: [
+        { name: "Design", weightBp: 6_000 },
+        { name: "Review", weightBp: 4_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+      ],
+    },
+  ],
   tasks: [
     {
       id: "task-1",
@@ -125,6 +136,68 @@ describe("product master commands", () => {
         changes: { productId: "product-missing" },
       }),
     ).toThrow("unknown product");
+  });
+});
+
+describe("subtask template master commands (Design 0003 §E-1)", () => {
+  it("adds a template with an ordered step array", () => {
+    const next = applyProjectCommand(project, {
+      type: "template.add",
+      template: {
+        id: "template-2",
+        name: "Design and review",
+        sortOrder: 1,
+        subtasks: [
+          { name: "Design", weightBp: 7_000 },
+          { name: "Review", weightBp: 3_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+        ],
+      },
+    });
+    expect(next.templates.map((template) => template.name)).toEqual([
+      "Standard build",
+      "Design and review",
+    ]);
+  });
+
+  it("renames a template and replaces its steps", () => {
+    const next = applyProjectCommand(project, {
+      type: "template.update",
+      templateId: "template-1",
+      changes: {
+        name: "Build only",
+        subtasks: [{ name: "Build", weightBp: 10_000 }],
+      },
+    });
+    expect(next.templates[0]).toMatchObject({ id: "template-1", name: "Build only" });
+    expect(next.templates[0]!.subtasks).toEqual([{ name: "Build", weightBp: 10_000 }]);
+  });
+
+  it("rejects a template without a name", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "template.add",
+        template: { id: "template-3", name: " ", sortOrder: 2, subtasks: [] },
+      }),
+    ).toThrow("Template template-3 requires a name");
+  });
+
+  it("rejects a template step whose weight is out of range", () => {
+    expect(() =>
+      applyProjectCommand(project, {
+        type: "template.add",
+        template: {
+          id: "template-4",
+          name: "Bad weight",
+          sortOrder: 3,
+          subtasks: [{ name: "Design", weightBp: 10_001 }],
+        },
+      }),
+    ).toThrow("weight must be whole basis points");
+  });
+
+  it("deletes a template with no referential guard (templates are copied, not referenced)", () => {
+    const next = applyProjectCommand(project, { type: "template.delete", templateId: "template-1" });
+    expect(next.templates).toEqual([]);
   });
 });
 

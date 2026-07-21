@@ -44,6 +44,7 @@ const project: ProjectState = {
   ],
   processes: [],
   products: [],
+  templates: [],
   tasks: [
     makeTask({ id: "task-1", sortOrder: 0, name: "Phase A" }),
     makeTask({

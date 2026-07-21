@@ -45,6 +45,12 @@ export function toProjectState(record: PersistedProjectRecord): ProjectState {
     })),
     processes: record.processes.map(({ id, name, sortOrder }) => ({ id, name, sortOrder })),
     products: record.products.map(({ id, name, sortOrder }) => ({ id, name, sortOrder })),
+    templates: record.templates.map(({ id, name, sortOrder, subtasks }) => ({
+      id,
+      name,
+      sortOrder,
+      subtasks: subtasks.map((step) => ({ ...step })),
+    })),
     tasks: record.tasks.map((task) => ({
       id: task.id,
       parentId: task.parentTaskId,

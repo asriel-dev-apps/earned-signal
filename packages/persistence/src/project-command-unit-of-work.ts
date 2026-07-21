@@ -8,6 +8,7 @@ import {
   type ProjectCommandRequest,
   type ProjectCommandUnitOfWork,
   type ProjectState,
+  type SubtaskTemplateStep,
 } from "@vecta/application";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -20,6 +21,7 @@ import {
   projectCalendars,
   projects,
   schema,
+  subtaskTemplates,
   taskDependencies,
   tasks,
 } from "./schema.js";
@@ -176,6 +178,16 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           and(eq(products.tenantId, request.tenantId), eq(products.projectId, request.projectId)),
         )
         .orderBy(asc(products.sortOrder), asc(products.id));
+      const templateRows = await transaction
+        .select()
+        .from(subtaskTemplates)
+        .where(
+          and(
+            eq(subtaskTemplates.tenantId, request.tenantId),
+            eq(subtaskTemplates.projectId, request.projectId),
+          ),
+        )
+        .orderBy(asc(subtaskTemplates.sortOrder), asc(subtaskTemplates.id));
       const dependencyRows = await transaction
         .select()
         .from(taskDependencies)
@@ -234,6 +246,12 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           name: product.name,
           sortOrder: product.sortOrder,
         })),
+        templates: templateRows.map((template) => ({
+          id: template.id,
+          name: template.name,
+          sortOrder: template.sortOrder,
+          subtasks: template.subtasks as readonly SubtaskTemplateStep[],
+        })),
         tasks: taskRows.map((task) => ({
           id: task.id,
           parentId: task.parentTaskId,
@@ -281,6 +299,8 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       const currentProcessIds = new Set(processRows.map((process) => process.id));
       const nextProductById = new Map(next.products.map((product) => [product.id, product]));
       const currentProductIds = new Set(productRows.map((product) => product.id));
+      const nextTemplateById = new Map(next.templates.map((template) => [template.id, template]));
+      const currentTemplateIds = new Set(templateRows.map((template) => template.id));
 
       // Free all self-FK (parent), assignee, process, and product references so
       // deletes and inserts never collide with RESTRICT constraints.
@@ -409,6 +429,49 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
                 eq(products.tenantId, request.tenantId),
                 eq(products.projectId, request.projectId),
                 eq(products.id, product.id),
+              ),
+            );
+        }
+      }
+
+      // Templates: insert / update present, delete removed. Templates are never
+      // referenced by a task (generation copies the step data), so a delete has
+      // no referential guard (Design 0003 §E-1 locked decision 4).
+      for (const template of next.templates) {
+        const values = {
+          name: template.name,
+          sortOrder: template.sortOrder,
+          subtasks: template.subtasks,
+        };
+        if (currentTemplateIds.has(template.id)) {
+          await transaction
+            .update(subtaskTemplates)
+            .set({ ...values, updatedAt: sql`now()` })
+            .where(
+              and(
+                eq(subtaskTemplates.tenantId, request.tenantId),
+                eq(subtaskTemplates.projectId, request.projectId),
+                eq(subtaskTemplates.id, template.id),
+              ),
+            );
+        } else {
+          await transaction.insert(subtaskTemplates).values({
+            id: template.id,
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            ...values,
+          });
+        }
+      }
+      for (const template of templateRows) {
+        if (!nextTemplateById.has(template.id)) {
+          await transaction
+            .delete(subtaskTemplates)
+            .where(
+              and(
+                eq(subtaskTemplates.tenantId, request.tenantId),
+                eq(subtaskTemplates.projectId, request.projectId),
+                eq(subtaskTemplates.id, template.id),
               ),
             );
         }

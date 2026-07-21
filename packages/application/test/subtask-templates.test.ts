@@ -3,13 +3,28 @@ import {
   applyEffortSchedule,
   applyProjectCommand,
   deriveSubtaskId,
-  getSubtaskTemplate,
-  listSubtaskTemplates,
   projectWbsGrid,
   prorateLargestRemainder,
   type ProjectState,
   type ProjectTask,
+  type SubtaskTemplate,
 } from "../src/index.js";
+
+// A project-scoped template (Design 0003 §E-1: generation resolves it from
+// project state, not a builtin catalog). Weights sum to 10000 so a freshly
+// generated parent's children reproduce its planned effort exactly.
+const STANDARD_BUILD_TEMPLATE: SubtaskTemplate = {
+  id: "standard-build",
+  name: "Standard build",
+  sortOrder: 0,
+  subtasks: [
+    { name: "Design", weightBp: 2_000 },
+    { name: "Review", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+    { name: "Rework", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+    { name: "Build", weightBp: 4_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+    { name: "Test", weightBp: 2_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+  ],
+};
 
 function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): ProjectTask {
   return {
@@ -49,6 +64,7 @@ function baseProject(parentEffortMinutes: number): ProjectState {
     ],
     processes: [],
     products: [],
+    templates: [STANDARD_BUILD_TEMPLATE],
     tasks: [
       makeTask({
         id: "parent-1",
@@ -95,16 +111,6 @@ describe("prorateLargestRemainder", () => {
     expect(prorateLargestRemainder(7_337, weights)).toEqual(
       prorateLargestRemainder(7_337, weights),
     );
-  });
-});
-
-describe("subtask template catalog", () => {
-  it("lists only generic templates whose weights sum to 10000", () => {
-    for (const template of listSubtaskTemplates()) {
-      const total = template.subtasks.reduce((sum, step) => sum + step.weightBp, 0);
-      expect(total).toBe(10_000);
-    }
-    expect(listSubtaskTemplates().map((template) => template.id)).toContain("standard-build");
   });
 });
 
@@ -162,7 +168,6 @@ describe("task.generateSubtasks", () => {
     const second = childrenOf(applyProjectCommand(baseProject(2_400), command), "parent-1");
     expect(first.map((child) => child.id)).toEqual(second.map((child) => child.id));
     expect(first[0]!.id).toBe(deriveSubtaskId("parent-1", 0));
-    expect(getSubtaskTemplate("does-not-exist")).toBeUndefined();
   });
 
   it("rejects generation onto an unknown parent or from an unknown template", () => {

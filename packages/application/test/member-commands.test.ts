@@ -14,6 +14,7 @@ const project: ProjectState = {
   members: [],
   processes: [],
   products: [],
+  templates: [],
   tasks: [
     {
       id: "task-1",

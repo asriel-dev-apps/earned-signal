@@ -172,7 +172,7 @@ describe("project REST API", () => {
         headers: { "content-type": "application/json", "idempotency-key": "key-gen" },
         body: JSON.stringify({
           expectedRevision: "7",
-          command: { type: "task.generateSubtasks", parentTaskId: PROJECT_ID, templateId: "standard-build" },
+          command: { type: "task.generateSubtasks", parentTaskId: PROJECT_ID, templateId: TENANT_ID },
         }),
       },
       env,

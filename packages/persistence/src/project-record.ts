@@ -51,6 +51,25 @@ export interface ProductRecord {
   readonly sortOrder: number;
 }
 
+/** One ordered step of a subtask template (matches the jsonb column shape). */
+export interface SubtaskTemplateStepRecord {
+  readonly name: string;
+  readonly weightBp: number;
+  readonly dependsOnPrev?: {
+    readonly type: DependencyType;
+    readonly lagWorkingDays: number;
+  };
+}
+
+export interface TemplateRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly sortOrder: number;
+  readonly subtasks: readonly SubtaskTemplateStepRecord[];
+}
+
 export interface TaskRecord {
   readonly id: string;
   readonly tenantId: string;
@@ -102,6 +121,7 @@ export interface PersistedProjectRecord {
   readonly members: readonly MemberRecord[];
   readonly processes: readonly ProcessRecord[];
   readonly products: readonly ProductRecord[];
+  readonly templates: readonly TemplateRecord[];
   readonly tasks: readonly TaskRecord[];
   readonly dependencies: readonly TaskDependencyRecord[];
   readonly auditEvents: readonly AuditEventRecord[];

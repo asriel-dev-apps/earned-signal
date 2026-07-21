@@ -136,21 +136,22 @@ describe("App WBS grid", () => {
     });
 
     // Open the first (parent) row's ⋯ menu, drill into the template list, and pick
-    // the first catalog entry (standard-build) — the same command the old toolbar
-    // "サブタスク生成" button used to send.
+    // the first project template (§E-1: resolved from project.templates, not a
+    // builtin catalog) — the same command the old toolbar "サブタスク生成" button sent.
+    const templateId = project.templates[0]!.id;
     const menuButton = document.querySelector(
       `[data-testid="row-menu-button"][data-task-id="${project.tasks[0]!.id}"]`,
     ) as HTMLButtonElement;
     fireEvent.click(menuButton);
     fireEvent.click(screen.getByTestId("row-menu-templates"));
     const templateItem = document.querySelector(
-      '[data-testid="row-menu-template"][data-template-id="standard-build"]',
+      `[data-testid="row-menu-template"][data-template-id="${templateId}"]`,
     ) as HTMLButtonElement;
     fireEvent.click(templateItem);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     expect(execute).toHaveBeenCalledWith(
-      { type: "task.generateSubtasks", parentTaskId: project.tasks[0]!.id, templateId: "standard-build" },
+      { type: "task.generateSubtasks", parentTaskId: project.tasks[0]!.id, templateId },
       "7",
     );
     // The menu closes after a template is chosen.

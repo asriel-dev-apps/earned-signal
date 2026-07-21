@@ -4,17 +4,27 @@ import { ApiCommandSchema, fromCommand, toCommand } from "../src/project-command
 
 const PARENT_ID = "b0000000-0000-4000-8000-000000000001";
 const TASK_ID = "b0000000-0000-4000-8000-000000000002";
+const TEMPLATE_ID = "b0000000-0000-4000-8000-000000000003";
 
 describe("project command contract", () => {
   it("round-trips task.generateSubtasks through the wire schema", () => {
     const command: ProjectCommand = {
       type: "task.generateSubtasks",
       parentTaskId: PARENT_ID,
-      templateId: "standard-build",
+      templateId: TEMPLATE_ID,
     };
     const wire = ApiCommandSchema.parse(fromCommand(command));
     expect(wire).toEqual(command);
     expect(toCommand(wire)).toEqual(command);
+  });
+
+  it("rejects a non-uuid template id at the wire boundary", () => {
+    const result = ApiCommandSchema.safeParse({
+      type: "task.generateSubtasks",
+      parentTaskId: PARENT_ID,
+      templateId: "standard-build",
+    });
+    expect(result.success).toBe(false);
   });
 
   it("carries a numeric prorationWeightBp through a task.update round trip", () => {
@@ -86,5 +96,44 @@ describe("project command contract", () => {
 
     const remove: ProjectCommand = { type: "product.delete", productId: PARENT_ID };
     expect(toCommand(ApiCommandSchema.parse(fromCommand(remove)))).toEqual(remove);
+  });
+
+  it("round-trips subtask template master commands through the wire schema", () => {
+    const add: ProjectCommand = {
+      type: "template.add",
+      template: {
+        id: TEMPLATE_ID,
+        name: "Standard build",
+        sortOrder: 0,
+        subtasks: [
+          { name: "Design", weightBp: 6_000 },
+          { name: "Review", weightBp: 4_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+        ],
+      },
+    };
+    expect(toCommand(ApiCommandSchema.parse(fromCommand(add)))).toEqual(add);
+
+    const update: ProjectCommand = {
+      type: "template.update",
+      templateId: TEMPLATE_ID,
+      changes: { name: "Build only", subtasks: [{ name: "Build", weightBp: 10_000 }] },
+    };
+    expect(toCommand(ApiCommandSchema.parse(fromCommand(update)))).toEqual(update);
+
+    const remove: ProjectCommand = { type: "template.delete", templateId: TEMPLATE_ID };
+    expect(toCommand(ApiCommandSchema.parse(fromCommand(remove)))).toEqual(remove);
+  });
+
+  it("rejects a template step weight out of range at the wire boundary", () => {
+    const result = ApiCommandSchema.safeParse({
+      type: "template.add",
+      template: {
+        id: TEMPLATE_ID,
+        name: "Bad",
+        sortOrder: 0,
+        subtasks: [{ name: "Design", weightBp: 10_001 }],
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });

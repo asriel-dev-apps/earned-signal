@@ -31,7 +31,6 @@ import {
 import {
   applyEffortSchedule,
   applyProjectCommand,
-  listSubtaskTemplates,
   projectWbsGrid,
   type ProjectCommand,
   type ProjectState,
@@ -85,8 +84,6 @@ const BAND_LABEL: Record<BandId, string> = {
   ac: "AC",
   cv: "CV",
 };
-
-const SUBTASK_TEMPLATES = listSubtaskTemplates();
 
 interface MetaColumn {
   readonly id: string;
@@ -513,6 +510,7 @@ const EMPTY_PROJECT: ProjectState = {
   members: [],
   processes: [],
   products: [],
+  templates: [],
   tasks: [],
 };
 
@@ -1900,19 +1898,30 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           style={{ position: "fixed", left: rowMenu.x, top: rowMenu.y }}
         >
           {rowMenu.showTemplates ? (
-            SUBTASK_TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                className="row-menu-item"
-                role="menuitem"
-                data-testid="row-menu-template"
-                data-template-id={template.id}
-                onClick={() => generateSubtasks(rowMenu.taskId, template.id)}
-              >
-                {template.name}
-              </button>
-            ))
+            project.templates.length === 0 ? (
+              <span className="row-menu-empty" data-testid="row-menu-templates-empty">
+                テンプレートがありません
+              </span>
+            ) : (
+              [...project.templates]
+                .sort(
+                  (left, right) =>
+                    left.sortOrder - right.sortOrder || left.id.localeCompare(right.id),
+                )
+                .map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="row-menu-item"
+                    role="menuitem"
+                    data-testid="row-menu-template"
+                    data-template-id={template.id}
+                    onClick={() => generateSubtasks(rowMenu.taskId, template.id)}
+                  >
+                    {template.name}
+                  </button>
+                ))
+            )
           ) : (
             <>
               <button

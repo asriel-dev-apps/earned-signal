@@ -5,6 +5,8 @@ import type {
   ProjectProduct,
   ProjectState,
   ProjectTask,
+  SubtaskTemplate,
+  SubtaskTemplateStep,
 } from "@vecta/application";
 
 // Deterministic, browser-safe synthetic fixture for the client preview. It
@@ -43,6 +45,32 @@ function pick<T>(values: readonly T[], random: () => number): T {
 
 const PHASE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const PER_DAY_MINUTES = [60, 120, 180, 240, 300, 360, 420, 480] as const;
+
+// The two default subtask templates every project starts with (Design 0003 §E-1;
+// the former builtin catalog). Weights are basis points summing to 10000 so a
+// freshly generated parent's children reproduce its planned effort exactly.
+const DEFAULT_SUBTASK_TEMPLATES: readonly {
+  readonly name: string;
+  readonly subtasks: readonly SubtaskTemplateStep[];
+}[] = [
+  {
+    name: "Standard build",
+    subtasks: [
+      { name: "Design", weightBp: 2_000 },
+      { name: "Review", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+      { name: "Rework", weightBp: 1_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+      { name: "Build", weightBp: 4_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+      { name: "Test", weightBp: 2_000, dependsOnPrev: { type: "FS", lagWorkingDays: 0 } },
+    ],
+  },
+  {
+    name: "Design and review",
+    subtasks: [
+      { name: "Design", weightBp: 7_000 },
+      { name: "Review", weightBp: 3_000, dependsOnPrev: { type: "FS", lagWorkingDays: 1 } },
+    ],
+  },
+];
 
 // Two mid-week holidays early in the horizon. The scheduler skips them, so
 // placed rows leave those day columns empty while the showcase row (below) keeps
@@ -142,6 +170,14 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       products.push({ id, name: productName, sortOrder: products.length });
     }
   }
+
+  // Subtask-template master seeded with the two project defaults (§E-1).
+  const templates: SubtaskTemplate[] = DEFAULT_SUBTASK_TEMPLATES.map((template, index) => ({
+    id: makeUuid("6", index + 1),
+    name: template.name,
+    sortOrder: index,
+    subtasks: template.subtasks,
+  }));
 
   const tasks: ProjectTask[] = [];
   let sortOrder = 0;
@@ -247,6 +283,7 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
     members,
     processes,
     products,
+    templates,
     tasks,
   };
 }

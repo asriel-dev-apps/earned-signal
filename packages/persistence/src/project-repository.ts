@@ -5,8 +5,10 @@ import type {
   PersistedProjectRecord,
   ProcessRecord,
   ProductRecord,
+  SubtaskTemplateStepRecord,
   TaskDependencyRecord,
   TaskRecord,
+  TemplateRecord,
 } from "./project-record.js";
 import {
   auditEvents,
@@ -16,6 +18,7 @@ import {
   projectCalendars,
   projects,
   schema,
+  subtaskTemplates,
   taskDependencies,
   tasks,
   tenants,
@@ -61,6 +64,14 @@ export class ProjectRepository {
       }
       if (record.products.length > 0) {
         await transaction.insert(products).values([...record.products]);
+      }
+      if (record.templates.length > 0) {
+        await transaction.insert(subtaskTemplates).values(
+          record.templates.map((template) => ({
+            ...template,
+            subtasks: template.subtasks,
+          })),
+        );
       }
       if (record.tasks.length > 0) {
         // Self-referential parent FK is satisfied within a single batched
@@ -121,6 +132,11 @@ export class ProjectRepository {
       .from(products)
       .where(and(eq(products.tenantId, tenantId), eq(products.projectId, projectId)))
       .orderBy(asc(products.sortOrder), asc(products.id));
+    const templateRows = await this.database
+      .select()
+      .from(subtaskTemplates)
+      .where(and(eq(subtaskTemplates.tenantId, tenantId), eq(subtaskTemplates.projectId, projectId)))
+      .orderBy(asc(subtaskTemplates.sortOrder), asc(subtaskTemplates.id));
     const taskRows = await this.database
       .select()
       .from(tasks)
@@ -165,6 +181,12 @@ export class ProjectRepository {
       ),
       products: productRows.map(
         (row): ProductRecord => withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
+      templates: templateRows.map(
+        (row): TemplateRecord => ({
+          ...withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+          subtasks: row.subtasks as readonly SubtaskTemplateStepRecord[],
+        }),
       ),
       tasks: taskRows.map(
         (row): TaskRecord => ({

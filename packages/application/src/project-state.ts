@@ -1,11 +1,11 @@
 import type { DependencyType } from "@vecta/domain";
 import {
   deriveSubtaskId,
-  getSubtaskTemplate,
   prorateLargestRemainder,
+  type SubtaskTemplate,
 } from "./subtask-templates.js";
 
-export type { DependencyType };
+export type { DependencyType, SubtaskTemplate };
 
 export interface ProjectCalendar {
   readonly id: string;
@@ -77,6 +77,7 @@ export interface ProjectState {
   readonly members: readonly ProjectMember[];
   readonly processes: readonly ProjectProcess[];
   readonly products: readonly ProjectProduct[];
+  readonly templates: readonly SubtaskTemplate[];
   readonly tasks: readonly ProjectTask[];
 }
 
@@ -164,6 +165,22 @@ export interface DeleteProductCommand {
   readonly productId: string;
 }
 
+export interface AddTemplateCommand {
+  readonly type: "template.add";
+  readonly template: SubtaskTemplate;
+}
+
+export interface UpdateTemplateCommand {
+  readonly type: "template.update";
+  readonly templateId: string;
+  readonly changes: Partial<Omit<SubtaskTemplate, "id">>;
+}
+
+export interface DeleteTemplateCommand {
+  readonly type: "template.delete";
+  readonly templateId: string;
+}
+
 export type ProjectCommand =
   | AddTaskCommand
   | UpdateTaskCommand
@@ -177,7 +194,10 @@ export type ProjectCommand =
   | DeleteProcessCommand
   | AddProductCommand
   | UpdateProductCommand
-  | DeleteProductCommand;
+  | DeleteProductCommand
+  | AddTemplateCommand
+  | UpdateTemplateCommand
+  | DeleteTemplateCommand;
 
 const DEPENDENCY_TYPES: ReadonlySet<DependencyType> = new Set(["FS", "SS", "FF", "SF"]);
 
@@ -251,6 +271,44 @@ function validateProducts(project: ProjectState): void {
   }
 }
 
+function validateTemplates(project: ProjectState): void {
+  const templateIds = new Set<string>();
+  for (const template of project.templates) {
+    if (template.id.trim().length === 0 || templateIds.has(template.id)) {
+      throw new Error(`Template ID must be unique: ${template.id}`);
+    }
+    templateIds.add(template.id);
+    if (template.name.trim().length === 0) {
+      throw new Error(`Template ${template.id} requires a name`);
+    }
+    validateWholeNonNegative(
+      template.sortOrder,
+      `Template ${template.id} sort order must be a whole number >= 0`,
+    );
+    template.subtasks.forEach((step, index) => {
+      if (step.name.trim().length === 0) {
+        throw new Error(`Template ${template.id} step ${index} requires a name`);
+      }
+      if (!Number.isInteger(step.weightBp) || step.weightBp < 0 || step.weightBp > 10_000) {
+        throw new Error(
+          `Template ${template.id} step ${index} weight must be whole basis points from 0 to 10000`,
+        );
+      }
+      if (step.dependsOnPrev !== undefined) {
+        if (!DEPENDENCY_TYPES.has(step.dependsOnPrev.type)) {
+          throw new Error(
+            `Template ${template.id} step ${index} has an invalid dependency type: ${step.dependsOnPrev.type}`,
+          );
+        }
+        validateWholeNonNegative(
+          step.dependsOnPrev.lagWorkingDays,
+          `Template ${template.id} step ${index} dependency lag must be a whole number >= 0`,
+        );
+      }
+    });
+  }
+}
+
 function validateParentHierarchy(project: ProjectState, taskIds: ReadonlySet<string>): void {
   const parentById = new Map(project.tasks.map((task) => [task.id, task.parentId]));
   for (const task of project.tasks) {
@@ -277,6 +335,7 @@ function validateProject(project: ProjectState): void {
   validateMembers(project);
   validateProcesses(project);
   validateProducts(project);
+  validateTemplates(project);
   const memberIds = new Set(project.members.map((member) => member.id));
   const processIds = new Set(project.processes.map((process) => process.id));
   const productIds = new Set(project.products.map((product) => product.id));
@@ -389,7 +448,9 @@ function generateSubtaskTasks(
   if (parent === undefined) {
     throw new Error(`Unknown parent task: ${command.parentTaskId}`);
   }
-  const template = getSubtaskTemplate(command.templateId);
+  // Resolve the template from the project-scoped master (Design 0003 §E-1); this
+  // is the generate-time validation now that templates are DB state, not builtin.
+  const template = state.templates.find((entry) => entry.id === command.templateId);
   if (template === undefined) {
     throw new Error(`Unknown subtask template: ${command.templateId}`);
   }
@@ -573,7 +634,7 @@ export function applyProjectCommand(
         product.id === command.productId ? { ...product, ...command.changes } : product,
       ),
     };
-  } else {
+  } else if (command.type === "product.delete") {
     if (!state.products.some((product) => product.id === command.productId)) {
       throw new Error(`Unknown product: ${command.productId}`);
     }
@@ -583,6 +644,32 @@ export function applyProjectCommand(
     next = {
       ...state,
       products: state.products.filter((product) => product.id !== command.productId),
+    };
+  } else if (command.type === "template.add") {
+    next = { ...state, templates: [...state.templates, command.template] };
+  } else if (command.type === "template.update") {
+    if (Object.keys(command.changes).length === 0) {
+      throw new Error("Template update requires at least one change");
+    }
+    if (!state.templates.some((template) => template.id === command.templateId)) {
+      throw new Error(`Unknown template: ${command.templateId}`);
+    }
+    next = {
+      ...state,
+      templates: state.templates.map((template) =>
+        template.id === command.templateId ? { ...template, ...command.changes } : template,
+      ),
+    };
+  } else {
+    // template.delete — a generated task copies its template's step data (no
+    // template FK is stored on a task), so a delete never orphans a task and
+    // needs no referential guard (Design 0003 §E-1 locked decision 4).
+    if (!state.templates.some((template) => template.id === command.templateId)) {
+      throw new Error(`Unknown template: ${command.templateId}`);
+    }
+    next = {
+      ...state,
+      templates: state.templates.filter((template) => template.id !== command.templateId),
     };
   }
   next = { ...next, tasks: reprorateSubtasks(next.tasks) };

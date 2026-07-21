@@ -1,4 +1,4 @@
-import type { ProjectCommand, ProjectTask } from "@vecta/application";
+import type { DependencyType, ProjectCommand, ProjectTask } from "@vecta/application";
 import { z } from "zod";
 
 export const UuidSchema = z.string().uuid();
@@ -11,7 +11,6 @@ const ProgressBasisPointsSchema = z.number().int().min(0).max(10_000);
 const ProrationWeightSchema = z.number().int().min(0).max(10_000).nullable();
 const SortOrderSchema = z.number().int().min(0);
 const CalendarIdSchema = z.string().trim().min(1).max(100);
-const TemplateIdSchema = z.string().trim().min(1).max(100);
 
 const DependencySchema = z.object({
   predecessorId: UuidSchema,
@@ -80,6 +79,37 @@ export const ProductChangesSchema = ProductSchema.omit({ id: true })
   .strict()
   .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
 
+// A subtask template's ordered steps (Design 0003 §E-1). The step-array shape is
+// validated here at the contract boundary (not via DB checks): a name, a
+// basis-point weight, and — for steps after the first — an optional dependency on
+// the preceding step (absent = the step runs in parallel).
+const SubtaskStepSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    weightBp: z.number().int().min(0).max(10_000),
+    dependsOnPrev: z
+      .object({
+        type: z.enum(["FS", "SS", "FF", "SF"]),
+        lagWorkingDays: z.number().int().min(0).max(3_650),
+      })
+      .optional(),
+  })
+  .strict();
+
+export const TemplateSchema = z
+  .object({
+    id: UuidSchema,
+    name: z.string().trim().min(1).max(200),
+    sortOrder: SortOrderSchema,
+    subtasks: z.array(SubtaskStepSchema).max(200),
+  })
+  .strict();
+
+export const TemplateChangesSchema = TemplateSchema.omit({ id: true })
+  .partial()
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
+
 export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("task.add"), task: TaskSchema }),
   z.object({ type: z.literal("task.update"), taskId: UuidSchema, changes: TaskChangesSchema }),
@@ -87,7 +117,7 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("task.generateSubtasks"),
     parentTaskId: UuidSchema,
-    templateId: TemplateIdSchema,
+    templateId: UuidSchema,
   }),
   z.object({ type: z.literal("member.add"), member: MemberSchema }),
   z.object({ type: z.literal("member.update"), memberId: UuidSchema, changes: MemberChangesSchema }),
@@ -98,6 +128,9 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("product.add"), product: ProductSchema }),
   z.object({ type: z.literal("product.update"), productId: UuidSchema, changes: ProductChangesSchema }),
   z.object({ type: z.literal("product.delete"), productId: UuidSchema }),
+  z.object({ type: z.literal("template.add"), template: TemplateSchema }),
+  z.object({ type: z.literal("template.update"), templateId: UuidSchema, changes: TemplateChangesSchema }),
+  z.object({ type: z.literal("template.delete"), templateId: UuidSchema }),
 ]);
 
 function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
@@ -154,6 +187,54 @@ function toTaskChanges(
     ...(changes.dependencies === undefined
       ? {}
       : { dependencies: changes.dependencies.map((dependency) => ({ ...dependency })) }),
+  };
+}
+
+// The template payload has the same shape on the wire and in the domain, so one
+// set of deep-clones serves both `toCommand` and `fromCommand`. These input types
+// accept both directions: `readonly` (domain) and mutable (wire) arrays, and an
+// optional `dependsOnPrev` with or without an explicit `undefined`.
+interface TemplateStepInput {
+  readonly name: string;
+  readonly weightBp: number;
+  readonly dependsOnPrev?: { readonly type: DependencyType; readonly lagWorkingDays: number } | undefined;
+}
+interface TemplateInput {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+  readonly subtasks: readonly TemplateStepInput[];
+}
+interface TemplateChangesInput {
+  readonly name?: string | undefined;
+  readonly sortOrder?: number | undefined;
+  readonly subtasks?: readonly TemplateStepInput[] | undefined;
+}
+
+function cloneTemplateStep(step: TemplateStepInput) {
+  return {
+    name: step.name,
+    weightBp: step.weightBp,
+    ...(step.dependsOnPrev === undefined ? {} : { dependsOnPrev: { ...step.dependsOnPrev } }),
+  };
+}
+
+function cloneTemplate(template: TemplateInput) {
+  return {
+    id: template.id,
+    name: template.name,
+    sortOrder: template.sortOrder,
+    subtasks: template.subtasks.map(cloneTemplateStep),
+  };
+}
+
+function cloneTemplateChanges(changes: TemplateChangesInput) {
+  return {
+    ...(changes.name === undefined ? {} : { name: changes.name }),
+    ...(changes.sortOrder === undefined ? {} : { sortOrder: changes.sortOrder }),
+    ...(changes.subtasks === undefined
+      ? {}
+      : { subtasks: changes.subtasks.map(cloneTemplateStep) }),
   };
 }
 
@@ -216,6 +297,16 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
           ? {}
           : { sortOrder: command.changes.sortOrder }),
       },
+    };
+  }
+  if (command.type === "template.add") {
+    return { type: command.type, template: cloneTemplate(command.template) };
+  }
+  if (command.type === "template.update") {
+    return {
+      type: command.type,
+      templateId: command.templateId,
+      changes: cloneTemplateChanges(command.changes),
     };
   }
   return command;
@@ -323,6 +414,16 @@ export function fromCommand(command: ProjectCommand): z.infer<typeof ApiCommandS
       type: command.type,
       productId: command.productId,
       changes: { ...command.changes },
+    };
+  }
+  if (command.type === "template.add") {
+    return { type: command.type, template: cloneTemplate(command.template) };
+  }
+  if (command.type === "template.update") {
+    return {
+      type: command.type,
+      templateId: command.templateId,
+      changes: cloneTemplateChanges(command.changes),
     };
   }
   return command;
