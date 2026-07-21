@@ -265,6 +265,13 @@ interface NameCellTree {
   readonly canExpand: boolean;
   readonly isExpanded: boolean;
   readonly onToggleExpand: () => void;
+}
+
+/**
+ * The dnd-kit drag handle for a row, hosted in the leftmost (No.) column so the
+ * ⠿ grip reads as the row's left-edge affordance (Design 0003 §C-3).
+ */
+interface DragHandle {
   readonly dragRef?: ((element: HTMLElement | null) => void) | undefined;
   readonly dragListeners?: DragListeners | undefined;
   readonly dragAttributes?: DragAttributes | undefined;
@@ -289,38 +296,49 @@ function buildTree(rows: readonly WbsGridTaskRow[]): TreeRow[] {
 }
 
 /**
- * Decide the new parent for a drag re-parent, or null when the drop is a no-op
- * or illegal. Dropping row A onto row B nests A under B, except when B is A
- * itself, B is already A's parent, or B lives inside A's subtree (which would
- * create a cycle). This mirrors the domain's `validateParentHierarchy`
- * (self-parent + acyclic) so the client rejects the same drops the server does.
+ * The `task.update` sortOrder commands a reorder drop should dispatch, or `[]`
+ * when the drop moves nothing (Design 0003 §C-3: drag reorders, never
+ * re-parents). A row reorders only within its own sibling group (same
+ * `parentId`): dropping A onto B in a different group — or onto itself — is a
+ * no-op, so a subtask can never leave its parent and a root can only re-order
+ * among roots (its whole subtree rides along, since the subtree nests by
+ * `parentId`). This same-scope rule also subsumes the acyclic guard — a parent's
+ * descendants never share its `parentId`, so it can never drop into its own
+ * subtree.
+ *
+ * Within the group, A is spliced to B's slot — after B when A sat before B,
+ * before B when A sat after B (moving toward B's slot) — and the group's own
+ * sortOrder values are reassigned in the new order. Only the reordered slice
+ * renumbers; every other row (and every other sibling group) keeps its value,
+ * so the tree's sibling order changes exactly where intended. `rows` must be the
+ * projection order (sorted by (sortOrder, id)), which is the render order.
  */
-export function resolveReparentTarget(
+export function reorderSiblingCommands(
   active: DragData,
   over: DragData,
-  isWithinActiveSubtree: (candidateId: string) => boolean,
-): string | null {
-  if (over.id === active.id) return null;
-  if (over.id === active.parentId) return null;
-  if (isWithinActiveSubtree(over.id)) return null;
-  return over.id;
-}
-
-/**
- * The `task.update` re-parent command a drop should dispatch, or null when the
- * drop is a no-op / illegal. This is the exact command sent through the shared
- * `executeCommand` plumbing, so the drag path reuses the same save/reload/
- * conflict handling as every inline edit.
- */
-export function reparentCommand(
-  active: DragData,
-  over: DragData,
-  isWithinActiveSubtree: (candidateId: string) => boolean,
-): ProjectCommand | null {
-  const newParentId = resolveReparentTarget(active, over, isWithinActiveSubtree);
-  return newParentId === null
-    ? null
-    : { type: "task.update", taskId: active.id, changes: { parentId: newParentId } };
+  rows: readonly WbsGridTaskRow[],
+): ProjectCommand[] {
+  if (over.id === active.id) return [];
+  if (over.parentId !== active.parentId) return [];
+  const group = rows.filter((row) => row.parentId === active.parentId);
+  const orderedIds = group.map((row) => row.id);
+  const activeIndex = orderedIds.indexOf(active.id);
+  const overIndex = orderedIds.indexOf(over.id);
+  if (activeIndex === -1 || overIndex === -1) return [];
+  const nextOrder = orderedIds.filter((id) => id !== active.id);
+  // Splicing at `overIndex` lands A after B when it moved down (B shifts left one
+  // slot after A's removal) and before B when it moved up (B keeps its index).
+  nextOrder.splice(overIndex, 0, active.id);
+  const values = group.map((row) => row.sortOrder);
+  const currentById = new Map(group.map((row) => [row.id, row.sortOrder]));
+  const commands: ProjectCommand[] = [];
+  nextOrder.forEach((id, index) => {
+    const value = values[index]!;
+    if (currentById.get(id) !== value) {
+      commands.push({ type: "task.update", taskId: id, changes: { sortOrder: value } });
+    }
+  });
+  return commands;
 }
 
 /**
@@ -681,31 +699,6 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return map;
   }, [rows, overloadByKey]);
 
-  // For each row, the immediately-preceding/following sibling id (same parentId),
-  // or null at a group edge. `rows` is already sorted by (sortOrder, id) — the
-  // same order the projection renders and the tree nests — so grouping by
-  // parentId preserves each sibling run's display order. Powers the row reorder
-  // controls: "move up" swaps sortOrder with prevId, "move down" with nextId, and
-  // an edge (null) disables the button.
-  const siblingBounds = useMemo(() => {
-    const byParent = new Map<string | null, WbsGridTaskRow[]>();
-    for (const row of rows) {
-      const group = byParent.get(row.parentId) ?? [];
-      group.push(row);
-      byParent.set(row.parentId, group);
-    }
-    const bounds = new Map<string, { prevId: string | null; nextId: string | null }>();
-    for (const group of byParent.values()) {
-      group.forEach((row, index) => {
-        bounds.set(row.id, {
-          prevId: index > 0 ? group[index - 1]!.id : null,
-          nextId: index < group.length - 1 ? group[index + 1]!.id : null,
-        });
-      });
-    }
-    return bounds;
-  }, [rows]);
-
   // The grid is always the tree (Design 0003 §C-1): projection rows nested under
   // their parentId. There is no flat mode anymore.
   const treeData = useMemo(() => buildTree(rows), [rows]);
@@ -805,9 +798,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [renderRows],
   );
 
-  // parentId → child ids, for the acyclic drop guard (target must not sit inside
-  // the dragged row's own subtree). Built from the full projection, not the
-  // visible set, so a collapsed descendant still blocks an illegal drop.
+  // parentId → child ids and id → row, for the collapsed-parent rollup below.
+  // Built from the full projection, not the visible set, so a collapsed parent
+  // still aggregates its hidden descendants.
   const childrenByParentId = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const row of rows) {
@@ -818,21 +811,47 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     }
     return map;
   }, [rows]);
+  const rowById = useMemo(() => {
+    const map = new Map<string, WbsGridTaskRow>();
+    for (const row of rows) map.set(row.id, row);
+    return map;
+  }, [rows]);
 
-  const collectSubtree = useCallback(
-    (id: string): Set<string> => {
-      const found = new Set<string>();
-      const stack = [...(childrenByParentId.get(id) ?? [])];
-      while (stack.length > 0) {
-        const current = stack.pop()!;
-        if (found.has(current)) continue;
-        found.add(current);
-        for (const child of childrenByParentId.get(current) ?? []) stack.push(child);
+  // Design 0003 §C-7 — the display-only rollup a parent row shows *while
+  // collapsed*: its subtree's total effort (Σ of descendant leaves'
+  // plannedEffortMinutes) and, per date, the Σ of that day across all
+  // descendants' dailyPlan. Aggregated bottom-up over the tree (a leaf
+  // contributes its own effort/plan; a parent sums its children), memoized per
+  // id. This never touches the leaf-only EVM math or the projection — the grid
+  // just reads it for a collapsed parent's effort/daily cells.
+  const subtreeRollupById = useMemo(() => {
+    const map = new Map<string, { effortMinutes: number; daily: Map<string, number> }>();
+    const compute = (id: string): { effortMinutes: number; daily: Map<string, number> } => {
+      const cached = map.get(id);
+      if (cached !== undefined) return cached;
+      const acc = { effortMinutes: 0, daily: new Map<string, number>() };
+      const children = childrenByParentId.get(id);
+      if (children === undefined || children.length === 0) {
+        const row = rowById.get(id);
+        if (row !== undefined) {
+          acc.effortMinutes = row.plannedEffortMinutes;
+          for (const [date, minutes] of Object.entries(row.dailyPlan)) acc.daily.set(date, minutes);
+        }
+      } else {
+        for (const childId of children) {
+          const childAcc = compute(childId);
+          acc.effortMinutes += childAcc.effortMinutes;
+          for (const [date, minutes] of childAcc.daily) {
+            acc.daily.set(date, (acc.daily.get(date) ?? 0) + minutes);
+          }
+        }
       }
-      return found;
-    },
-    [childrenByParentId],
-  );
+      map.set(id, acc);
+      return acc;
+    };
+    for (const row of rows) compute(row.id);
+    return map;
+  }, [rows, rowById, childrenByParentId]);
 
   // initialRect seeds the viewport before the browser measures the scroller on
   // the first frame; a no-layout environment (e.g. tests) falls back to it.
@@ -976,25 +995,6 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [executeCommands],
   );
 
-  // Swap a row's sortOrder with an adjacent sibling's (same parentId), moving it
-  // up or down within its sibling run without touching the parent hierarchy. The
-  // two swapped values are read up front, so the batch is a true exchange; the
-  // projection re-sorts by (sortOrder, id) and the two rows trade places, leaving
-  // every other row's order untouched. Works identically in flat and tree modes.
-  const reorderSibling = useCallback(
-    (rowId: string, neighborId: string) => {
-      if (!editable) return;
-      const row = rows.find((candidate) => candidate.id === rowId);
-      const neighbor = rows.find((candidate) => candidate.id === neighborId);
-      if (row === undefined || neighbor === undefined) return;
-      executeCommands([
-        { type: "task.update", taskId: row.id, changes: { sortOrder: neighbor.sortOrder } },
-        { type: "task.update", taskId: neighbor.id, changes: { sortOrder: row.sortOrder } },
-      ]);
-    },
-    [editable, executeCommands, rows],
-  );
-
   // §C-5 — generate subtasks from a template chosen in the row menu. Runs the same
   // command the API accepts; the shared re-proration splits the parent's effort
   // across the template's weighted children, and the scheduler auto-places each
@@ -1102,22 +1102,17 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       const active = event.active.data.current as DragData | undefined;
       const over = event.over?.data.current as DragData | undefined;
       if (active === undefined || over === undefined) return;
-      const subtree = collectSubtree(active.id);
-      const command = reparentCommand(active, over, (candidateId) => subtree.has(candidateId));
-      if (command === null) return;
-      // Re-parent through the same typed command as every other edit; ④'s
-      // scheduler re-places the moved leaf and the leaf/rollup recompute on the
-      // write path (old parent may become a leaf, the new parent a summary).
-      const dispatched = executeCommand(command);
-      // Reveal the moved subtree by expanding its new parent.
-      if (dispatched && command.type === "task.update" && command.changes.parentId != null) {
-        const newParentId = command.changes.parentId;
-        setExpanded((previous) =>
-          previous === true ? previous : { ...previous, [newParentId]: true },
-        );
-      }
+      // Reorder only (Design 0003 §C-3): a subtask moves within its parent's
+      // children, a root among roots. A drop outside the active row's sibling
+      // group returns no commands, so nothing moves and nothing re-parents. The
+      // sortOrder rewrite dispatches through the shared batch path — same
+      // optimistic-apply → save → reload as every inline edit; the projection
+      // re-sorts by (sortOrder, id).
+      const commands = reorderSiblingCommands(active, over, rows);
+      if (commands.length === 0) return;
+      executeCommands(commands);
     },
-    [collectSubtree, editable, executeCommand],
+    [editable, executeCommands, rows],
   );
 
   const commit = useCallback(
@@ -1295,11 +1290,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     row: WbsGridTaskRow,
     rowIndex: number,
     tree?: NameCellTree,
+    drag?: DragHandle,
+    rollup?: { readonly effortMinutes: number },
   ) => {
     if (column.kind === "index") {
-      const bounds = siblingBounds.get(row.id);
-      const canMoveUp = editable && bounds?.prevId != null;
-      const canMoveDown = editable && bounds?.nextId != null;
       const indexSelected = selected.rowIndex === rowIndex && selected.colIndex === colIndex;
       const warning = rowWarningById.get(row.id);
       const indexClasses = ["cell", "cell--index"];
@@ -1313,68 +1307,50 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           data-col={column.id}
           onMouseDown={() => setSelected({ rowIndex, colIndex })}
         >
-          {warning !== undefined && (
+          {/* §C-3 — the ⠿ drag grip is the row's leftmost affordance now (the No.
+              column is the leftmost column); dragging reorders within the sibling
+              scope. The ▲▼ buttons are gone. */}
+          <span className="index-lead">
             <span
-              className="row-warning"
-              data-testid="row-warning"
+              ref={drag?.dragRef}
+              className="drag-grip"
+              data-testid="drag-grip"
               data-task-id={row.id}
-              role="img"
-              aria-label={warning.title}
-              title={warning.title}
+              title="ドラッグで並び替え"
+              {...(drag?.dragListeners ?? {})}
+              {...(drag?.dragAttributes ?? {})}
             >
-              ⚠
+              ⠿
             </span>
-          )}
-          <span className="row-no">{rowIndex + 1}</span>
-          <span className="reorder">
-            <button
-              type="button"
-              className="reorder-button"
-              data-testid="move-up"
-              data-task-id={row.id}
-              aria-label="ひとつ上の兄弟と入れ替え"
-              title="上へ移動"
-              disabled={!canMoveUp}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (bounds?.prevId != null) reorderSibling(row.id, bounds.prevId);
-              }}
-            >
-              ▲
-            </button>
-            <button
-              type="button"
-              className="reorder-button"
-              data-testid="move-down"
-              data-task-id={row.id}
-              aria-label="ひとつ下の兄弟と入れ替え"
-              title="下へ移動"
-              disabled={!canMoveDown}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (bounds?.nextId != null) reorderSibling(row.id, bounds.nextId);
-              }}
-            >
-              ▼
-            </button>
-            <button
-              type="button"
-              className="row-menu-button"
-              data-testid="row-menu-button"
-              data-task-id={row.id}
-              aria-label="行メニュー"
-              title="行メニュー（サブタスク追加・テンプレート）"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                openRowMenu(row.id, event.clientX, event.clientY);
-              }}
-            >
-              ⋯
-            </button>
+            {warning !== undefined && (
+              <span
+                className="row-warning"
+                data-testid="row-warning"
+                data-task-id={row.id}
+                role="img"
+                aria-label={warning.title}
+                title={warning.title}
+              >
+                ⚠
+              </span>
+            )}
+            <span className="row-no">{rowIndex + 1}</span>
           </span>
+          <button
+            type="button"
+            className="row-menu-button"
+            data-testid="row-menu-button"
+            data-task-id={row.id}
+            aria-label="行メニュー"
+            title="行メニュー（サブタスク追加・テンプレート）"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              openRowMenu(row.id, event.clientX, event.clientY);
+            }}
+          >
+            ⋯
+          </button>
         </div>
       );
     }
@@ -1387,6 +1363,15 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     if (column.kind === "derivedNum" && column.id === "costVarianceHours" && row.costVarianceHours < 0) {
       classes.push("cell--negative");
     }
+    // §C-7 — a collapsed parent surfaces its subtree's total effort in its own
+    // 工数(人時)/工数(人日) cells (a display-only summary of the hidden leaves).
+    const rollupText =
+      rollup !== undefined && column.id === "plannedEffortMinutes"
+        ? formatNumber(rollup.effortMinutes / 60)
+        : rollup !== undefined && column.id === "plannedEffortDays"
+          ? formatNumber(rollup.effortMinutes / 60 / 8)
+          : null;
+    if (rollupText !== null) classes.push("cell--rollup");
     const style: CSSProperties =
       column.id === "process"
         ? { width: column.width, borderLeft: `3px solid hsl(${processHue(row.process)} 50% 55%)` }
@@ -1422,22 +1407,17 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             ) : (
               <span className="tree-toggle-spacer" aria-hidden />
             )}
-            <span
-              ref={tree.dragRef}
-              className="drag-grip"
-              data-testid="drag-grip"
-              data-task-id={row.id}
-              title="ドラッグで親を付け替え"
-              {...(tree.dragListeners ?? {})}
-              {...(tree.dragAttributes ?? {})}
-            >
-              ⠿
-            </span>
           </span>
         )}
-        {isEditing
-          ? cellEditor(column)
-          : <span className="cell-text">{displayValue(column, row, rowIndex)}</span>}
+        {isEditing ? (
+          cellEditor(column)
+        ) : rollupText !== null ? (
+          <span className="cell-text" data-testid="rollup-effort" data-task-id={row.id}>
+            {rollupText}
+          </span>
+        ) : (
+          <span className="cell-text">{displayValue(column, row, rowIndex)}</span>
+        )}
       </div>
     );
   };
@@ -1676,6 +1656,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
               );
             }
             const { row, depth, canExpand, isExpanded, onToggleExpand } = renderRow;
+            // §C-7 — a collapsed parent (can expand, currently collapsed) rolls up
+            // its hidden subtree; an expanded parent shows nothing extra.
+            const collapsedRollup =
+              canExpand && !isExpanded ? subtreeRollupById.get(row.id) : undefined;
             return (
               <DndRow
                 key={virtualRow.key}
@@ -1683,10 +1667,18 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 parentId={row.parentId}
                 name={row.name}
               >
-                {(dnd) => (
+                {(dnd) => {
+                // §C-3 — light a row as a drop target only when the active drag can
+                // legally land there: same sibling scope (parentId) and not itself.
+                const isDropTarget =
+                  dnd.isOver &&
+                  activeDrag !== null &&
+                  activeDrag.id !== row.id &&
+                  activeDrag.parentId === row.parentId;
+                return (
               <div
                 ref={dnd.dropRef}
-                className={`grid-row ${row.parentId === null ? "grid-row--parent" : "grid-row--child"}${rowWarningById.has(row.id) ? " grid-row--warning" : ""}${dnd.isOver ? " grid-row--drop-target" : ""}`}
+                className={`grid-row ${row.parentId === null ? "grid-row--parent" : "grid-row--child"}${rowWarningById.has(row.id) ? " grid-row--warning" : ""}${isDropTarget ? " grid-row--drop-target" : ""}`}
                 role="row"
                 data-warning={rowWarningById.has(row.id) ? "true" : undefined}
                 data-row-id={row.id}
@@ -1705,16 +1697,16 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       row,
                       rowIndex,
                       column.id === "name"
+                        ? { depth, canExpand, isExpanded, onToggleExpand }
+                        : undefined,
+                      column.id === "no"
                         ? {
-                            depth,
-                            canExpand,
-                            isExpanded,
-                            onToggleExpand,
                             dragRef: dnd.dragRef,
                             dragListeners: dnd.dragListeners,
                             dragAttributes: dnd.dragAttributes,
                           }
                         : undefined,
+                      collapsedRollup,
                     ),
                   )}
                 </div>
@@ -1724,18 +1716,24 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                     className="cell-slot"
                     style={{ left: NON_PINNED_LEFT[index], width: column.width }}
                   >
-                    {renderMetaCell(column, META.indexOf(column), row, rowIndex)}
+                    {renderMetaCell(column, META.indexOf(column), row, rowIndex, undefined, undefined, collapsedRollup)}
                   </div>
                 ))}
                 {dayVirtualizer.getVirtualItems().map((virtualDay) => {
                   const date = days[virtualDay.index]!;
                   const minutes = row.dailyPlan[date] ?? 0;
+                  // §C-7 — a collapsed parent shows the Σ of that day across its
+                  // hidden descendants instead of its own (empty) plan; the cell is
+                  // then a read-only summary, not an editable plan cell.
+                  const rollupMinutes = collapsedRollup?.daily.get(date) ?? 0;
+                  const showRollup = collapsedRollup !== undefined;
+                  const displayMinutes = showRollup ? rollupMinutes : minutes;
                   // Shared weekend/holiday (grey) takes precedence over the
                   // assignee's paid leave (violet); either blocks editing. Every
                   // working day is hand-editable now (Design 0003 §C-2: no lock).
                   const nonWorking = sharedNonWorkingDates.has(date);
                   const paidLeave = !nonWorking && isPaidLeave(row.assigneeMemberId, date);
-                  const cellEditable = editable && !nonWorking && !paidLeave;
+                  const cellEditable = editable && !nonWorking && !paidLeave && !showRollup;
                   const isEditing =
                     dailyEditing?.rowId === row.id && dailyEditing.date === date;
                   // Cross-project overlay + overflow, per the row's assignee.
@@ -1750,7 +1748,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   const overloadEntry =
                     assignee !== null ? overloadByKey.get(overloadKey(assignee, date)) : undefined;
                   const classes = ["daily-cell"];
-                  if (minutes > 0) classes.push("daily-cell--filled");
+                  if (showRollup) {
+                    if (rollupMinutes > 0) classes.push("daily-cell--rollup");
+                  } else if (minutes > 0) {
+                    classes.push("daily-cell--filled");
+                  }
                   if (nonWorking) classes.push("daily-cell--nonworking");
                   else if (paidLeave) classes.push("daily-cell--leave");
                   classes.push(cellEditable ? "daily-cell--editable" : "daily-cell--readonly");
@@ -1762,18 +1764,21 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       style={{ left: virtualDay.start, width: DAILY_COL_W }}
                       data-daily-row={row.id}
                       data-daily-date={date}
+                      data-daily-rollup={showRollup ? "true" : undefined}
                       data-overload={overloadEntry !== undefined ? "true" : undefined}
                       aria-readonly={cellEditable ? undefined : true}
                       title={
                         overloadEntry !== undefined
                           ? `⚠ 工数超過 ${date.slice(5)}: 合計 ${formatNumber(overloadEntry.totalMinutes / 60)}h（本PJ ${formatNumber(overloadEntry.projectMinutes / 60)}h + 他PJ ${formatNumber(overloadEntry.externalMinutes / 60)}h）＞ 上限 ${formatNumber(overloadEntry.capacityMinutes / 60)}h`
-                          : externalMinutes > 0
-                            ? `他PJ負荷 ${formatNumber(externalMinutes / 60)}h`
-                            : cellEditable
-                              ? "日別計画 — ダブルクリックで編集"
-                              : "日別計画（非稼働日）"
+                          : showRollup
+                            ? "配下の日別合計（折畳中）"
+                            : externalMinutes > 0
+                              ? `他PJ負荷 ${formatNumber(externalMinutes / 60)}h`
+                              : cellEditable
+                                ? "日別計画 — ダブルクリックで編集"
+                                : "日別計画（非稼働日）"
                       }
-                      onDoubleClick={() => beginDailyEdit(row, date)}
+                      onDoubleClick={() => { if (!showRollup) beginDailyEdit(row, date); }}
                     >
                       {loadFraction > 0 && (
                         <div
@@ -1793,8 +1798,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                             onBlur={() => finishDailyEdit(true)}
                             onKeyDown={onDailyEditorKeyDown}
                           />
-                        ) : minutes > 0 ? (
-                          formatNumber(minutes / 60)
+                        ) : displayMinutes > 0 ? (
+                          formatNumber(displayMinutes / 60)
                         ) : (
                           ""
                         )}
@@ -1803,7 +1808,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   );
                 })}
               </div>
-                )}
+                );
+                }}
               </DndRow>
             );
           })}

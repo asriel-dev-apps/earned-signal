@@ -8,7 +8,7 @@ import {
   type ProjectCommand,
   type ProjectState,
 } from "@vecta/application";
-import { App, reparentCommand, resolveReparentTarget, type DragData } from "../src/App.js";
+import { App } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
 import { TaskSchema } from "../src/project-command-contract.js";
 import type { ProjectApiClient } from "../src/project-api-client.js";
@@ -74,37 +74,6 @@ async function ready(): Promise<void> {
     expect(screen.getByTestId("save-state").textContent).toBe("saved");
   });
 }
-
-describe("resolveReparentTarget / reparentCommand (drop decision)", () => {
-  const active: DragData = { id: "child", parentId: "p1", name: "Child" };
-
-  it("nests the dragged row under the drop target for a legal move", () => {
-    const over: DragData = { id: "p2", parentId: null, name: "Parent 2" };
-    expect(resolveReparentTarget(active, over, () => false)).toBe("p2");
-    expect(reparentCommand(active, over, () => false)).toEqual({
-      type: "task.update",
-      taskId: "child",
-      changes: { parentId: "p2" },
-    });
-  });
-
-  it("rejects dropping a row onto itself", () => {
-    const over: DragData = { id: "child", parentId: "p1", name: "Child" };
-    expect(resolveReparentTarget(active, over, () => false)).toBeNull();
-    expect(reparentCommand(active, over, () => false)).toBeNull();
-  });
-
-  it("treats a drop onto the current parent as a no-op", () => {
-    const over: DragData = { id: "p1", parentId: null, name: "Parent 1" };
-    expect(reparentCommand(active, over, () => false)).toBeNull();
-  });
-
-  it("rejects dropping a row into its own subtree (would create a cycle)", () => {
-    const over: DragData = { id: "grandchild", parentId: "child", name: "Grandchild" };
-    // grandchild is within the active row's subtree.
-    expect(reparentCommand(active, over, (id) => id === "grandchild")).toBeNull();
-  });
-});
 
 describe("App tree grid (§C-1)", () => {
   it("always renders the tree affordances (chevrons + drag handles) — no flat mode", async () => {
@@ -222,5 +191,95 @@ describe("App tree grid (§C-1)", () => {
     for (const child of childrenOfA) {
       expect(document.querySelector(`.grid-row[data-row-id="${child.id}"]`)).not.toBeNull();
     }
+  });
+});
+
+// Design 0003 §C-7 — a collapsed parent surfaces its subtree's total effort and
+// each day's descendant sum; an expanded parent shows nothing extra. A tiny
+// engineered seed (1 parent, 2 leaves with known plans) makes the numbers crisp.
+const rollupSeed: ProjectState = (() => {
+  const base = createDemoProject({ parentCount: 1, subtasksPerParent: 2, memberCount: 2 });
+  const tasks = base.tasks.map((task, index) => {
+    if (index === 1) {
+      return { ...task, plannedEffortMinutes: 180, dailyPlan: { "2026-01-05": 120, "2026-01-06": 60 } };
+    }
+    if (index === 2) {
+      return { ...task, plannedEffortMinutes: 240, dailyPlan: { "2026-01-05": 240 } };
+    }
+    return task;
+  });
+  return { ...base, tasks };
+})();
+const rollupParent = rollupSeed.tasks[0]!; // total leaves: 420m = 7h; 01-05 Σ = 360m = 6h
+
+function rollupClient(): ProjectApiClient {
+  return {
+    load: async () => ({ revision: "1", current: rollupSeed }),
+    grid: async () => projectWbsGrid(rollupSeed),
+    execute: async () => ({ revision: "2", replayed: false }),
+  };
+}
+
+// Reveal the daily column at `dateIndex` (48px each) past the ~2592px of frozen
+// meta columns, matching the cross-project suite's scroll approach.
+async function revealDailyColumn(dateIndex: number): Promise<void> {
+  const scroller = screen.getByTestId("wbs-grid") as HTMLDivElement;
+  scroller.scrollLeft = 2592 + dateIndex * 48 - 600;
+  fireEvent.scroll(scroller);
+  await waitFor(() => {
+    expect(document.querySelector("[data-daily-date]")).not.toBeNull();
+  });
+}
+
+describe("App collapsed-parent rollup (§C-7)", () => {
+  it("shows nothing extra on the effort cell while the parent is expanded", async () => {
+    render(<App client={rollupClient()} />);
+    await ready();
+
+    // Expanded (default): the effort cell shows the parent's own value, and there
+    // is no rollup marker.
+    const effortCell = document.querySelector(
+      `.grid-row[data-row-id="${rollupParent.id}"] [data-col="plannedEffortMinutes"]`,
+    ) as HTMLElement;
+    expect(effortCell).not.toBeNull();
+    expect(effortCell.querySelector('[data-testid="rollup-effort"]')).toBeNull();
+  });
+
+  it("rolls up the subtree's total effort and each day's sum once collapsed", async () => {
+    render(<App client={rollupClient()} />);
+    await ready();
+
+    // Collapse the parent, hiding its two leaves.
+    const toggle = document.querySelector(
+      `[data-testid="tree-toggle"][data-task-id="${rollupParent.id}"]`,
+    ) as HTMLButtonElement;
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(document.querySelector(`.grid-row[data-row-id="${rollupSeed.tasks[1]!.id}"]`)).toBeNull();
+    });
+
+    // 工数(人時) rolls up to Σ leaves = 420m = 7h; 工数(人日) = 7/8 → 0.9.
+    const hoursCell = document.querySelector(
+      `.grid-row[data-row-id="${rollupParent.id}"] [data-col="plannedEffortMinutes"]`,
+    ) as HTMLElement;
+    expect(hoursCell.querySelector('[data-testid="rollup-effort"]')?.textContent).toBe("7");
+    const daysCell = document.querySelector(
+      `.grid-row[data-row-id="${rollupParent.id}"] [data-col="plannedEffortDays"]`,
+    ) as HTMLElement;
+    expect(daysCell.querySelector('[data-testid="rollup-effort"]')?.textContent).toBe("0.9");
+
+    // Each daily column shows the descendant sum: 2026-01-05 → 120 + 240 = 360m = 6h.
+    await revealDailyColumn(0);
+    const dayCell = await waitFor(() => {
+      const found = document.querySelector(
+        `[data-daily-row="${rollupParent.id}"][data-daily-date="2026-01-05"]`,
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(dayCell.getAttribute("data-daily-rollup")).toBe("true");
+    expect(dayCell.textContent).toBe("6");
+    // The rolled-up daily cell is a read-only summary, not an editable plan cell.
+    expect(dayCell.getAttribute("aria-readonly")).toBe("true");
   });
 });

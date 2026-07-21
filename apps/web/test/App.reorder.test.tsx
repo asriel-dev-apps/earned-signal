@@ -1,14 +1,9 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import {
-  applyProjectCommand,
-  projectWbsGrid,
-  type ProjectCommand,
-  type ProjectState,
-} from "@vecta/application";
-import { App } from "../src/App.js";
+import { projectWbsGrid, type ProjectState } from "@vecta/application";
+import { App, reorderSiblingCommands, type DragData } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
 import type { ProjectApiClient } from "../src/project-api-client.js";
 
@@ -27,33 +22,26 @@ beforeAll(() => {
 afterEach(() => cleanup());
 
 const project: ProjectState = createDemoProject({ parentCount: 2, subtasksPerParent: 3, memberCount: 2 });
+const grid = projectWbsGrid(project);
+const rows = grid.rows;
 const roots = project.tasks.filter((task) => task.parentId === null);
 const parentA = roots[0]!;
 const parentB = roots[1]!;
 const childrenOfA = project.tasks.filter((task) => task.parentId === parentA.id);
+const childrenOfB = project.tasks.filter((task) => task.parentId === parentB.id);
 
-/**
- * A fake client that applies each executed command to its own project copy (via
- * the same `applyProjectCommand` the server runs) and serves it back, so the
- * optimistic-apply → save → reload round trip settles on the reordered state.
- */
-function statefulFakeClient(seed: ProjectState): {
-  readonly client: ProjectApiClient;
-  readonly execute: ReturnType<typeof vi.fn<(command: ProjectCommand, revision: string) => Promise<{ revision: string; replayed: boolean }>>>;
-} {
-  let current = seed;
-  let revisionCounter = 7;
-  const execute = vi.fn(async (command: ProjectCommand) => {
-    current = applyProjectCommand(current, command);
-    revisionCounter += 1;
-    return { revision: String(revisionCounter), replayed: false };
-  });
-  const client: ProjectApiClient = {
-    load: async () => ({ revision: String(revisionCounter), current }),
-    grid: async () => projectWbsGrid(current),
+/** Build the drag payload the grid attaches to a row (id + parentId + name). */
+function dragData(id: string): DragData {
+  const row = rows.find((candidate) => candidate.id === id)!;
+  return { id: row.id, parentId: row.parentId, name: row.name };
+}
+
+function fakeClient(execute = vi.fn(async () => ({ revision: "8", replayed: false }))): ProjectApiClient {
+  return {
+    load: async () => ({ revision: "7", current: project }),
+    grid: async () => grid,
     execute,
   };
-  return { client, execute };
 }
 
 async function ready(): Promise<void> {
@@ -63,114 +51,71 @@ async function ready(): Promise<void> {
   });
 }
 
-function rowOrder(): string[] {
-  return Array.from(document.querySelectorAll(".grid-row")).map(
-    (row) => row.getAttribute("data-row-id") ?? "",
-  );
-}
-
-function moveButton(direction: "up" | "down", taskId: string): HTMLButtonElement {
-  return document.querySelector(
-    `[data-testid="move-${direction}"][data-task-id="${taskId}"]`,
-  ) as HTMLButtonElement;
-}
-
-describe("App sibling reorder", () => {
-  it("swaps two child siblings' sortOrder via the down control and reorders the grid", async () => {
-    const { client, execute } = statefulFakeClient(project);
-    render(<App client={client} />);
-    await ready();
-
-    const first = childrenOfA[0]!;
-    const second = childrenOfA[1]!;
-    // Before: first child precedes the second among parent A's children.
-    expect(rowOrder().indexOf(first.id)).toBeLessThan(rowOrder().indexOf(second.id));
-
-    fireEvent.click(moveButton("down", first.id));
-
-    // A single click dispatches the two-command swap: each row takes the other's
-    // sortOrder (a true exchange), leaving every other row's order untouched.
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
-    expect(execute.mock.calls[0]![0]).toEqual({
-      type: "task.update",
-      taskId: first.id,
-      changes: { sortOrder: second.sortOrder },
-    });
-    expect(execute.mock.calls[1]![0]).toEqual({
-      type: "task.update",
-      taskId: second.id,
-      changes: { sortOrder: first.sortOrder },
-    });
-
-    // After the reload the two siblings have traded places in the grid.
-    await waitFor(() => {
-      expect(rowOrder().indexOf(second.id)).toBeLessThan(rowOrder().indexOf(first.id));
-    });
+// Design 0003 §C-3 — drag REORDERS within the sibling scope; it never re-parents.
+// The drop semantics live in the pure `reorderSiblingCommands` helper (the exact
+// commands `onDragEnd` dispatches through the shared batch path), unit-tested
+// here over the real projection rows.
+describe("reorderSiblingCommands (drag reorder semantics)", () => {
+  it("reorders a subtask within its parent, renumbering that sibling group's slots", () => {
+    const [first, middle, last] = childrenOfA;
+    // Drag the first child onto the last: it lands after the last, and the two it
+    // passes shift up one slot — so all three renumber within the group's own
+    // sortOrder values (nothing else moves, no re-parenting).
+    const commands = reorderSiblingCommands(dragData(first!.id), dragData(last!.id), rows);
+    expect(commands).toEqual([
+      { type: "task.update", taskId: middle!.id, changes: { sortOrder: first!.sortOrder } },
+      { type: "task.update", taskId: last!.id, changes: { sortOrder: middle!.sortOrder } },
+      { type: "task.update", taskId: first!.id, changes: { sortOrder: last!.sortOrder } },
+    ]);
   });
 
-  it("swaps two child siblings via the up control (mirror of down)", async () => {
-    const { client, execute } = statefulFakeClient(project);
-    render(<App client={client} />);
-    await ready();
-
-    const first = childrenOfA[0]!;
-    const second = childrenOfA[1]!;
-
-    fireEvent.click(moveButton("up", second.id));
-
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
-    expect(execute.mock.calls[0]![0]).toEqual({
-      type: "task.update",
-      taskId: second.id,
-      changes: { sortOrder: first.sortOrder },
-    });
-    expect(execute.mock.calls[1]![0]).toEqual({
-      type: "task.update",
-      taskId: first.id,
-      changes: { sortOrder: second.sortOrder },
-    });
-    await waitFor(() => {
-      expect(rowOrder().indexOf(second.id)).toBeLessThan(rowOrder().indexOf(first.id));
-    });
+  it("swaps two adjacent subtasks (drag onto the neighbor renumbers just those two)", () => {
+    const [first, second] = childrenOfA;
+    const commands = reorderSiblingCommands(dragData(first!.id), dragData(second!.id), rows);
+    expect(commands).toEqual([
+      { type: "task.update", taskId: second!.id, changes: { sortOrder: first!.sortOrder } },
+      { type: "task.update", taskId: first!.id, changes: { sortOrder: second!.sortOrder } },
+    ]);
   });
 
-  it("disables the reorder controls at the edges of a sibling run", async () => {
-    const { client } = statefulFakeClient(project);
-    render(<App client={client} />);
-    await ready();
-
-    const firstChild = childrenOfA[0]!;
-    const lastChild = childrenOfA[childrenOfA.length - 1]!;
-
-    // First/last child: cannot move up/down past its run.
-    expect(moveButton("up", firstChild.id).disabled).toBe(true);
-    expect(moveButton("down", firstChild.id).disabled).toBe(false);
-    expect(moveButton("down", lastChild.id).disabled).toBe(true);
-    expect(moveButton("up", lastChild.id).disabled).toBe(false);
-
-    // Root siblings are their own run: first root can't move up, last can't move down.
-    expect(moveButton("up", parentA.id).disabled).toBe(true);
-    expect(moveButton("down", parentB.id).disabled).toBe(true);
+  it("is a no-op when a subtask is dropped outside its own parent (no re-parenting)", () => {
+    // Onto a child of a different parent…
+    expect(reorderSiblingCommands(dragData(childrenOfA[0]!.id), dragData(childrenOfB[0]!.id), rows)).toEqual([]);
+    // …and onto a root: different sibling scope, so nothing moves.
+    expect(reorderSiblingCommands(dragData(childrenOfA[0]!.id), dragData(parentB.id), rows)).toEqual([]);
   });
 
-  it("reorders root siblings (and their subtrees) in the tree", async () => {
-    const { client, execute } = statefulFakeClient(project);
-    render(<App client={client} />);
+  it("reorders a root (whole subtree) among roots only", () => {
+    const commands = reorderSiblingCommands(dragData(parentA.id), dragData(parentB.id), rows);
+    // Root A moves after root B; the two roots trade their own sortOrder slots, so
+    // A's subtree rides along (it still nests under A by parentId).
+    expect(commands).toEqual([
+      { type: "task.update", taskId: parentB.id, changes: { sortOrder: parentA.sortOrder } },
+      { type: "task.update", taskId: parentA.id, changes: { sortOrder: parentB.sortOrder } },
+    ]);
+  });
+
+  it("is a no-op when a row is dropped onto itself", () => {
+    expect(reorderSiblingCommands(dragData(parentA.id), dragData(parentA.id), rows)).toEqual([]);
+    expect(reorderSiblingCommands(dragData(childrenOfA[0]!.id), dragData(childrenOfA[0]!.id), rows)).toEqual([]);
+  });
+});
+
+describe("App reorder affordances (§C-3)", () => {
+  it("hosts the ⠿ drag grip in the No. column and drops the ▲▼ reorder buttons", async () => {
+    render(<App client={fakeClient()} />);
     await ready();
 
-    // Before: parent A precedes parent B.
-    expect(rowOrder().indexOf(parentA.id)).toBeLessThan(rowOrder().indexOf(parentB.id));
+    // The ▲▼ per-row reorder buttons are gone entirely.
+    expect(document.querySelector('[data-testid="move-up"]')).toBeNull();
+    expect(document.querySelector('[data-testid="move-down"]')).toBeNull();
 
-    fireEvent.click(moveButton("down", parentA.id));
-
-    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
-    // After the swap the tree nests B's and A's subtrees under the new root order,
-    // so B (with its children) now precedes A.
-    await waitFor(() => {
-      const order = rowOrder();
-      expect(order.indexOf(parentB.id)).toBeLessThan(order.indexOf(parentA.id));
-      // A's children still nest under A (subtree moved with it, not orphaned).
-      expect(order.indexOf(parentA.id)).toBeLessThan(order.indexOf(childrenOfA[0]!.id));
-    });
+    // Every row (parent and subtask) still carries a ⠿ grip, now hosted in the
+    // leftmost No. column so it reads as the row's left-edge affordance.
+    for (const id of [parentA.id, childrenOfA[0]!.id]) {
+      const grip = document.querySelector(`[data-testid="drag-grip"][data-task-id="${id}"]`);
+      expect(grip).not.toBeNull();
+      expect(grip!.closest("[data-col]")?.getAttribute("data-col")).toBe("no");
+    }
   });
 });

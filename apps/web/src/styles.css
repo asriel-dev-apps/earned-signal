@@ -543,11 +543,18 @@ body {
 }
 .cell--negative { color: var(--risk); font-weight: 600; }
 
-/* No. column: row number + sibling reorder controls. */
+/* No. column: ⠿ drag grip (left-edge affordance) + row number, ⋯ menu at right. */
 .cell--index {
   justify-content: space-between;
   gap: 4px;
+  padding-left: 4px;
   padding-right: 4px;
+}
+.index-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
 }
 .row-no {
   font-variant-numeric: tabular-nums;
@@ -555,33 +562,6 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
-.reorder {
-  display: inline-flex;
-  gap: 1px;
-  opacity: 0;
-  transition: opacity 0.1s ease;
-}
-.grid-row:hover .reorder,
-.grid-row:has(.cell--selected) .reorder,
-.reorder:focus-within { opacity: 1; }
-.reorder-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 8px;
-  line-height: 1;
-  cursor: pointer;
-}
-.reorder-button:hover:not(:disabled) { color: var(--accent-strong); background: var(--accent-soft); }
-.reorder-button:focus-visible { outline: none; box-shadow: var(--ring); opacity: 1; }
-.reorder-button:disabled { color: var(--faint); opacity: 0.35; cursor: default; }
 
 /* Status chips. */
 .cell--status { font-weight: 600; }
@@ -715,11 +695,13 @@ body {
 }
 .tree-toggle:hover { color: var(--accent-strong); background: var(--accent-soft); }
 .tree-toggle-spacer { display: inline-block; width: 16px; flex: 0 0 auto; }
+/* ⠿ drag grip — the row's left-edge affordance in the No. column (§C-3). */
 .drag-grip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 14px;
+  flex: 0 0 auto;
   color: var(--faint);
   font-size: 12px;
   line-height: 1;
@@ -729,10 +711,26 @@ body {
 }
 .drag-grip:hover { color: var(--muted); }
 
-/* Row highlighted as a valid drop target while a re-parent drag is over it. */
+/* Row highlighted as a valid drop target while a reorder drag is over it (same
+   sibling scope only — a cross-scope drop is a no-op, so it never lights up). */
 .grid-row--drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grid-row--drop-target .pinned-group,
 .grid-row--drop-target .cell { background: var(--accent-soft); }
+
+/* ── Collapsed-parent rollup (§C-7) ─────────────────────────────────── */
+/* A collapsed parent surfaces its subtree's total effort (工数 cells) and each
+   day's descendant sum (daily cells) as a quiet summary — distinct-but-subtle:
+   a soft accent tint and de-emphasised weight, clearly not a hand-entered value. */
+.cell--rollup {
+  color: var(--accent-strong);
+  font-style: italic;
+}
+.daily-cell--rollup {
+  color: var(--accent-strong);
+  font-style: italic;
+  background: var(--accent-soft);
+}
+.grid-row--parent .daily-cell.daily-cell--rollup { background: var(--accent-soft); }
 
 .drag-overlay-chip {
   padding: 5px 11px;
