@@ -21,6 +21,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,6 +45,7 @@ import {
   detectOverloads,
   externalMinutesFor,
   overloadKey,
+  projectLoadByMember,
   synthesizeExternalLoad,
   type ExternalLoad,
   type OverloadEntry,
@@ -58,6 +60,9 @@ const HEAD_NAME_H = 46;
 const HEADER_H = BAND_H + HEAD_NAME_H;
 const ROW_H = 30;
 const DAILY_COL_W = 48;
+// §G-1 — row height of the member daily-total panel below the grid. Independent
+// of the grid's ROW_H (only the day columns align with the grid horizontally).
+const MEMBER_ROW_H = 28;
 
 type ColKind =
   | "index"
@@ -571,6 +576,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [pendingAddedTaskId, setPendingAddedTaskId] = useState<string | null>(null);
   const saving = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  // §G-1 — the member daily-total panel: its own horizontal scroll container,
+  // kept in lockstep with the grid, and a component-local open/closed toggle.
+  const memberPanelRef = useRef<HTMLDivElement>(null);
+  const [memberPanelOpen, setMemberPanelOpen] = useState(false);
 
   const rows = grid.rows as WbsGridTaskRow[];
   const editable = saveState === "preview" || saveState === "saved";
@@ -710,6 +719,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     for (const entry of overloads) map.set(overloadKey(entry.memberId, entry.date), entry);
     return map;
   }, [overloads]);
+  // §G-1 — this-project planned minutes per (member, date): Σ dailyPlan across the
+  // member's tasks. The exact aggregation the overload detector runs, reused by
+  // the member daily-total panel so its this-project figure matches the grid.
+  const projectLoadByMemberMap = useMemo(() => projectLoadByMember(rows), [rows]);
 
   // Design 0003 §C-2 — non-blocking, row-level validation. A row is flagged when
   // its estimate disagrees with its children (親≠Σ子) or its daily plot
@@ -909,6 +922,32 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     paddingStart: META_WIDTH,
     initialRect: { width: 1440, height: 720 },
   });
+
+  // §G-1 — keep the member panel's horizontal scroll in lockstep with the grid.
+  // Each handler mirrors scrollLeft to its peer; the inequality guard breaks the
+  // echo (the mirrored write fires the peer's scroll, which now finds the two
+  // equal and no-ops), so no explicit "is-syncing" flag is needed. Only the day
+  // columns are shared, so vertical scroll on either side is left untouched.
+  const syncGridToPanel = useCallback(() => {
+    const panel = memberPanelRef.current;
+    const scroller = scrollerRef.current;
+    if (panel === null || scroller === null) return;
+    if (panel.scrollLeft !== scroller.scrollLeft) panel.scrollLeft = scroller.scrollLeft;
+  }, []);
+  const syncPanelToGrid = useCallback(() => {
+    const panel = memberPanelRef.current;
+    const scroller = scrollerRef.current;
+    if (panel === null || scroller === null) return;
+    if (scroller.scrollLeft !== panel.scrollLeft) scroller.scrollLeft = panel.scrollLeft;
+  }, []);
+  // Seed the panel's scroll offset from the grid the moment it opens, before
+  // paint, so its day columns line up immediately without a scroll event.
+  useLayoutEffect(() => {
+    if (!memberPanelOpen) return;
+    const panel = memberPanelRef.current;
+    const scroller = scrollerRef.current;
+    if (panel !== null && scroller !== null) panel.scrollLeft = scroller.scrollLeft;
+  }, [memberPanelOpen]);
 
   const reload = useCallback(async () => {
     if (client === undefined) return;
@@ -1596,6 +1635,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         aria-rowcount={rows.length}
         data-testid="wbs-grid"
         onKeyDown={onGridKeyDown}
+        onScroll={syncGridToPanel}
       >
         <div
           className="grid-canvas"
@@ -1901,6 +1941,130 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           }}
         />
       </footer>
+
+      {/* §G-1 — member daily-total panel. Rows = the project's members; columns =
+          the WBS grid's day axis (the same virtualized DAILY_COL_W day cells past
+          a META_WIDTH member label), horizontally scroll-synced with the grid so a
+          day lines up under its grid column. Each cell is the member's total
+          planned hours that day — Σ this-project dailyPlan (projectLoadByMember) +
+          cross-project ExternalLoad (externalMinutesFor) — with an accent heat
+          shading it by load fraction; a capacity overflow (overloadByKey) reddens
+          it, reusing the grid's --overload* language. A quiet toggle opens/closes
+          it; the state is component-local. */}
+      <section className="member-panel" data-testid="member-panel">
+        <button
+          type="button"
+          className="member-panel-toggle"
+          data-testid="member-panel-toggle"
+          aria-expanded={memberPanelOpen}
+          onClick={() => setMemberPanelOpen((open) => !open)}
+        >
+          <span className="member-panel-caret" aria-hidden>{memberPanelOpen ? "▾" : "▸"}</span>
+          メンバー日次負荷
+          <span className="member-panel-hint">行=メンバー · 列=日次合計h（他PJ込み） · 超過は赤</span>
+        </button>
+        {memberPanelOpen && (
+          <div
+            ref={memberPanelRef}
+            className="member-panel-scroll"
+            data-testid="member-panel-scroll"
+            onScroll={syncPanelToGrid}
+          >
+            <div
+              className="member-panel-canvas"
+              style={{
+                width: dayVirtualizer.getTotalSize(),
+                height: Math.max(1, project.members.length) * MEMBER_ROW_H,
+              }}
+            >
+              {project.members.length === 0 ? (
+                <div className="member-panel-empty">メンバーが登録されていません</div>
+              ) : (
+                project.members.map((member, memberIndex) => {
+                  const capacity = capacityByMember.get(member.id);
+                  const perDate = projectLoadByMemberMap.get(member.id);
+                  return (
+                    <div
+                      key={member.id}
+                      className="member-row"
+                      data-testid="member-row"
+                      data-member-id={member.id}
+                      style={{
+                        top: memberIndex * MEMBER_ROW_H,
+                        height: MEMBER_ROW_H,
+                        width: dayVirtualizer.getTotalSize(),
+                      }}
+                    >
+                      {/* The name label freezes only across the grid's pinned
+                          columns (PINNED_WIDTH), matching the grid's sticky group,
+                          so it never overruns the viewport; the day cells still
+                          begin at META_WIDTH (via virtualDay.start), so a day lines
+                          up under its grid column. The gap between the two scrolls
+                          away exactly like the grid's non-pinned meta. */}
+                      <div
+                        className="member-label"
+                        style={{ width: PINNED_WIDTH }}
+                        title={
+                          capacity !== undefined
+                            ? `${member.name} · 1日上限 ${formatNumber(capacity / 60)}h`
+                            : member.name
+                        }
+                      >
+                        {member.name}
+                      </div>
+                      {dayVirtualizer.getVirtualItems().map((virtualDay) => {
+                        const date = days[virtualDay.index]!;
+                        const projectMinutes = perDate?.get(date) ?? 0;
+                        const externalMinutes = externalMinutesFor(externalLoad, member.id, date);
+                        const totalMinutes = projectMinutes + externalMinutes;
+                        const overloaded = overloadByKey.has(overloadKey(member.id, date));
+                        const nonWorking = sharedNonWorkingDates.has(date);
+                        const loadFraction =
+                          capacity !== undefined && capacity > 0 && totalMinutes > 0
+                            ? Math.min(1, totalMinutes / capacity)
+                            : 0;
+                        const classes = ["member-day-cell"];
+                        if (nonWorking) classes.push("member-day-cell--nonworking");
+                        if (overloaded) classes.push("member-day-cell--overload");
+                        else if (totalMinutes > 0) classes.push("member-day-cell--load");
+                        return (
+                          <div
+                            key={virtualDay.key}
+                            className={classes.join(" ")}
+                            style={{ left: virtualDay.start, width: DAILY_COL_W }}
+                            data-member-row={member.id}
+                            data-member-date={date}
+                            data-member-overload={overloaded ? "true" : undefined}
+                            title={
+                              overloaded
+                                ? `⚠ 工数超過 ${date.slice(5)}: 合計 ${formatNumber(totalMinutes / 60)}h（本PJ ${formatNumber(projectMinutes / 60)}h + 他PJ ${formatNumber(externalMinutes / 60)}h）＞ 上限 ${capacity !== undefined ? formatNumber(capacity / 60) : "—"}h`
+                                : totalMinutes > 0
+                                  ? `${date.slice(5)}: 合計 ${formatNumber(totalMinutes / 60)}h（本PJ ${formatNumber(projectMinutes / 60)}h + 他PJ ${formatNumber(externalMinutes / 60)}h）`
+                                  : `${date.slice(5)}: 割当なし`
+                            }
+                          >
+                            {loadFraction > 0 && !overloaded && (
+                              <div
+                                className="member-day-heat"
+                                style={{ opacity: loadFraction * 0.5 }}
+                                data-testid="member-day-heat"
+                                aria-hidden
+                              />
+                            )}
+                            <span className="member-day-value">
+                              {totalMinutes > 0 ? formatNumber(totalMinutes / 60) : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* §C-5 — the row action menu (⋯ / right-click). Fixed-positioned at the
           click, closed on outside-click / Escape (see effect above). */}

@@ -1405,6 +1405,131 @@ body {
 
 .template-step-add { margin-top: 4px; }
 
+/* ── Member daily-total panel (Design 0003 §G-1) ─────────────────────────
+   A bottom-docked panel: rows = members, columns = the WBS grid's day axis (the
+   same DAILY_COL_W day cells past a META_WIDTH member label), scroll-synced with
+   the grid so each day lines up under its grid column above. Each cell is the
+   member's total planned hours that day (this-project Σ dailyPlan + cross-project
+   ExternalLoad); an accent heat shades it by load, and a capacity overflow
+   reddens it, reusing the grid's --overload* language. A quiet toggle opens it. */
+.member-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line-strong);
+}
+
+.member-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 20px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink-soft);
+  background: var(--panel-2);
+  border: none;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.member-panel-toggle:hover { color: var(--ink); background: var(--accent-soft); }
+.member-panel-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
+.member-panel-caret { width: 12px; color: var(--muted); font-size: 10px; }
+.member-panel-hint {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+
+.member-panel-scroll {
+  position: relative;
+  max-height: 34vh;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.member-panel-canvas { position: relative; }
+
+.member-panel-empty {
+  padding: 12px 20px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.member-row {
+  position: absolute;
+  left: 0;
+  display: block;
+  border-bottom: 1px solid var(--line);
+}
+.member-row:hover .member-label { color: var(--ink); }
+
+/* The member name label — sticky-left across the grid's frozen PINNED_WIDTH (set
+   inline) so it never overruns the viewport, while the day cells begin at
+   META_WIDTH (their virtualDay.start) exactly like the grid's day cells; the blank
+   span between the two scrolls away like the grid's non-pinned meta columns. */
+.member-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 10px;
+  border-right: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-day-cell {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  color: var(--muted);
+  background: var(--panel);
+}
+.member-day-cell--nonworking { background: var(--daily-nonworking-bg); }
+.member-day-cell--load { color: var(--daily-fill-ink); font-weight: 600; }
+
+/* Continuous heat behind the value: an accent wash whose opacity scales with the
+   day's total load as a fraction of the member's daily capacity (set inline),
+   capped at half so the hours value above it stays legible. */
+.member-day-heat {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* Capacity overflow — the strongest signal, reusing the grid's overload tokens. */
+.member-day-cell--overload {
+  background: var(--overload-bg);
+  box-shadow: inset 0 0 0 1px var(--overload-line);
+  color: var(--overload-ink);
+  font-weight: 700;
+}
+
+.member-day-value { position: relative; z-index: 1; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
