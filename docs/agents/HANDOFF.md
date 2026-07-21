@@ -180,14 +180,34 @@ must live **inside `apps/web/`** so `@vitejs/plugin-react` resolves — `VITE_VE
 --dir apps/web exec vite build --config <cfg>` (drop the cloudflare plugin, `define`
 `import.meta.env.VITE_VECTA_PREVIEW`), serve the outDir, shoot with playwright.
 
-### Remaining backlog (design 0003)
+### P2 progress 2026-07-21 — E-1 done (subtask templates → DB master). **P2 COMPLETE.**
 
-- **C-6**: 工程/プロダクト dropdowns done with E-2 (`ba68c6b`); 担当 was already a select → C-6 complete.
-- **E-1** (next): subtask-template DB masters + テンプレ management screen (templates are still
-  builtin constants in `packages/application/src/subtask-templates.ts`, project-scoped per 確認事項
-  #4). Add the **テンプレート** nav link when this lands (omitted now to avoid a dead link).
-- **Deploy**: run migration 0004 on live Neon at the next deploy (deferred like 0002/0003); then
-  E-2 is user-visible in prod. Use the manual deploy recipe above.
+**Committed `e4d54dd`** (pushed with this HANDOFF commit). Full gate green (domain 32, application
+67, persistence 34, web 111); migration exercised on real Postgres via testcontainers.
+- **Schema**: `subtask_templates` table (project-scoped; `name` + ordered `subtasks` jsonb).
+  **Migration 0005** creates it and seeds the two former-builtin templates (Standard build, Design
+  and review) into every existing `(tenant,project)`; NOT yet run on live Neon (deferred like 0002-0004).
+- **Application**: `template.*` commands + validation; `ProjectState.templates`; `generateSubtaskTasks`
+  resolves from `state.templates` (builtin `SUBTASK_TEMPLATES` / `getSubtaskTemplate` /
+  `listSubtaskTemplates` removed; `prorateLargestRemainder` + `deriveSubtaskId` kept). `template.delete`
+  needs no referential guard (generation copies step data into children; no template FK on a task).
+- **Web**: `TemplateScreen` (list CRUD + ordered step editor: 名称 / 重み% / 依存[FS/SS/FF/SF+なし] /
+  ラグ営業日, ▲▼ reorder, Σ重み hint); **テンプレート** top-bar nav segment (nav is now
+  WBS | マスタ | テンプレート); the C-5 row menu + grid read templates from project state;
+  `task.generateSubtasks` templateId is now a uuid. Verified by screenshot + web tests.
+
+Also `6a1b92e` (hygiene): three source files carried a **raw NUL byte** as a composite-key separator
+(the dependency-edge key + two member×date ledgers), which made `file`/`grep` treat them as binary.
+Replaced with `backslash-u-0000` escapes — byte-identical at runtime, valid UTF-8 on disk. Repo-wide NUL scan
+now clean. Note: the repo `scratchpad/` is inside `eslint .` scope, so a screenshot build's output
+must go **outside the repo** (e.g. the session scratchpad), else a built bundle there fails the gate.
+
+### Remaining backlog (design 0003) — P2 done; only deploy + P3 left
+
+- **P2 = COMPLETE** (A/B/C/D in P0/P1; E-2 `ba68c6b`; E-1 `e4d54dd`). C-6 done (工程/プロダクト with
+  E-2, 担当 already a select).
+- **Deploy**: run migrations **0004 + 0005** on live Neon at the next deploy (deferred like 0002/0003),
+  then redeploy the worker (manual recipe above); this makes all of P2 user-visible in prod.
 - **P3**: F-1 unique numbering (approved: internal UUID + project-scoped immutable display seq),
   G-1 member daily-total bottom panel (option a).
 
