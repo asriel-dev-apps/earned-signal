@@ -145,7 +145,16 @@ the repo `wrangler.jsonc` targets `vecta-local`/`-staging`/`-production` — non
    `earned-signal-realignment.md`). **Gotcha:** do NOT pass `--mode production` — it sets
    `CLOUDFLARE_ENV=production` and the cloudflare vite plugin suffixes the worker to
    `vecta-production` (wrong worker). Always deploy with an explicit `--name vecta`.
-3. `pnpm --dir apps/web exec wrangler deploy --name vecta` (dry-run first).
+3. Deploy from the **cloudflare-vite-plugin-generated** config, NOT the flat source config:
+   `pnpm --dir apps/web exec wrangler deploy -c dist/vecta/wrangler.json --name vecta`.
+   **Critical (2026-07-22):** deploying the flat `apps/web/wrangler.jsonc` directly
+   (`main: ./src/worker.ts`, `assets` with **no `directory`**) uploads the worker but serves
+   **STALE assets** — the deploy reports success + a new version yet the old JS/CSS bundle stays
+   live. The generated `dist/vecta/wrangler.json` carries `main: index.js` + `assets.directory:
+   "../client"` (the fresh build) and only needs `--name vecta` to override its `vecta-production`
+   name. **Always verify after deploy**: `ax https://vecta.tt-dev.workers.dev/` and confirm the
+   served `assets/index-*.js` hash equals `apps/web/dist/client/index.html`'s — a matching version
+   id is NOT sufficient.
 4. Secret (persists across deploys, only to set/refresh): `printf '%s' "$(security
    find-generic-password -w -s vecta-database-url)" | wrangler secret put DATABASE_URL --name vecta`.
 5. Migrate: `DEPLOY_ENV=production DATABASE_URL=<keychain> EXPECTED_DATABASE_HOST=<url host>
@@ -217,6 +226,29 @@ bundle); API unauthenticated → 401 "Authentication is required" (NOT 500 → s
   scope, so screenshot build output must go outside the repo; `wrangler secret`/OIDC audience were
   already set (secret persists across deploys). The DB migrate script is `packages/persistence/
   scripts/migrate.mjs` (pg driver, guards on `EXPECTED_DATABASE_HOST`/`NAME`).
+
+### Post-P2 polish 2026-07-22 (QA feedback) — all committed + live
+
+- **UI redesign + IA merge** `2819f36` (deployed, worker version `ac03a65e`): the header was called
+  "ダサい". Rebuilt into **one in-flow app bar** (a Gantt-glyph mark + VECTA wordmark + hairline +
+  **editorial underline tabs** + a ghost Sign out / identity cluster; per-screen subtitle/save-badge
+  drop to a recessed sub-strip) using the `frontend-design` + `hallmark` skills; light+dark verified.
+  The standalone テンプレート screen is **folded into マスタ** as a 4th section 「サブタスクテンプレート」
+  (`TemplateScreen` → extracted `TemplateSection`), so the top nav is now **WBS | マスタ** (2 tabs).
+  No contract/domain/persistence change. Gate green (web tests 112).
+- **CI** `f376416`: `ci.yml` (checks only — lint/typecheck/test/build, no deploy) now runs on **every
+  branch push** + PRs + `workflow_dispatch`, with a per-ref concurrency cancel. Verified green on a
+  feature-branch run. `deploy.yml` stays **manual-only + main-only** (workflow_dispatch, `if:
+  github.ref == 'refs/heads/main'`) and is still non-functional (needs GH secrets/vars) — no branch
+  auto-deploys. Deploy strategy = branch → push (checks) → merge to main → deploy on main (manual for
+  now). Merge-to-main workflow proposed by the user, not yet adopted.
+- **Prod test data**: the prod project's 3 junk stubs (テスト/hhh/hoge) were replaced with **48
+  synthetic tasks** (8 phases × 5 subtasks) + 8 processes / 6 products / 6 members / 2 templates / 32
+  deps, all generic ("Phase A"/"Product 1"/"Member 01"), via a transactional project-scoped replace
+  that preserved the tenant/project rows + admin access (project_memberships untouched). revision→11.
+- **Advisor**: the Claude Code **Advisor feature** is the "consult Fable" mechanism (`/advisor fable`
+  pairs this Opus main with a Fable advisor). The old `fable` skill → renamed `pseudo-fable-thinking`;
+  this session's agmsg identity `fable` → `opus` (see private memory [[model-role-split]]).
 
 ### Remaining backlog (design 0003) — P2 done + deployed; only P3 left
 
