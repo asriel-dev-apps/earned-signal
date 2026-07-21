@@ -486,55 +486,6 @@ const EMPTY_PROJECT: ProjectState = {
   tasks: [],
 };
 
-/** Fixed localStorage key/version for the preview-only persistence below (exported for tests). */
-export const PREVIEW_STORAGE_KEY = "vecta-preview-state-v1";
-export const PREVIEW_STORAGE_VERSION = 1;
-
-interface PreviewStorageEnvelope {
-  readonly version: number;
-  readonly project: ProjectState;
-}
-
-function isPreviewStorageEnvelope(value: unknown): value is PreviewStorageEnvelope {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { version?: unknown; project?: unknown };
-  if (candidate.version !== PREVIEW_STORAGE_VERSION) return false;
-  if (typeof candidate.project !== "object" || candidate.project === null) return false;
-  const project = candidate.project as { id?: unknown; tasks?: unknown };
-  return typeof project.id === "string" && Array.isArray(project.tasks);
-}
-
-/**
- * Preview-only persistence. With no backend (client === undefined), a reload
- * would otherwise lose every hand-added/edited task, so preview mutations are
- * mirrored to localStorage and reloaded on the next mount. Reads/writes are
- * wrapped in try/catch so disabled or full storage (private browsing, quota)
- * degrades to "preview simply doesn't persist" instead of crashing the app,
- * and a corrupt or version-mismatched payload falls back to the demo baseline
- * rather than feeding a malformed ProjectState into the grid.
- */
-function loadPreviewProject(): ProjectState | null {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(PREVIEW_STORAGE_KEY);
-    if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isPreviewStorageEnvelope(parsed) ? parsed.project : null;
-  } catch {
-    return null;
-  }
-}
-
-function savePreviewProject(project: ProjectState): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    const envelope: PreviewStorageEnvelope = { version: PREVIEW_STORAGE_VERSION, project };
-    localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(envelope));
-  } catch {
-    // Storage unavailable or full — preview edits simply aren't persisted.
-  }
-}
-
 function demoProjectScheduled(): ProjectState {
   // The preview's initial daily plot is generated once by the same deterministic
   // scheduler the server runs (Design 0003 §C-2): every leaf is placed honoring
@@ -546,10 +497,10 @@ function demoProjectScheduled(): ProjectState {
 export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [project, setProject] = useState<ProjectState>(() => {
     if (client !== undefined) return EMPTY_PROJECT;
-    // Preview: reuse whatever was last saved to localStorage so a reload keeps
-    // hand-added/edited tasks with no backend; fall back to the scheduled demo
-    // baseline when nothing is stored yet (or storage is corrupt/unreadable).
-    return loadPreviewProject() ?? demoProjectScheduled();
+    // Preview (dev/demo only, Design 0003 §A-1): start from a fresh scheduled demo
+    // baseline every mount. Edits are ephemeral — there is no localStorage mirror,
+    // so a reload restores the demo rather than reviving prior preview edits.
+    return demoProjectScheduled();
   });
   const [grid, setGrid] = useState<WbsGridProjection>(() => projectWbsGrid(project));
   const [revision, setRevision] = useState<string | null>(null);
@@ -968,10 +919,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         );
         optimistic = applyEffortSchedule(candidate, newTaskIds);
       }
-      // Preview has no backend, so every mutation is mirrored to localStorage
-      // here (connected mode leaves storage untouched — the server is the
-      // source of truth there).
-      if (client === undefined) savePreviewProject(optimistic);
+      // Preview edits are in-memory only (Design 0003 §A-1: no localStorage
+      // mirror); connected mode leaves storage untouched — the server is the
+      // source of truth there.
       setProject(optimistic);
       setGrid(projectWbsGrid(optimistic));
       setNotice(null);

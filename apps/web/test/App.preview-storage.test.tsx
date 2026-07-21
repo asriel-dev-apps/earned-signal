@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ProjectState } from "@vecta/application";
-import { App, PREVIEW_STORAGE_KEY, PREVIEW_STORAGE_VERSION } from "../src/App.js";
+import { App } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
 
 // Same no-layout shims as App.test.tsx so both virtualizers materialize rows.
@@ -23,21 +23,8 @@ afterEach(() => {
   localStorage.clear();
 });
 
-// A tiny, distinctly-named fixture so its rows are never confused with the
-// (much larger) default demo baseline's own row names.
-const seed: ProjectState = (() => {
-  const base = createDemoProject({ parentCount: 1, subtasksPerParent: 1, memberCount: 1 });
-  return {
-    ...base,
-    tasks: base.tasks.map((task) =>
-      task.parentId === null ? { ...task, name: "Seeded root task" } : { ...task, name: "Seeded child task" },
-    ),
-  };
-})();
-
-function seedStorage(project: ProjectState): void {
-  localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify({ version: PREVIEW_STORAGE_VERSION, project }));
-}
+// A tiny fixture the connected fake client serves back through load/grid.
+const seed: ProjectState = createDemoProject({ parentCount: 1, subtasksPerParent: 1, memberCount: 1 });
 
 async function ready(): Promise<void> {
   await waitFor(() => {
@@ -46,71 +33,29 @@ async function ready(): Promise<void> {
   });
 }
 
-describe("App preview localStorage persistence", () => {
-  it("restores a previously-saved preview project instead of the demo baseline", async () => {
-    seedStorage(seed);
+// Preview persistence was removed in Design 0003 §A-1: the demo grid is
+// dev/local-only and its edits are ephemeral. Neither mode mirrors state to
+// localStorage — a reload simply restores the fresh demo baseline (preview) or
+// the server's project (connected).
+describe("App state is never mirrored to localStorage", () => {
+  it("does not persist a preview edit to localStorage", async () => {
     render(<App />);
     await ready();
 
-    expect(screen.getByText("Seeded root task")).toBeTruthy();
-    expect(screen.getByText("Seeded child task")).toBeTruthy();
-    expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length);
-  });
-
-  it("falls back to the demo baseline when nothing is stored yet", async () => {
-    render(<App />);
-    await ready();
-
-    expect(screen.getByText("Phase A deliverable 1")).toBeTruthy();
-    expect(document.querySelector(".grid-row")).not.toBeNull();
-  });
-
-  it("falls back to the demo baseline without crashing when the stored payload is corrupt JSON", async () => {
-    localStorage.setItem(PREVIEW_STORAGE_KEY, "{not valid json");
-    render(<App />);
-    await ready();
-
-    expect(screen.getByText("Phase A deliverable 1")).toBeTruthy();
-  });
-
-  it("falls back to the demo baseline when the stored payload's version doesn't match", async () => {
-    localStorage.setItem(
-      PREVIEW_STORAGE_KEY,
-      JSON.stringify({ version: PREVIEW_STORAGE_VERSION + 1, project: seed }),
-    );
-    render(<App />);
-    await ready();
-
-    expect(screen.getByText("Phase A deliverable 1")).toBeTruthy();
-  });
-
-  it("persists a tail-draft commit across a simulated reload (unmount/remount)", async () => {
-    seedStorage(seed);
-    const { unmount } = render(<App />);
-    await ready();
-
-    // Commit a name typed into the tail draft — that creates a real root task and
-    // (in preview mode) mirrors the mutation to localStorage.
-    const draftName = document.querySelector('.grid-row--draft [data-col="name"]') as HTMLElement;
-    expect(draftName).not.toBeNull();
-    fireEvent.doubleClick(draftName);
-    const editor = draftName.querySelector("input.cell-editor") as HTMLInputElement;
+    // Edit a visible cell — that mutates the in-memory preview project through the
+    // exact path (executeCommands) that previously mirrored to localStorage.
+    const nameCell = document.querySelector(
+      '.grid-row:not(.grid-row--draft) [data-col="name"]',
+    ) as HTMLElement;
+    expect(nameCell).not.toBeNull();
+    fireEvent.doubleClick(nameCell);
+    const editor = nameCell.querySelector("input.cell-editor") as HTMLInputElement;
     expect(editor).not.toBeNull();
-    fireEvent.change(editor, { target: { value: "Persisted task" } });
+    fireEvent.change(editor, { target: { value: "Renamed in preview" } });
     fireEvent.blur(editor);
 
-    await waitFor(() => {
-      expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length + 1);
-    });
-    await waitFor(() => expect(screen.getByText("Persisted task")).toBeTruthy());
-
-    unmount();
-
-    // A fresh mount re-reads localStorage exactly like a page reload would.
-    render(<App />);
-    await ready();
-    expect(screen.getByText("Persisted task")).toBeTruthy();
-    expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length + 1);
+    await waitFor(() => expect(screen.getByText("Renamed in preview")).toBeTruthy());
+    expect(localStorage.length).toBe(0);
   });
 
   it("never writes localStorage in connected mode", async () => {
@@ -127,6 +72,6 @@ describe("App preview localStorage persistence", () => {
     render(<App client={client} />);
     await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("saved"));
 
-    expect(localStorage.getItem(PREVIEW_STORAGE_KEY)).toBeNull();
+    expect(localStorage.length).toBe(0);
   });
 });

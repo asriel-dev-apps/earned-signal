@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { projectWbsGrid, type ProjectState } from "@vecta/application";
-import { App, PREVIEW_STORAGE_KEY, PREVIEW_STORAGE_VERSION } from "../src/App.js";
+import { App } from "../src/App.js";
 import { createDemoProject } from "../src/demo-project.js";
+import type { ProjectApiClient } from "../src/project-api-client.js";
 import {
   detectOverloads,
   overloadKey,
@@ -22,11 +23,7 @@ beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 1440 });
 });
 
-beforeEach(() => localStorage.clear());
-afterEach(() => {
-  cleanup();
-  localStorage.clear();
-});
+afterEach(() => cleanup());
 
 // A small preview project engineered so a cross-project overflow is guaranteed
 // and confined to a known day column, even under the (sparse) synthesizer.
@@ -62,8 +59,15 @@ const seed: ProjectState = (() => {
   return { ...base, tasks };
 })();
 
-function seedStorage(project: ProjectState): void {
-  localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify({ version: PREVIEW_STORAGE_VERSION, project }));
+// Preview persistence is gone (Design 0003 §A-1), so inject the engineered seed
+// through a read-only connected client. The overlay/overload signal is a pure
+// view-layer derivation of the grid rows, so it behaves identically to preview.
+function fakeClient(project: ProjectState): ProjectApiClient {
+  return {
+    load: async () => ({ revision: "1", current: project }),
+    grid: async () => projectWbsGrid(project),
+    execute: async () => ({ revision: "2", replayed: false }),
+  };
 }
 
 /** The overloads App will detect, computed with the exact same seam functions. */
@@ -77,7 +81,7 @@ function expectedOverloads(project: ProjectState) {
 async function ready(): Promise<void> {
   await waitFor(() => {
     expect(document.querySelector('[data-col="name"]')).not.toBeNull();
-    expect(screen.getByTestId("save-state").textContent).toBe("preview");
+    expect(screen.getByTestId("save-state").textContent).toBe("saved");
   });
 }
 
@@ -107,8 +111,7 @@ describe("App cross-project load overlay + overflow alert", () => {
   });
 
   it("overlays the assignee's other-project load and highlights the overflow day cells", async () => {
-    seedStorage(seed);
-    render(<App />);
+    render(<App client={fakeClient(seed)} />);
     await ready();
     const { date, index } = overflowColumnIndex(seed);
     await revealDailyColumn(index);
