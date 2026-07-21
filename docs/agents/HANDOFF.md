@@ -156,11 +156,38 @@ To make CI usable later: reconcile the repo wrangler config to the real `vecta` 
 dead Hyperdrive binding, and populate all GitHub Actions secrets/vars (`CLOUDFLARE_API_TOKEN`,
 `DATABASE_URL`, `DATABASE_HOST/NAME`, hyperdrive/OIDC/rate-limit values, operations-evidence).
 
+### P2 progress 2026-07-21 — E-2 done (masters + schema) + C-6 process/product
+
+**Committed `ba68c6b`** (pushed with this HANDOFF commit). Full gate green (domain 32,
+application 63, persistence 34, web 104); migration exercised on real Postgres via testcontainers.
+- **Schema**: new project-scoped, **name-only** masters `processes` / `products` (composite PK
+  `(tenant,project,id)`, project FK cascade). `tasks.process`/`product` free text →
+  `process_id`/`product_id` uuid FK (onDelete **restrict**), mirroring `assignee_member_id`→
+  `members`. **Migration 0004** is data-preserving (seed masters from distinct existing values,
+  backfill, drop text cols); like 0002/0003 it is **NOT yet run on live Neon** — run it at deploy.
+- **Application**: `process.*` / `product.*` commands (mirror `member.*`); task→master reference
+  validation + delete-while-referenced guard; projection resolves `processName`/`productName`;
+  `ProjectTask.process/product` → `processId/productId` (nullable).
+- **Web**: new `MasterScreen` (工程 / プロダクト / メンバー CRUD; 工程・プロダクトは名称のみ、メンバー=
+  名称/カレンダー/キャパ[時間]). **Top-bar nav** `WBS | マスタ` integrated into the auth-bar (client
+  `useState` view switch). Advisor decision: **top bar over left rail** — the WBS grid scrolls
+  horizontally so width is precious and grid-first tools (Airtable/Sheets/Notion) use a top bar.
+  Grid 工程/プロダクト cells are now **master-backed dropdowns** (C-6 process/product part; 担当 was
+  already a member select). Verified by screenshots (master + grid) + web tests.
+
+Screenshot pipeline (scratchpad assets are session-local; re-create as needed): the vite config
+must live **inside `apps/web/`** so `@vitejs/plugin-react` resolves — `VITE_VECTA_PREVIEW=1 pnpm
+--dir apps/web exec vite build --config <cfg>` (drop the cloudflare plugin, `define`
+`import.meta.env.VITE_VECTA_PREVIEW`), serve the outDir, shoot with playwright.
+
 ### Remaining backlog (design 0003)
 
-- **C-6** (dropdown inputs for 工程/プロダクト/担当) — deferred: it validates against the E-2
-  master, which is **P2**. Do C-6 together with E-2.
-- **P2**: E-2 master screen + schema, E-1 subtask-template screen, then C-6's full master binding.
+- **C-6**: 工程/プロダクト dropdowns done with E-2 (`ba68c6b`); 担当 was already a select → C-6 complete.
+- **E-1** (next): subtask-template DB masters + テンプレ management screen (templates are still
+  builtin constants in `packages/application/src/subtask-templates.ts`, project-scoped per 確認事項
+  #4). Add the **テンプレート** nav link when this lands (omitted now to avoid a dead link).
+- **Deploy**: run migration 0004 on live Neon at the next deploy (deferred like 0002/0003); then
+  E-2 is user-visible in prod. Use the manual deploy recipe above.
 - **P3**: F-1 unique numbering (approved: internal UUID + project-scoped immutable display seq),
   G-1 member daily-total bottom panel (option a).
 
