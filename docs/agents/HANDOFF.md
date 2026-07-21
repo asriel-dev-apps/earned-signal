@@ -91,15 +91,38 @@ a hand plan (demo `2026-01-07`). If the sheet expects a **continuous calendar ax
 weekend columns visible), change the `days` memo in `App.tsx` from union-of-plan-dates to a
 continuous min→max range (watch the knock-on to `synthesizeExternalLoad`/`detectOverloads`).
 
-Remaining P0: **C-2 review/change field removal** (the one C-2 sub-item still open — drop
-`review_ref`/`change_ref` from schema/records/contract/api/workspace/UoW/projection/demo/
-tests via a migration `0003`; NOTE the conflict to resolve first: design 0002 §2 models col
-E=`review_ref` and col G=`change_ref` as real worksheet columns and keeps `change_ref` as a
-"Phase-2 change-rollup key", whereas 0003 §B-1 says both were added without authorization and
-are not in the sheet — 0003 is newer + user-driven, so removal is intended, but confirm) →
-**D-1+C-1+C-4+C-5** (full toolbar overhaul; the current UI still shows every toolbar) →
-**A-1** last (A-1 removes preview, which breaks local screenshotting — gate preview behind a
-dev env flag, e.g. `VITE_VECTA_PREVIEW`, off in prod, on for the screenshot build).
+### P0 is COMPLETE (all local, `git log` `ab46631..f0c77b3`; NOT pushed)
+
+Later user decisions applied: date axis → **continuous** `b2b5a01`; review/change → **removed
+from the data model** `a46da43` (migration `0003`); C-5 template UI → **row ⋯ / right-click
+menu**. Remaining commits after C-2:
+- **continuous axis** `b2b5a01` — daily axis is every calendar day first→last plan; weekends/
+  holidays are greyed columns; load/overload stays on the sparse `planDays`.
+- **review/change removal** `a46da43` — dropped `review_ref`/`change_ref` everywhere + migration
+  `0003` (deferred from live Neon like `0002`).
+- **D-1+C-1+C-4+C-5** `67a53cf` — tree-only (flat toggle gone); all three toolbars deleted;
+  cross-project overlay/overload/⚠ always on (legend → ⓘ tooltip); tasks added by typing into
+  tail draft rows + a "+ n 行追加" footer; each task row has a ⋯/right-click menu →
+  「サブタスクを追加」(child draft) + 「テンプレートから生成…」(picks a template → `task.generateSubtasks`).
+- **A-1** `f0c77b3` — sign-in required; unauthenticated shows a login screen (Google sign-in
+  card, or "未設定" card), never the grid; the demo App is gated behind build-time
+  `VITE_VECTA_PREVIEW` (dev/screenshots only); preview localStorage persistence deleted.
+
+Full gate green at `f0c77b3`: lint + typecheck + tests (domain 32, application 51, persistence
+32, web 96). Screenshot the demo with `VITE_VECTA_PREVIEW=1 pnpm exec vite build --config
+scratchpad/vite.screenshot.config.ts` (login screen renders without the flag).
+
+### Still open / next
+
+1. **Deploy** (user-gated): the two destructive migrations `0002` (drop `daily_plan_locked`) +
+   `0003` (drop `review_ref`/`change_ref`) must run against the live Neon DB at deploy, AFTER
+   the pending Neon password rotation (then update the `vecta-database-url` Keychain item + re-run
+   `wrangler secret put DATABASE_URL --name vecta`). Also set `VITE_GOOGLE_*` so the login screen
+   shows the real sign-in (prod already has the client id) and confirm `VITE_VECTA_PREVIEW` is unset.
+2. **Push**: 14 local commits (`ab46631..f0c77b3`) are unpushed — awaiting the user's go.
+3. **P1/P2/P3** from design 0003: P1 leftovers = C-3 drag-reorder-only semantics, C-6 dropdown
+   inputs, C-7 collapse roll-up (C-4/C-5 already landed in P0); P2 = E-1/E-2 master + template
+   screens (+ schema); P3 = F-1 numbering + G-1 member daily-total panel.
 
 Local screenshot pipeline (the Cloudflare vite plugin needs local Postgres so `pnpm dev`
 fails): a React-only build of the preview `App` renders without a backend —
