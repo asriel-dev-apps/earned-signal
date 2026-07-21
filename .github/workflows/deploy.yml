@@ -18,7 +18,7 @@ permissions:
 jobs:
   staging:
     name: Deploy staging
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ inputs.target == 'staging' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: staging
@@ -85,7 +85,6 @@ jobs:
   production:
     name: Deploy production
     if: ${{ inputs.target == 'production' && github.ref == 'refs/heads/main' }}
-    needs: staging
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
@@ -132,6 +131,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm types:worker --check
       - name: Materialize and verify production configuration
         run: |
           node .github/scripts/materialize-deploy-config.mjs
