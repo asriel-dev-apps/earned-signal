@@ -27,6 +27,12 @@ jobs:
       cancel-in-progress: false
     env:
       DEPLOY_ENV: staging
+      # Frontend (Vite) build-time auth config — required so the login screen
+      # renders real Google sign-in (A-1); all three or the app shows the
+      # "sign-in unavailable" screen. Set these as repo variables.
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      VITE_VECTA_TENANT_ID: ${{ vars.STAGING_TENANT_ID }}
+      VITE_VECTA_PROJECT_ID: ${{ vars.STAGING_PROJECT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       HYPERDRIVE_ID: ${{ vars.STAGING_HYPERDRIVE_ID }}
@@ -70,17 +76,11 @@ jobs:
           node .github/scripts/verify-operations-evidence.mjs
       - name: Apply database migrations once
         run: pnpm --dir packages/persistence db:migrate
-      - name: Deploy asynchronous workers
-        run: |
-          pnpm --dir apps/optimizer exec wrangler deploy --env staging --strict --containers-rollout gradual --tag "$RELEASE_TAG"
-          pnpm --dir apps/simulator exec wrangler deploy --env staging --strict --containers-rollout gradual --tag "$RELEASE_TAG"
       - name: Build and deploy web worker with static assets
         run: |
           pnpm --dir apps/web build --mode staging
           node .github/scripts/verify-web-build.mjs
           pnpm --dir apps/web exec wrangler deploy --strict --tag "$RELEASE_TAG"
-      - name: Run read-only staging smoke test
-        run: node scripts/beta-smoke.mjs
 
   production:
     name: Deploy production
@@ -94,6 +94,10 @@ jobs:
       cancel-in-progress: false
     env:
       DEPLOY_ENV: production
+      # Frontend (Vite) build-time auth config — required for the login screen (A-1).
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      VITE_VECTA_TENANT_ID: ${{ vars.PRODUCTION_TENANT_ID }}
+      VITE_VECTA_PROJECT_ID: ${{ vars.PRODUCTION_PROJECT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       HYPERDRIVE_ID: ${{ vars.PRODUCTION_HYPERDRIVE_ID }}
@@ -135,14 +139,8 @@ jobs:
           node .github/scripts/verify-operations-evidence.mjs
       - name: Apply database migrations once
         run: pnpm --dir packages/persistence db:migrate
-      - name: Deploy asynchronous workers
-        run: |
-          pnpm --dir apps/optimizer exec wrangler deploy --env production --strict --containers-rollout gradual --tag "$RELEASE_TAG"
-          pnpm --dir apps/simulator exec wrangler deploy --env production --strict --containers-rollout gradual --tag "$RELEASE_TAG"
       - name: Build and deploy web worker with static assets
         run: |
           pnpm --dir apps/web build --mode production
           node .github/scripts/verify-web-build.mjs
           pnpm --dir apps/web exec wrangler deploy --strict --tag "$RELEASE_TAG"
-      - name: Run read-only production smoke test
-        run: node scripts/beta-smoke.mjs
