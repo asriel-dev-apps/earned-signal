@@ -126,60 +126,78 @@ describe("App WBS grid", () => {
     );
   });
 
-  it("dispatches task.generateSubtasks for the selected row and chosen template", async () => {
+  it("dispatches task.generateSubtasks via the row ⋯ menu for the chosen template", async () => {
     const { client, execute } = fakeClient();
     render(<App client={client} />);
 
     await waitFor(() => {
-      expect(document.querySelector('[data-testid="generate-subtasks"]')).not.toBeNull();
+      expect(document.querySelector('[data-col="name"]')).not.toBeNull();
       expect(screen.getByTestId("save-state").textContent).toBe("saved");
     });
 
-    // The default selection is the first row (a parent); the default template is
-    // the first catalog entry (standard-build).
-    fireEvent.click(screen.getByTestId("generate-subtasks"));
+    // Open the first (parent) row's ⋯ menu, drill into the template list, and pick
+    // the first catalog entry (standard-build) — the same command the old toolbar
+    // "サブタスク生成" button used to send.
+    const menuButton = document.querySelector(
+      `[data-testid="row-menu-button"][data-task-id="${project.tasks[0]!.id}"]`,
+    ) as HTMLButtonElement;
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByTestId("row-menu-templates"));
+    const templateItem = document.querySelector(
+      '[data-testid="row-menu-template"][data-template-id="standard-build"]',
+    ) as HTMLButtonElement;
+    fireEvent.click(templateItem);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     expect(execute).toHaveBeenCalledWith(
       { type: "task.generateSubtasks", parentTaskId: project.tasks[0]!.id, templateId: "standard-build" },
       "7",
     );
+    // The menu closes after a template is chosen.
+    expect(screen.queryByTestId("row-menu")).toBeNull();
   });
 
 });
 
-describe("App add task (flat mode)", () => {
-  it("dispatches task.add as a root-level sibling of the (default) selected row and adds a row", async () => {
+describe("App tail draft rows (§C-4)", () => {
+  it("commits a name typed into the tail draft and dispatches task.add as a root task", async () => {
     const { client, execute } = statefulFakeClient(project);
     render(<App client={client} />);
 
     await waitFor(() => {
-      expect(document.querySelector('[data-testid="add-task"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="draft-row"]')).not.toBeNull();
       expect(screen.getByTestId("save-state").textContent).toBe("saved");
     });
-    const initialRowCount = document.querySelectorAll(".grid-row").length;
+    const initialRowCount = document.querySelectorAll(".grid-row:not(.grid-row--draft)").length;
 
-    // The default selection (row 0) is the sole parent, whose parentId is
-    // null, so the new task lands at the root too.
-    fireEvent.click(screen.getByTestId("add-task"));
+    // Type a name into the tail draft's name cell and commit it — that turns the
+    // draft into a real root task (parentId null, sortOrder = max+1).
+    const draftName = document.querySelector('.grid-row--draft [data-col="name"]') as HTMLElement;
+    fireEvent.doubleClick(draftName);
+    const editor = draftName.querySelector("input.cell-editor") as HTMLInputElement;
+    expect(editor).not.toBeNull();
+    fireEvent.change(editor, { target: { value: "Fresh task" } });
+    fireEvent.blur(editor);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     const command = execute.mock.calls[0]![0];
     if (command.type !== "task.add") throw new Error(`expected task.add, got ${command.type}`);
     expect(command.task.parentId).toBeNull();
-    expect(command.task.name).toBe("New task");
+    expect(command.task.name).toBe("Fresh task");
     // Appended after every existing sortOrder (0..project.tasks.length-1).
     expect(command.task.sortOrder).toBe(project.tasks.length);
     // The dispatched payload is a fully-populated, schema-valid ProjectTask.
     expect(() => TaskSchema.parse(command.task)).not.toThrow();
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".grid-row").length).toBe(initialRowCount + 1);
+      expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(initialRowCount + 1);
     });
-    // The new row is selected (name column) so it is ready for inline editing.
+    // The new row is selected (name column) so it is ready for further editing.
     const newRow = document.querySelector(`.grid-row[data-row-id="${command.task.id}"]`);
     expect(newRow).not.toBeNull();
     expect(newRow!.querySelector('[data-col="name"]')?.className).toContain("cell--selected");
+    // A tail draft still remains after the commit.
+    expect(document.querySelector('[data-testid="draft-row"]')).not.toBeNull();
   });
 
   it("adds a root task with sortOrder 0 when the project has no rows yet", async () => {
@@ -188,11 +206,15 @@ describe("App add task (flat mode)", () => {
     render(<App client={client} />);
 
     await waitFor(() => {
-      expect(document.querySelector('[data-testid="add-task"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="draft-row"]')).not.toBeNull();
       expect(screen.getByTestId("save-state").textContent).toBe("saved");
     });
 
-    fireEvent.click(screen.getByTestId("add-task"));
+    const draftName = document.querySelector('.grid-row--draft [data-col="name"]') as HTMLElement;
+    fireEvent.doubleClick(draftName);
+    const editor = draftName.querySelector("input.cell-editor") as HTMLInputElement;
+    fireEvent.change(editor, { target: { value: "First task" } });
+    fireEvent.blur(editor);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     const command = execute.mock.calls[0]![0];
@@ -202,7 +224,27 @@ describe("App add task (flat mode)", () => {
     expect(() => TaskSchema.parse(command.task)).not.toThrow();
 
     await waitFor(() => {
-      expect(document.querySelectorAll(".grid-row").length).toBe(1);
+      expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(1);
+    });
+  });
+
+  it("grows the tail draft rows by n through the + 行追加 control", async () => {
+    const { client } = fakeClient();
+    render(<App client={client} />);
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="draft-row"]')).not.toBeNull();
+      expect(screen.getByTestId("save-state").textContent).toBe("saved");
+    });
+
+    // Default: exactly one tail draft.
+    expect(document.querySelectorAll('[data-testid="draft-row"]').length).toBe(1);
+
+    const countInput = screen.getByTestId("add-rows-count") as HTMLInputElement;
+    fireEvent.change(countInput, { target: { value: "3" } });
+    fireEvent.click(screen.getByTestId("add-rows-button"));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-testid="draft-row"]').length).toBe(4);
     });
   });
 });

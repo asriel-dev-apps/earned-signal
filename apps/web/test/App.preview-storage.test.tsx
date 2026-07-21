@@ -54,7 +54,7 @@ describe("App preview localStorage persistence", () => {
 
     expect(screen.getByText("Seeded root task")).toBeTruthy();
     expect(screen.getByText("Seeded child task")).toBeTruthy();
-    expect(document.querySelectorAll(".grid-row").length).toBe(seed.tasks.length);
+    expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length);
   });
 
   it("falls back to the demo baseline when nothing is stored yet", async () => {
@@ -84,25 +84,24 @@ describe("App preview localStorage persistence", () => {
     expect(screen.getByText("Phase A deliverable 1")).toBeTruthy();
   });
 
-  it("persists an Add-task + inline name edit across a simulated reload (unmount/remount)", async () => {
+  it("persists a tail-draft commit across a simulated reload (unmount/remount)", async () => {
     seedStorage(seed);
     const { unmount } = render(<App />);
     await ready();
 
-    fireEvent.click(screen.getByTestId("add-task"));
-    await waitFor(() => {
-      expect(document.querySelectorAll(".grid-row").length).toBe(seed.tasks.length + 1);
-    });
-
-    // The newly-added row is selected on its name column; rename it through
-    // the same inline-editor path as every other edit.
-    const nameCell = document.querySelector(".cell--selected[data-col='name']") as HTMLElement;
-    expect(nameCell).not.toBeNull();
-    fireEvent.doubleClick(nameCell);
-    const editor = nameCell.querySelector("input.cell-editor") as HTMLInputElement;
+    // Commit a name typed into the tail draft — that creates a real root task and
+    // (in preview mode) mirrors the mutation to localStorage.
+    const draftName = document.querySelector('.grid-row--draft [data-col="name"]') as HTMLElement;
+    expect(draftName).not.toBeNull();
+    fireEvent.doubleClick(draftName);
+    const editor = draftName.querySelector("input.cell-editor") as HTMLInputElement;
     expect(editor).not.toBeNull();
     fireEvent.change(editor, { target: { value: "Persisted task" } });
     fireEvent.blur(editor);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length + 1);
+    });
     await waitFor(() => expect(screen.getByText("Persisted task")).toBeTruthy());
 
     unmount();
@@ -111,25 +110,10 @@ describe("App preview localStorage persistence", () => {
     render(<App />);
     await ready();
     expect(screen.getByText("Persisted task")).toBeTruthy();
-    expect(document.querySelectorAll(".grid-row").length).toBe(seed.tasks.length + 1);
+    expect(document.querySelectorAll(".grid-row:not(.grid-row--draft)").length).toBe(seed.tasks.length + 1);
   });
 
-  it("clears storage and restores the demo baseline via Reset to demo", async () => {
-    seedStorage(seed);
-    render(<App />);
-    await ready();
-    expect(document.querySelectorAll(".grid-row").length).toBe(seed.tasks.length);
-
-    fireEvent.click(screen.getByTestId("reset-to-demo"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Phase A deliverable 1")).toBeTruthy();
-    });
-    expect(document.querySelector(".grid-row")).not.toBeNull();
-    expect(localStorage.getItem(PREVIEW_STORAGE_KEY)).toBeNull();
-  });
-
-  it("does not render Reset to demo, and never writes localStorage, in connected mode", async () => {
+  it("never writes localStorage in connected mode", async () => {
     const client = {
       load: async () => ({ revision: "1", current: seed }),
       grid: async () => ({
@@ -143,7 +127,6 @@ describe("App preview localStorage persistence", () => {
     render(<App client={client} />);
     await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("saved"));
 
-    expect(document.querySelector('[data-testid="reset-to-demo"]')).toBeNull();
     expect(localStorage.getItem(PREVIEW_STORAGE_KEY)).toBeNull();
   });
 });

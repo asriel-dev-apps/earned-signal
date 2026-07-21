@@ -35,7 +35,7 @@ const CONFIG = { clientId: "client-123", tenantId: "tenant-1", projectId: "proje
 describe("AppRoot", () => {
   it("renders the preview app with no sign-in affordance when unconfigured", () => {
     render(<AppRoot config={null} />);
-    expect(screen.getByTestId("add-task")).toBeTruthy();
+    expect(screen.getByTestId("wbs-grid")).toBeTruthy();
     expect(screen.queryByTestId("google-sign-in")).toBeNull();
     expect(screen.queryByTestId("auth-bar")).toBeNull();
     expect(screen.getByTestId("save-state").textContent).toBe("preview");
@@ -46,7 +46,7 @@ describe("AppRoot", () => {
     expect(screen.getByTestId("google-sign-in")).toBeTruthy();
     expect(screen.queryByTestId("google-sign-out")).toBeNull();
     // Still the no-auth preview: the grid is fully interactive.
-    expect(screen.getByTestId("add-task")).toBeTruthy();
+    expect(screen.getByTestId("wbs-grid")).toBeTruthy();
     expect(screen.getByTestId("save-state").textContent).toBe("preview");
   });
 

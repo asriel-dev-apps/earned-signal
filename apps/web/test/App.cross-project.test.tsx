@@ -106,20 +106,6 @@ describe("App cross-project load overlay + overflow alert", () => {
     expect(overloads.length).toBeGreaterThan(0);
   });
 
-  it("defaults the toggle on and summarizes the exact overflow count", async () => {
-    seedStorage(seed);
-    render(<App />);
-    await ready();
-
-    const toggle = screen.getByTestId("toggle-external-load");
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-
-    const summary = screen.getByTestId("overload-summary");
-    expect(summary.getAttribute("data-overload-count")).toBe(String(expectedOverloads(seed).length));
-    expect(summary.className).toContain("load-summary--risk");
-    expect(summary.textContent).toContain("件の工数超過");
-  });
-
   it("overlays the assignee's other-project load and highlights the overflow day cells", async () => {
     seedStorage(seed);
     render(<App />);
@@ -149,33 +135,9 @@ describe("App cross-project load overlay + overflow alert", () => {
       const cellDate = overloadCell.getAttribute("data-daily-date")!;
       expect(overloadKeys.has(overloadKey(leafRow.assigneeMemberId!, cellDate))).toBe(true);
     }
-  });
 
-  it("returns to the plain day-plot view when toggled off (no overlay, no highlight, no summary)", async () => {
-    seedStorage(seed);
-    render(<App />);
-    await ready();
-    const { index } = overflowColumnIndex(seed);
-    await revealDailyColumn(index);
-
-    // On (default): overlay + overload cells present.
-    await waitFor(() => {
-      expect(document.querySelectorAll('[data-testid="daily-load-overlay"]').length).toBeGreaterThan(0);
-    });
-    expect(document.querySelectorAll('[data-overload="true"]').length).toBeGreaterThan(0);
-    // A filled day cell that we can re-check survives the toggle (traditional view intact).
-    const filledBefore = document.querySelectorAll(".daily-cell--filled").length;
-    expect(filledBefore).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByTestId("toggle-external-load"));
-
-    await waitFor(() => {
-      expect(document.querySelectorAll('[data-testid="daily-load-overlay"]').length).toBe(0);
-    });
-    expect(document.querySelectorAll('[data-overload="true"]').length).toBe(0);
+    // The overlay is always on now (§D-1): there is no toggle to hide it.
+    expect(screen.queryByTestId("toggle-external-load")).toBeNull();
     expect(screen.queryByTestId("overload-summary")).toBeNull();
-    expect(screen.getByTestId("toggle-external-load").getAttribute("aria-pressed")).toBe("false");
-    // The underlying day plot is unchanged — filled cells still render their values.
-    expect(document.querySelectorAll(".daily-cell--filled").length).toBe(filledBefore);
   });
 });

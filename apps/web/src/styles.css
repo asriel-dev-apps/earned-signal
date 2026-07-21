@@ -247,7 +247,7 @@ body {
 }
 .rollup-metric--risk .rollup-metric-value { color: var(--risk); }
 
-/* ── Notice / toolbars ──────────────────────────────────────────────── */
+/* ── Notice ─────────────────────────────────────────────────────────── */
 .notice {
   margin: 0;
   padding: 8px 20px;
@@ -257,126 +257,102 @@ body {
   border-bottom: 1px solid var(--locked-line);
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 20px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
-
-.toolbar-field { display: flex; align-items: center; gap: 6px; }
-
-.toolbar-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-}
-
-.toolbar-select {
-  font: inherit;
+/* ── Totals-strip legend affordance (§D-1) ──────────────────────────── */
+/* The cross-project-load legend lives here now (the toolbar that hosted it is
+   gone); the overlay itself is always on. */
+.rollup-info {
+  align-self: center;
+  margin-left: 8px;
   font-size: 12px;
-  padding: 5px 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--ink);
-}
-.toolbar-select:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--accent); }
-
-.toolbar-button {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 13px;
-  border: 1px solid var(--accent);
-  border-radius: 7px;
-  background: var(--accent);
-  color: var(--on-accent);
-  cursor: pointer;
-  transition: filter 0.12s ease, background 0.12s ease;
-}
-.toolbar-button:hover:not(:disabled) { filter: brightness(1.05); }
-.toolbar-button:focus-visible { outline: none; box-shadow: var(--ring); }
-.toolbar-button:disabled {
-  border-color: var(--line-strong);
-  background: var(--line);
   color: var(--faint);
-  cursor: not-allowed;
+  cursor: help;
 }
-.toolbar-button--ghost {
-  background: transparent;
-  color: var(--accent-strong);
-  border-color: var(--line-strong);
-}
-.toolbar-button--ghost:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); filter: none; }
-.toolbar-button--ghost.toolbar-button--on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-strong);
-}
+.rollup-info:hover { color: var(--muted); }
 
-/* Cross-project overflow summary badge. */
-.load-summary {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 4px 11px;
-  border-radius: 999px;
-  white-space: nowrap;
-  cursor: default;
-}
-.load-summary--risk {
-  background: var(--overload-bg);
-  color: var(--overload-ink);
-  border: 1px solid var(--overload-line);
-}
-.load-summary--ok {
-  background: var(--status-done-bg);
-  color: var(--status-done-ink);
-}
-
-.toolbar-hint {
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ── Segmented view toggle ──────────────────────────────────────────── */
-.view-toggle {
+/* ── Row action menu (§C-5: ⋯ / right-click) ────────────────────────── */
+.row-menu-button {
   display: inline-flex;
-  padding: 2px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.grid-row:hover .row-menu-button,
+.grid-row:has(.cell--selected) .row-menu-button,
+.row-menu-button:focus-visible { opacity: 1; }
+.row-menu-button:hover { color: var(--accent-strong); background: var(--accent-soft); }
+.row-menu-button:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.row-menu {
+  z-index: 60;
+  min-width: 184px;
+  padding: 4px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  background: var(--panel-2);
-  gap: 2px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
-.view-toggle-button {
+.row-menu-item {
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
-  padding: 4px 13px;
+  text-align: left;
+  padding: 7px 10px;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: var(--ink);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
 }
-.view-toggle-button:hover { color: var(--ink); }
-.view-toggle-button:focus-visible { outline: none; box-shadow: var(--ring); }
-.view-toggle-button--active {
+.row-menu-item:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.row-menu-item:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ── "+ 行追加" footer (§C-4) ────────────────────────────────────────── */
+.add-rows {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px;
   background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.add-rows-button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--panel-2);
   color: var(--accent-strong);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
 }
-@media (prefers-color-scheme: dark) {
-  .view-toggle-button--active { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.add-rows-button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.add-rows-button:focus-visible { outline: none; box-shadow: var(--ring); }
+.add-rows-button:disabled { color: var(--faint); cursor: not-allowed; }
+.add-rows-count {
+  width: 64px;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
 }
+.add-rows-count:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--accent); }
 
 /* ── Scroller / grid canvas ─────────────────────────────────────────── */
 .scroller {
@@ -510,6 +486,15 @@ body {
   font-weight: 600;
   color: var(--parent-ink);
 }
+
+/* Draft rows (§C-4/§C-5): empty append rows a person types into. A dashed left
+   edge and muted placeholder mark them as not-yet-real; committing any field
+   turns the draft into a real task. */
+.grid-row--draft { border-left: 2px dashed var(--line-strong); }
+.grid-row--draft .pinned-group,
+.grid-row--draft .cell,
+.daily-cell--draft { background: var(--panel); }
+.cell-text--placeholder { color: var(--faint); font-style: italic; }
 
 .cell-slot {
   position: absolute;

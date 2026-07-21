@@ -106,48 +106,35 @@ describe("resolveReparentTarget / reparentCommand (drop decision)", () => {
   });
 });
 
-describe("App hybrid flat/tree toggle", () => {
-  it("switches between flat and tree layouts, showing tree affordances only in tree mode", async () => {
+describe("App tree grid (§C-1)", () => {
+  it("always renders the tree affordances (chevrons + drag handles) — no flat mode", async () => {
     const { client } = fakeClient();
     render(<App client={client} />);
     await ready();
 
-    // Flat mode (default): no chevrons or drag handles.
-    expect(document.querySelector('[data-testid="tree-toggle"]')).toBeNull();
-    expect(document.querySelector('[data-testid="drag-grip"]')).toBeNull();
+    // Tree is the only mode: chevrons and drag grips are present from the start,
+    // and there is no flat/tree toggle to switch away from it.
+    expect(document.querySelector('[data-testid="tree-toggle"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull();
+    expect(screen.queryByTestId("view-mode-flat")).toBeNull();
+    expect(screen.queryByTestId("view-mode-tree")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("view-mode-tree"));
-
-    await waitFor(() => {
-      expect(document.querySelector('[data-testid="tree-toggle"]')).not.toBeNull();
-      expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull();
-    });
     // Roots are depth 0, subtasks depth 1 (visible because parents start expanded).
     expect(document.querySelector(`.grid-row[data-row-id="${parentA.id}"]`)?.getAttribute("data-depth")).toBe("0");
     expect(
       document.querySelector(`.grid-row[data-row-id="${childrenOfA[0]!.id}"]`)?.getAttribute("data-depth"),
     ).toBe("1");
-
-    fireEvent.click(screen.getByTestId("view-mode-flat"));
-    await waitFor(() => {
-      expect(document.querySelector('[data-testid="tree-toggle"]')).toBeNull();
-      expect(document.querySelector('[data-testid="drag-grip"]')).toBeNull();
-    });
   });
 
   it("collapses and re-expands a parent through its chevron", async () => {
     const { client } = fakeClient();
     render(<App client={client} />);
     await ready();
-    fireEvent.click(screen.getByTestId("view-mode-tree"));
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-testid="tree-toggle"]')).not.toBeNull();
-    });
-    // 2 parents + 3 + 3 children, all visible while expanded.
-    const expandedCount = document.querySelectorAll(".grid-row").length;
+    // 2 parents + 3 + 3 children, all visible while expanded (drafts excluded).
+    const realRows = () => document.querySelectorAll(".grid-row:not(.grid-row--draft)").length;
+    const expandedCount = realRows();
     expect(expandedCount).toBe(project.tasks.length);
-    // A child of parent A is present.
     expect(document.querySelector(`.grid-row[data-row-id="${childrenOfA[0]!.id}"]`)).not.toBeNull();
 
     const toggle = document.querySelector(
@@ -158,7 +145,7 @@ describe("App hybrid flat/tree toggle", () => {
     await waitFor(() => {
       // Parent A's three children drop out of the visible set.
       expect(document.querySelector(`.grid-row[data-row-id="${childrenOfA[0]!.id}"]`)).toBeNull();
-      expect(document.querySelectorAll(".grid-row").length).toBe(expandedCount - childrenOfA.length);
+      expect(realRows()).toBe(expandedCount - childrenOfA.length);
     });
 
     fireEvent.click(
@@ -166,18 +153,17 @@ describe("App hybrid flat/tree toggle", () => {
     );
     await waitFor(() => {
       expect(document.querySelector(`.grid-row[data-row-id="${childrenOfA[0]!.id}"]`)).not.toBeNull();
-      expect(document.querySelectorAll(".grid-row").length).toBe(expandedCount);
+      expect(realRows()).toBe(expandedCount);
     });
   });
 
-  it("keeps the daily columns and inline editing working in tree mode (no regression)", async () => {
+  it("keeps the daily columns and inline editing working (no regression)", async () => {
     const { client, execute } = fakeClient();
     render(<App client={client} />);
     await ready();
-    fireEvent.click(screen.getByTestId("view-mode-tree"));
-    await waitFor(() => expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull());
+    expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull();
 
-    // An inline effort (L) edit still dispatches task.update in tree mode.
+    // An inline effort (L) edit dispatches task.update.
     const cell = document.querySelector('[data-col="plannedEffortMinutes"]') as HTMLElement;
     fireEvent.doubleClick(cell);
     const editor = cell.querySelector("input.cell-editor") as HTMLInputElement;
@@ -186,41 +172,53 @@ describe("App hybrid flat/tree toggle", () => {
     fireEvent.blur(editor);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    // Row 0 in tree mode is the first root; the inline effort edit still routes
-    // through executeCommand as task.update (7h = 420 min).
+    // Row 0 is the first root; the inline effort edit routes through
+    // executeCommand as task.update (7h = 420 min).
     expect(execute).toHaveBeenCalledWith(
       { type: "task.update", taskId: parentA.id, changes: { plannedEffortMinutes: 420 } },
       "7",
     );
   });
 
-  it("adds a new task as a sibling of the selected row, not nested under it, in tree mode", async () => {
+  it("creates a child task from a subtask draft opened via the row ⋯ menu (§C-5)", async () => {
     const { client, execute } = statefulFakeClient(project);
     render(<App client={client} />);
     await ready();
-    fireEvent.click(screen.getByTestId("view-mode-tree"));
-    await waitFor(() => expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull());
 
-    // Select a child of parent A (not a root) via its name cell.
-    const childCell = document.querySelector(
-      `.grid-row[data-row-id="${childrenOfA[0]!.id}"] [data-col="name"]`,
-    ) as HTMLElement;
-    fireEvent.mouseDown(childCell);
+    // Open parent A's ⋯ menu and add an empty child draft under it.
+    const menuButton = document.querySelector(
+      `[data-testid="row-menu-button"][data-task-id="${parentA.id}"]`,
+    ) as HTMLButtonElement;
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByTestId("row-menu-add-subtask"));
 
-    const rowCountBefore = document.querySelectorAll(".grid-row").length;
-    fireEvent.click(screen.getByTestId("add-task"));
+    const draftName = await waitFor(() => {
+      const found = document.querySelector(
+        `.grid-row--draft[data-draft-parent="${parentA.id}"] [data-col="name"]`,
+      );
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+
+    fireEvent.doubleClick(draftName);
+    const editor = draftName.querySelector("input.cell-editor") as HTMLInputElement;
+    fireEvent.change(editor, { target: { value: "New child" } });
+    fireEvent.blur(editor);
 
     await waitFor(() => expect(execute).toHaveBeenCalledOnce());
     const command = execute.mock.calls[0]![0];
     if (command.type !== "task.add") throw new Error(`expected task.add, got ${command.type}`);
-    // Same level as the selected child (parentA), not nested under the child.
+    // Committing the child draft dispatches task.add with the parent's id.
     expect(command.task.parentId).toBe(parentA.id);
+    expect(command.task.name).toBe("New child");
     expect(() => TaskSchema.parse(command.task)).not.toThrow();
 
+    // The committed child appears under parent A and the draft is consumed.
     await waitFor(() => {
-      expect(document.querySelectorAll(".grid-row").length).toBe(rowCountBefore + 1);
+      expect(document.querySelector(`.grid-row[data-row-id="${command.task.id}"]`)).not.toBeNull();
     });
-    // The tree stays intact: the original children of A are still present.
+    expect(document.querySelector(`.grid-row--draft[data-draft-parent="${parentA.id}"]`)).toBeNull();
+    // The pre-existing children of A are still present (tree intact).
     for (const child of childrenOfA) {
       expect(document.querySelector(`.grid-row[data-row-id="${child.id}"]`)).not.toBeNull();
     }

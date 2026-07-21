@@ -130,8 +130,8 @@ const PINNED = META.filter((column) => column.pinned);
 const NON_PINNED = META.filter((column) => !column.pinned);
 const PINNED_WIDTH = PINNED.reduce((sum, column) => sum + column.width, 0);
 const META_WIDTH = PINNED_WIDTH + NON_PINNED.reduce((sum, column) => sum + column.width, 0);
-// Column an "Add task" click lands the selection on, so the new row is ready
-// for an immediate inline-edit of its name.
+// Column the selection lands on after a draft commit, so the freshly-created
+// task row is ready for an immediate inline-edit of its name.
 const NAME_COL_INDEX = META.findIndex((column) => column.id === "name");
 
 const NON_PINNED_LEFT: readonly number[] = (() => {
@@ -201,16 +201,54 @@ function isoWeekday(date: string): number {
   return day === 0 ? 7 : day;
 }
 
-type ViewMode = "flat" | "tree";
-
 /**
- * A grid row augmented with `subRows` for TanStack's expanded row model. In tree
- * mode the flat projection rows are nested under their `parentId`; flat mode
- * feeds the projection rows straight through (no `subRows`, so every row is
- * depth 0). The tree engine (TanStack Table `getExpandedRowModel`) is the same
- * one validated in the grid spike (FINDINGS §"ツリー階層").
+ * A grid row augmented with `subRows` for TanStack's expanded row model: the flat
+ * projection rows are nested under their `parentId`. The tree is the only view
+ * mode now (Design 0003 §C-1). The tree engine (TanStack Table
+ * `getExpandedRowModel`) is the same one validated in the grid spike
+ * (FINDINGS §"ツリー階層").
  */
 type TreeRow = WbsGridTaskRow & { readonly subRows?: readonly TreeRow[] };
+
+/** A pending, uncommitted subtask row a person opened under a parent (§C-5). */
+interface SubtaskDraft {
+  readonly id: string;
+  readonly parentId: string;
+}
+
+/**
+ * One rendered grid line. Real projection rows (`task`) and empty draft rows
+ * (`draft`, §C-4/§C-5) share one virtualized sequence so selection, keyboard
+ * nav, and the virtualizer all address a single index space. A `tail` draft is
+ * one of the empty append rows at the end of the grid; a `subtask` draft is an
+ * empty child opened under a specific parent through the row menu.
+ */
+interface TaskRenderRow {
+  readonly kind: "task";
+  readonly key: string;
+  readonly row: WbsGridTaskRow;
+  readonly depth: number;
+  readonly canExpand: boolean;
+  readonly isExpanded: boolean;
+  readonly onToggleExpand: () => void;
+}
+interface DraftRenderRow {
+  readonly kind: "draft";
+  readonly key: string;
+  readonly parentId: string | null;
+  readonly depth: number;
+  readonly source: "tail" | "subtask";
+  readonly subtaskDraftId?: string;
+}
+type RenderRow = TaskRenderRow | DraftRenderRow;
+
+/** The open row action menu (§C-5): its target task and screen position. */
+interface RowMenuState {
+  readonly taskId: string;
+  readonly x: number;
+  readonly y: number;
+  readonly showTemplates: boolean;
+}
 
 export interface DragData {
   readonly id: string;
@@ -287,22 +325,20 @@ export function reparentCommand(
 
 /**
  * Per-row dnd wrapper. It calls the draggable/droppable hooks once per rendered
- * row (rules of hooks) and hands their refs/listeners to a render prop, so the
- * heavy row markup stays inline in `App` with direct access to grid state. The
- * hooks are `disabled` in flat mode, and the enclosing `DndContext` stays
- * mounted across the flat⇄tree toggle (spike gotcha #2: never remount it).
+ * task row (rules of hooks) and hands their refs/listeners to a render prop, so
+ * the heavy row markup stays inline in `App` with direct access to grid state.
+ * The tree is the only view mode, so the per-row hooks are always enabled; only
+ * real task rows are wrapped (draft rows are never draggable/droppable).
  */
 function DndRow({
   id,
   parentId,
   name,
-  enabled,
   children,
 }: {
   readonly id: string;
   readonly parentId: string | null;
   readonly name: string;
-  readonly enabled: boolean;
   readonly children: (bag: {
     readonly dropRef?: ((element: HTMLElement | null) => void) | undefined;
     readonly dragRef?: ((element: HTMLElement | null) => void) | undefined;
@@ -312,14 +348,14 @@ function DndRow({
   }) => ReactNode;
 }): ReactNode {
   const data: DragData = { id, parentId, name };
-  const draggable = useDraggable({ id: `drag-${id}`, data, disabled: !enabled });
-  const droppable = useDroppable({ id: `drop-${id}`, data, disabled: !enabled });
+  const draggable = useDraggable({ id: `drag-${id}`, data });
+  const droppable = useDroppable({ id: `drop-${id}`, data });
   return children({
-    dropRef: enabled ? droppable.setNodeRef : undefined,
-    dragRef: enabled ? draggable.setNodeRef : undefined,
-    dragListeners: enabled ? draggable.listeners : undefined,
-    dragAttributes: enabled ? draggable.attributes : undefined,
-    isOver: enabled && droppable.isOver,
+    dropRef: droppable.setNodeRef,
+    dragRef: draggable.setNodeRef,
+    dragListeners: draggable.listeners,
+    dragAttributes: draggable.attributes,
+    isOver: droppable.isOver,
   });
 }
 
@@ -499,15 +535,6 @@ function savePreviewProject(project: ProjectState): void {
   }
 }
 
-function clearPreviewProject(): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.removeItem(PREVIEW_STORAGE_KEY);
-  } catch {
-    // Storage unavailable — nothing to clear.
-  }
-}
-
 function demoProjectScheduled(): ProjectState {
   // The preview's initial daily plot is generated once by the same deterministic
   // scheduler the server runs (Design 0003 §C-2): every leaf is placed honoring
@@ -533,20 +560,24 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const [editValue, setEditValue] = useState("");
   const [dailyEditing, setDailyEditing] = useState<DailyCellAddress | null>(null);
   const [dailyEditValue, setDailyEditValue] = useState("");
-  const [templateId, setTemplateId] = useState<string>(SUBTASK_TEMPLATES[0]?.id ?? "");
-  const [viewMode, setViewMode] = useState<ViewMode>("flat");
-  // Feature #6: overlay each assignee's other-project daily load behind the day
-  // columns and flag the days where this-project + other-project effort exceeds
-  // the member's daily capacity. Default on so the cross-project signal is
-  // visible; the toggle returns the grid to its plain day-plot view.
-  const [showExternalLoad, setShowExternalLoad] = useState(true);
+  // §C-4 — empty draft rows at the tail of the grid. `draftCount` empty rows
+  // render after every real row; committing a field on one turns it into a real
+  // root task and consumes it (min one draft always remains). `addRowsCount` is
+  // the "+ 行追加" stepper's n (1–1000).
+  const [draftCount, setDraftCount] = useState(1);
+  const [addRowsCount, setAddRowsCount] = useState(1);
+  // §C-5 — empty child draft rows a person opened under a parent through the row
+  // menu. Committing one dispatches task.add with that parentId and consumes it.
+  const [subtaskDrafts, setSubtaskDrafts] = useState<readonly SubtaskDraft[]>([]);
+  // §C-5 — the open row action menu (⋯ / right-click), or null when closed.
+  const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null);
   // Expanded state. Default `true` = every parent expanded (the spike's initial
   // all-expanded worst case), independent of async load timing; a per-row
-  // collapse or "Collapse all" narrows it to a record.
+  // collapse narrows it to a record.
   const [expanded, setExpanded] = useState<ExpandedState>(true);
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
-  // Id of a just-added task awaiting its first appearance in `modelRows`, so it
-  // can be selected (and scrolled to) once the grid re-renders with it.
+  // Id of a just-added task awaiting its first appearance in the rendered rows,
+  // so it can be selected (and scrolled to) once the grid re-renders with it.
   const [pendingAddedTaskId, setPendingAddedTaskId] = useState<string | null>(null);
   const saving = useRef(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -648,11 +679,11 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   );
 
   // Feature #6 — cross-project load. `externalLoad` is the synthetic "other PJ"
-  // daily commitment behind the seam (swapped for a real read in Phase 2); it is
-  // always computed but only surfaced when the toggle is on. `overloads` are the
-  // (member, date) pairs whose this-project + other-project total exceeds the
-  // member's daily capacity, keyed for O(1) day-cell lookup and named for the
-  // summary breakdown.
+  // daily commitment behind the seam (swapped for a real read in Phase 2).
+  // `overloads` are the (member, date) pairs whose this-project + other-project
+  // total exceeds the member's daily capacity, keyed for O(1) day-cell lookup.
+  // The overlay + overload signal is always on now (Design 0003 §D-1: the toggle
+  // is gone); it stays a quiet, half-transparent context behind the day cells.
   const externalLoad = useMemo<ExternalLoad>(
     () => synthesizeExternalLoad(project.members, planDays),
     [project.members, planDays],
@@ -665,28 +696,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return map;
   }, [project.members]);
   const overloads = useMemo<OverloadEntry[]>(
-    () =>
-      showExternalLoad
-        ? detectOverloads({ rows, external: externalLoad, members: project.members })
-        : [],
-    [showExternalLoad, rows, externalLoad, project.members],
+    () => detectOverloads({ rows, external: externalLoad, members: project.members }),
+    [rows, externalLoad, project.members],
   );
   const overloadByKey = useMemo(() => {
     const map = new Map<string, OverloadEntry>();
     for (const entry of overloads) map.set(overloadKey(entry.memberId, entry.date), entry);
     return map;
   }, [overloads]);
-  const overloadSummary = useMemo(() => {
-    if (overloads.length === 0) return null;
-    const nameById = new Map(project.members.map((member) => [member.id, member.name]));
-    const lines = overloads.slice(0, 8).map((entry) => {
-      const name = nameById.get(entry.memberId) ?? entry.memberId;
-      return `${name} · ${entry.date.slice(5)}  +${formatNumber(entry.overflowMinutes / 60)}h 超過（本PJ ${formatNumber(entry.projectMinutes / 60)}h + 他PJ ${formatNumber(entry.externalMinutes / 60)}h ＞ 上限 ${formatNumber(entry.capacityMinutes / 60)}h）`;
-    });
-    const remainder = overloads.length - lines.length;
-    const title = remainder > 0 ? `${lines.join("\n")}\n…ほか ${remainder} 件` : lines.join("\n");
-    return { count: overloads.length, title };
-  }, [overloads, project.members]);
 
   // Design 0003 §C-2 — non-blocking, row-level validation. A row is flagged when
   // its estimate disagrees with its children (親≠Σ子) or its daily plot
@@ -738,11 +755,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     return bounds;
   }, [rows]);
 
-  const treeMode = viewMode === "tree";
+  // The grid is always the tree (Design 0003 §C-1): projection rows nested under
+  // their parentId. There is no flat mode anymore.
   const treeData = useMemo(() => buildTree(rows), [rows]);
-  // Tree mode nests rows under parentId; flat mode feeds the projection rows
-  // straight through (no subRows ⇒ every row depth 0, sort-order sequence).
-  const data: TreeRow[] = treeMode ? treeData : (rows as TreeRow[]);
+  const data: TreeRow[] = treeData;
 
   const columns = useMemo<ColumnDef<TreeRow>[]>(
     () => META.map((column) => ({ id: column.id, header: column.header, accessorKey: "id" })),
@@ -758,10 +774,85 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     getCoreRowModel: getCoreRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
   });
-  // In tree mode this is the expanded/visible set (collapsed subtrees drop out),
-  // so the row virtualizer window shrinks with collapse; in flat mode it is the
-  // full sort-ordered list. Selection/edit indices address this display order.
+  // The expanded/visible set (collapsed subtrees drop out), so the row
+  // virtualizer window shrinks with collapse.
   const modelRows = table.getRowModel().rows;
+
+  // The single rendered sequence of real rows + draft rows. Subtask drafts (§C-5)
+  // are inserted at the end of their parent's visible subtree so a committed
+  // child (sortOrder = max+1 ⇒ last sibling) lands where its draft sat; the tail
+  // root drafts (§C-4) follow every real row. Selection, keyboard nav, and the
+  // row virtualizer all address this one index space.
+  const renderRows = useMemo<RenderRow[]>(() => {
+    const result: RenderRow[] = [];
+    const draftsByParent = new Map<string, SubtaskDraft[]>();
+    for (const draft of subtaskDrafts) {
+      const group = draftsByParent.get(draft.parentId) ?? [];
+      group.push(draft);
+      draftsByParent.set(draft.parentId, group);
+    }
+    // subtreeEnd[i] = last modelRows index in row i's subtree (inclusive); a leaf
+    // ends at itself. Built once in O(n) so draft insertion is a Map lookup.
+    const count = modelRows.length;
+    const subtreeEnd = new Array<number>(count);
+    for (let i = count - 1; i >= 0; i -= 1) {
+      let end = i;
+      let j = i + 1;
+      while (j < count && modelRows[j]!.depth > modelRows[i]!.depth) {
+        end = subtreeEnd[j]!;
+        j = subtreeEnd[j]! + 1;
+      }
+      subtreeEnd[i] = end;
+    }
+    const closesAt = new Map<number, number[]>();
+    for (let p = 0; p < count; p += 1) {
+      const end = subtreeEnd[p]!;
+      const list = closesAt.get(end) ?? [];
+      list.push(p);
+      closesAt.set(end, list);
+    }
+    for (let i = 0; i < count; i += 1) {
+      const modelRow = modelRows[i]!;
+      result.push({
+        kind: "task",
+        key: `task-${modelRow.original.id}`,
+        row: modelRow.original,
+        depth: modelRow.depth,
+        canExpand: modelRow.getCanExpand(),
+        isExpanded: modelRow.getIsExpanded(),
+        onToggleExpand: modelRow.getToggleExpandedHandler(),
+      });
+      // Deepest-ending subtree first, so each parent's drafts nest just below it.
+      const closing = (closesAt.get(i) ?? []).slice().sort((a, b) => modelRows[b]!.depth - modelRows[a]!.depth);
+      for (const p of closing) {
+        const parentRow = modelRows[p]!;
+        const drafts = draftsByParent.get(parentRow.original.id);
+        if (drafts === undefined) continue;
+        for (const draft of drafts) {
+          result.push({
+            kind: "draft",
+            key: `subtask-draft-${draft.id}`,
+            parentId: draft.parentId,
+            depth: parentRow.depth + 1,
+            source: "subtask",
+            subtaskDraftId: draft.id,
+          });
+        }
+      }
+    }
+    for (let n = 0; n < draftCount; n += 1) {
+      result.push({ kind: "draft", key: `tail-draft-${n}`, parentId: null, depth: 0, source: "tail" });
+    }
+    return result;
+  }, [modelRows, subtaskDrafts, draftCount]);
+
+  const taskRowAt = useCallback(
+    (rowIndex: number): WbsGridTaskRow | undefined => {
+      const renderRow = renderRows[rowIndex];
+      return renderRow !== undefined && renderRow.kind === "task" ? renderRow.row : undefined;
+    },
+    [renderRows],
+  );
 
   // parentId → child ids, for the acyclic drop guard (target must not sit inside
   // the dragged row's own subtree). Built from the full projection, not the
@@ -795,7 +886,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   // initialRect seeds the viewport before the browser measures the scroller on
   // the first frame; a no-layout environment (e.g. tests) falls back to it.
   const rowVirtualizer = useVirtualizer({
-    count: modelRows.length,
+    count: renderRows.length,
     getScrollElement: () => scrollerRef.current,
     estimateSize: () => ROW_H,
     overscan: 12,
@@ -836,12 +927,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
 
   useEffect(() => {
     if (pendingAddedTaskId === null) return;
-    const rowIndex = modelRows.findIndex((modelRow) => modelRow.original.id === pendingAddedTaskId);
+    const rowIndex = renderRows.findIndex(
+      (renderRow) => renderRow.kind === "task" && renderRow.row.id === pendingAddedTaskId,
+    );
     if (rowIndex === -1) return;
     setSelected({ rowIndex, colIndex: NAME_COL_INDEX });
     rowVirtualizer.scrollToIndex(rowIndex, { align: "auto" });
     setPendingAddedTaskId(null);
-  }, [modelRows, pendingAddedTaskId, rowVirtualizer]);
+  }, [renderRows, pendingAddedTaskId, rowVirtualizer]);
 
   // Apply one or more commands as a single atomic edit. Multi-command batches
   // (e.g. a sibling reorder that swaps two rows' sortOrder) fold through the same
@@ -952,30 +1045,40 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [editable, executeCommands, rows],
   );
 
+  // §C-5 — generate subtasks from a template chosen in the row menu. Runs the same
+  // command the API accepts; the shared re-proration splits the parent's effort
+  // across the template's weighted children, and the scheduler auto-places each
+  // new leaf once as an initial value (④), then closes the menu.
   const generateSubtasks = useCallback(
-    (parentTaskId: string) => {
+    (parentTaskId: string, templateId: string) => {
       if (!editable || templateId === "") return;
-      // Runs the same command the API accepts; the shared re-proration splits the
-      // parent's effort across the template's weighted children, and the scheduler
-      // auto-places each new leaf in dependency order (④).
       executeCommand({ type: "task.generateSubtasks", parentTaskId, templateId });
+      setRowMenu(null);
     },
-    [editable, executeCommand, templateId],
+    [editable, executeCommand],
   );
 
-  const addTask = useCallback(
-    (parentId: string | null) => {
+  // §C-4/§C-5 — commit a field typed into a draft row, turning it into a real
+  // task. The new task lands as the last row overall (existing max sortOrder + 1)
+  // under the draft's parent (null for a tail draft ⇒ a root task; a parent id
+  // for a subtask draft ⇒ that parent's child). An empty commit creates nothing,
+  // spreadsheet-style. Committing consumes the draft: a tail draft decrements the
+  // tail count (min one always remains); a subtask draft is dropped from the list.
+  const commitDraft = useCallback(
+    (column: MetaColumn, draft: DraftRenderRow, raw: string) => {
       if (!editable) return;
-      // New task lands as the last row overall (existing max sortOrder + 1) and
-      // as a sibling of the current selection (same parentId), or at the root
-      // when nothing is selected — never nested under it, since nesting is the
-      // template generator's job.
+      if (raw.trim() === "") return;
+      const changes = buildChanges(column, raw);
+      if (changes === null) {
+        setNotice(`"${raw}" is not a valid ${column.header} value`);
+        return;
+      }
       const sortOrder = rows.reduce((max, row) => Math.max(max, row.sortOrder), -1) + 1;
       const task: ProjectTask = {
         id: crypto.randomUUID(),
-        parentId,
+        parentId: draft.parentId,
         sortOrder,
-        name: "New task",
+        name: "",
         process: "",
         product: "",
         note: "",
@@ -989,25 +1092,50 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         actualStart: null,
         actualFinish: null,
         dependencies: [],
+        ...changes,
       };
-      if (executeCommand({ type: "task.add", task })) setPendingAddedTaskId(task.id);
+      if (executeCommand({ type: "task.add", task })) {
+        setPendingAddedTaskId(task.id);
+        if (draft.source === "tail") setDraftCount((n) => Math.max(1, n - 1));
+        else if (draft.subtaskDraftId !== undefined) {
+          const consumed = draft.subtaskDraftId;
+          setSubtaskDrafts((list) => list.filter((entry) => entry.id !== consumed));
+        }
+      }
     },
     [editable, executeCommand, rows],
   );
 
-  // Preview-only: discard any locally-saved project and restore the scheduled
-  // demo baseline, clearing selection/edit state so nothing points at a row
-  // that no longer exists.
-  const resetToDemo = useCallback(() => {
-    clearPreviewProject();
-    const demo = demoProjectScheduled();
-    setProject(demo);
-    setGrid(projectWbsGrid(demo));
-    setSelected({ rowIndex: 0, colIndex: 0 });
-    setEditing(null);
-    setDailyEditing(null);
-    setNotice(null);
+  // §C-5 — open an empty child draft under a parent (subtask-add mode). Reveals it
+  // by expanding the parent (a no-op when everything is expanded by default).
+  const addSubtaskDraft = useCallback((parentId: string) => {
+    setSubtaskDrafts((list) => [...list, { id: crypto.randomUUID(), parentId }]);
+    setExpanded((previous) => (previous === true ? previous : { ...previous, [parentId]: true }));
+    setRowMenu(null);
   }, []);
+
+  const openRowMenu = useCallback((taskId: string, x: number, y: number) => {
+    setRowMenu({ taskId, x, y, showTemplates: false });
+  }, []);
+
+  // §C-5 — the row menu closes on outside-click or Escape.
+  useEffect(() => {
+    if (rowMenu === null) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-testid="row-menu"]') || target?.closest('[data-testid="row-menu-button"]')) return;
+      setRowMenu(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRowMenu(null);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [rowMenu]);
 
   // 6px activation distance so a click (cell select / expand toggle) or a scroll
   // gesture never trips a drag, per the spike's PointerSensor tuning.
@@ -1090,52 +1218,54 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const beginEdit = useCallback(
     (address: CellAddress) => {
       const column = META[address.colIndex];
-      const row = modelRows[address.rowIndex]?.original;
-      if (column === undefined || row === undefined || !column.editable || !editable) return;
+      const renderRow = renderRows[address.rowIndex];
+      if (column === undefined || renderRow === undefined || !column.editable || !editable) return;
       setSelected(address);
       setEditing(address);
-      setEditValue(editInitialValue(column, row));
+      // A draft cell starts empty; a real row seeds the editor from its value.
+      setEditValue(renderRow.kind === "draft" ? "" : editInitialValue(column, renderRow.row));
     },
-    [editable, modelRows],
+    [editable, renderRows],
   );
 
   const finishEdit = useCallback(
     (persist: boolean) => {
       if (editing === null) return;
       const column = META[editing.colIndex];
-      const row = modelRows[editing.rowIndex]?.original;
-      if (persist && column !== undefined && row !== undefined) {
-        commit(column, row, editValue);
+      const renderRow = renderRows[editing.rowIndex];
+      if (persist && column !== undefined && renderRow !== undefined) {
+        if (renderRow.kind === "draft") commitDraft(column, renderRow, editValue);
+        else commit(column, renderRow.row, editValue);
       }
       setEditing(null);
     },
-    [commit, editValue, editing, modelRows],
+    [commit, commitDraft, editValue, editing, renderRows],
   );
 
   const moveSelection = useCallback(
     (rowDelta: number, colDelta: number) => {
       setSelected((current) => {
-        const rowIndex = Math.max(0, Math.min(modelRows.length - 1, current.rowIndex + rowDelta));
+        const rowIndex = Math.max(0, Math.min(renderRows.length - 1, current.rowIndex + rowDelta));
         const colIndex = Math.max(0, Math.min(META.length - 1, current.colIndex + colDelta));
         if (rowDelta !== 0) rowVirtualizer.scrollToIndex(rowIndex, { align: "auto" });
         return { rowIndex, colIndex };
       });
     },
-    [rowVirtualizer, modelRows.length],
+    [rowVirtualizer, renderRows.length],
   );
 
   const copySelection = useCallback(() => {
     const column = META[selected.colIndex];
-    const row = modelRows[selected.rowIndex]?.original;
+    const row = taskRowAt(selected.rowIndex);
     if (column === undefined || row === undefined || navigator.clipboard === undefined) return;
     void navigator.clipboard
       .writeText(displayValue(column, row, selected.rowIndex))
       .catch(() => undefined);
-  }, [modelRows, selected]);
+  }, [selected, taskRowAt]);
 
   const pasteSelection = useCallback(() => {
     const column = META[selected.colIndex];
-    const row = modelRows[selected.rowIndex]?.original;
+    const row = taskRowAt(selected.rowIndex);
     if (
       column === undefined ||
       row === undefined ||
@@ -1149,7 +1279,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
       .readText()
       .then((text) => commit(column, row, text.replace(/\r?\n$/u, "")))
       .catch(() => undefined);
-  }, [commit, editable, modelRows, selected]);
+  }, [commit, editable, selected, taskRowAt]);
 
   const onGridKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1180,6 +1310,34 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     },
     [finishDailyEdit],
   );
+
+  // The inline editor for one editable cell — a member <select> for the assignee
+  // column, a text <input> otherwise. Shared by real rows and draft rows.
+  const cellEditor = (column: MetaColumn): ReactNode =>
+    column.kind === "assignee" ? (
+      <select
+        className="cell-editor"
+        autoFocus
+        value={editValue}
+        onChange={(event) => setEditValue(event.target.value)}
+        onBlur={() => finishEdit(true)}
+        onKeyDown={onEditorKeyDown}
+      >
+        <option value="">— 未割り当て —</option>
+        {memberOptions.map((member) => (
+          <option key={member.id} value={member.id}>{member.name}</option>
+        ))}
+      </select>
+    ) : (
+      <input
+        className="cell-editor"
+        autoFocus
+        value={editValue}
+        onChange={(event) => setEditValue(event.target.value)}
+        onBlur={() => finishEdit(true)}
+        onKeyDown={onEditorKeyDown}
+      />
+    );
 
   const renderMetaCell = (
     column: MetaColumn,
@@ -1251,6 +1409,21 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
             >
               ▼
             </button>
+            <button
+              type="button"
+              className="row-menu-button"
+              data-testid="row-menu-button"
+              data-task-id={row.id}
+              aria-label="行メニュー"
+              title="行メニュー（サブタスク追加・テンプレート）"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                openRowMenu(row.id, event.clientX, event.clientY);
+              }}
+            >
+              ⋯
+            </button>
           </span>
         </div>
       );
@@ -1313,39 +1486,65 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           </span>
         )}
         {isEditing
-          ? column.kind === "assignee"
-            ? (
-              <select
-                className="cell-editor"
-                autoFocus
-                value={editValue}
-                onChange={(event) => setEditValue(event.target.value)}
-                onBlur={() => finishEdit(true)}
-                onKeyDown={onEditorKeyDown}
-              >
-                <option value="">— 未割り当て —</option>
-                {memberOptions.map((member) => (
-                  <option key={member.id} value={member.id}>{member.name}</option>
-                ))}
-              </select>
-            )
-            : (
-              <input
-                className="cell-editor"
-                autoFocus
-                value={editValue}
-                onChange={(event) => setEditValue(event.target.value)}
-                onBlur={() => finishEdit(true)}
-                onKeyDown={onEditorKeyDown}
-              />
-            )
+          ? cellEditor(column)
           : <span className="cell-text">{displayValue(column, row, rowIndex)}</span>}
       </div>
     );
   };
 
+  // A draft row's meta cell (§C-4/§C-5): empty, but editable columns open the same
+  // inline editor as a real row and commit through `commitDraft`, creating the
+  // task. The name column keeps the tree indentation so a subtask draft nests
+  // visually under its parent (no chevron/drag handle — a draft is not yet a row).
+  const renderDraftCell = (
+    column: MetaColumn,
+    colIndex: number,
+    draft: DraftRenderRow,
+    rowIndex: number,
+    withTreeIndent: boolean,
+  ) => {
+    if (column.kind === "index") {
+      return (
+        <div
+          key={column.id}
+          className="cell cell--index"
+          style={{ width: column.width }}
+          role="gridcell"
+          data-col={column.id}
+          onMouseDown={() => setSelected({ rowIndex, colIndex })}
+        >
+          <span className="row-no">{rowIndex + 1}</span>
+        </div>
+      );
+    }
+    const isSelected = selected.rowIndex === rowIndex && selected.colIndex === colIndex;
+    const isEditing = editing?.rowIndex === rowIndex && editing.colIndex === colIndex;
+    const classes = ["cell", `cell--${column.kind}`, "cell--draft"];
+    if (column.editable) classes.push(editable ? "cell--editable" : "cell--locked");
+    if (isSelected) classes.push("cell--selected");
+    return (
+      <div
+        key={column.id}
+        className={classes.join(" ")}
+        style={{ width: column.width }}
+        role="gridcell"
+        data-col={column.id}
+        onMouseDown={() => setSelected({ rowIndex, colIndex })}
+        onDoubleClick={() => column.editable && beginEdit({ rowIndex, colIndex })}
+      >
+        {withTreeIndent && (
+          <span className="tree-affordance" style={{ paddingLeft: draft.depth * 16 }}>
+            <span className="tree-toggle-spacer" aria-hidden />
+          </span>
+        )}
+        {isEditing
+          ? cellEditor(column)
+          : <span className="cell-text cell-text--placeholder">{withTreeIndent ? "新規行…" : ""}</span>}
+      </div>
+    );
+  };
+
   const rollup = grid.rollup;
-  const selectedRow = modelRows[selected.rowIndex]?.original;
 
   // Month band over the day columns: group the currently-visible virtualized days
   // into contiguous YYYY-MM runs. Each band's left is its first day's virtual
@@ -1385,143 +1584,23 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         <RollupMetric label="CV (人日)" value={formatNumber(rollup.cv)} tone={rollup.cv < 0 ? "risk" : "ok"} />
         <RollupMetric label="SPI" value={rollup.spi === "-" ? "—" : rollup.spi.toFixed(2)} />
         <RollupMetric label="CPI" value={rollup.cpi === "-" ? "—" : rollup.cpi.toFixed(2)} />
-      </section>
-
-      <section className="toolbar" aria-label="表示切り替え" data-testid="view-toolbar">
-        <div className="view-toggle" role="group" aria-label="行レイアウト" data-testid="view-toggle">
-          <button
-            type="button"
-            className={`view-toggle-button ${treeMode ? "" : "view-toggle-button--active"}`}
-            data-testid="view-mode-flat"
-            aria-pressed={!treeMode}
-            onClick={() => setViewMode("flat")}
-          >
-            フラット
-          </button>
-          <button
-            type="button"
-            className={`view-toggle-button ${treeMode ? "view-toggle-button--active" : ""}`}
-            data-testid="view-mode-tree"
-            aria-pressed={treeMode}
-            onClick={() => setViewMode("tree")}
-          >
-            ツリー
-          </button>
-        </div>
-        <span className="toolbar-hint">No. 列の ▲ ▼ で同じ親の兄弟どうしを並べ替え</span>
-        {treeMode && (
-          <>
-            <button
-              type="button"
-              className="toolbar-button toolbar-button--ghost"
-              data-testid="expand-all"
-              onClick={() => table.toggleAllRowsExpanded(true)}
-            >
-              すべて展開
-            </button>
-            <button
-              type="button"
-              className="toolbar-button toolbar-button--ghost"
-              data-testid="collapse-all"
-              onClick={() => table.toggleAllRowsExpanded(false)}
-            >
-              すべて折りたたむ
-            </button>
-            <span className="toolbar-hint">行の ⠿ ハンドルを別のタスクにドラッグすると親を付け替え</span>
-          </>
-        )}
-      </section>
-
-      <section className="toolbar" aria-label="サブタスク生成" data-testid="subtask-toolbar">
-        <button
-          type="button"
-          className="toolbar-button"
-          data-testid="add-task"
-          disabled={!editable}
-          onClick={() => addTask(selectedRow?.parentId ?? null)}
+        {/* §D-1 — the cross-project-load legend, moved off the deleted toolbar into
+            a quiet ⓘ affordance; the overlay itself is always on now. */}
+        <span
+          className="rollup-info"
+          data-testid="load-legend"
+          role="img"
+          aria-label="半透明の帯は担当者が他PJで埋まっている時間。赤いセルはその日の合計工数がキャパ超過。"
+          title="半透明の帯は担当者が他PJで埋まっている時間。赤いセルはその日の合計工数がキャパ超過。"
         >
-          タスク追加
-        </button>
-        {client === undefined && (
-          <button
-            type="button"
-            className="toolbar-button toolbar-button--ghost"
-            data-testid="reset-to-demo"
-            onClick={resetToDemo}
-          >
-            デモに戻す
-          </button>
-        )}
-        <label className="toolbar-field">
-          <span className="toolbar-label">テンプレート</span>
-          <select
-            className="toolbar-select"
-            data-testid="template-select"
-            value={templateId}
-            disabled={!editable}
-            onChange={(event) => setTemplateId(event.target.value)}
-          >
-            {SUBTASK_TEMPLATES.map((template) => (
-              <option key={template.id} value={template.id}>{template.name}</option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="toolbar-button"
-          data-testid="generate-subtasks"
-          data-selected-task-id={selectedRow?.id ?? ""}
-          disabled={!editable || selectedRow === undefined}
-          onClick={() => selectedRow !== undefined && generateSubtasks(selectedRow.id)}
-        >
-          サブタスク生成
-        </button>
-        <span className="toolbar-hint">
-          {selectedRow === undefined
-            ? "生成先となるタスク行を選択してください"
-            : `親の工数をテンプレートに沿って「${selectedRow.name}」へ按分します`}
-        </span>
-      </section>
-
-      <section className="toolbar" aria-label="他プロジェクト負荷" data-testid="load-toolbar">
-        <button
-          type="button"
-          className={`toolbar-button toolbar-button--ghost ${showExternalLoad ? "toolbar-button--on" : ""}`}
-          data-testid="toggle-external-load"
-          aria-pressed={showExternalLoad}
-          onClick={() => setShowExternalLoad((on) => !on)}
-        >
-          {showExternalLoad ? "他PJ負荷: 表示" : "他PJ負荷: 非表示"}
-        </button>
-        {showExternalLoad &&
-          (overloadSummary === null ? (
-            <span
-              className="load-summary load-summary--ok"
-              data-testid="overload-summary"
-              data-overload-count={0}
-            >
-              工数超過なし
-            </span>
-          ) : (
-            <span
-              className="load-summary load-summary--risk"
-              data-testid="overload-summary"
-              data-overload-count={overloadSummary.count}
-              title={overloadSummary.title}
-            >
-              ⚠ {overloadSummary.count.toLocaleString()} 件の工数超過
-            </span>
-          ))}
-        <span className="toolbar-hint">
-          半透明の帯は担当者が他PJで埋まっている時間。赤いセルはその日の合計工数がキャパ超過。
+          ⓘ
         </span>
       </section>
 
       {notice !== null && <div className="notice" role="alert">{notice}</div>}
 
-      {/* DndContext stays mounted in both modes so the scroller never remounts on
-          the flat⇄tree toggle (spike gotcha #2); the per-row hooks are simply
-          disabled in flat mode. */}
+      {/* One mounted DndContext wraps the tree-only grid so the scroller never
+          remounts (spike gotcha #2); per-row drag hooks are always enabled. */}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -1607,20 +1686,52 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
           </div>
 
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const modelRow = modelRows[virtualRow.index]!;
-            const row = modelRow.original;
             const rowIndex = virtualRow.index;
-            const depth = modelRow.depth;
-            const canExpand = modelRow.getCanExpand();
-            const isExpanded = modelRow.getIsExpanded();
-            const toggleExpand = modelRow.getToggleExpandedHandler();
+            const renderRow = renderRows[rowIndex]!;
+            if (renderRow.kind === "draft") {
+              return (
+                <div
+                  key={virtualRow.key}
+                  className="grid-row grid-row--draft"
+                  role="row"
+                  data-testid="draft-row"
+                  data-draft-source={renderRow.source}
+                  data-draft-parent={renderRow.parentId ?? ""}
+                  data-depth={renderRow.depth}
+                  style={{ top: virtualRow.start, height: ROW_H, width: dayVirtualizer.getTotalSize() }}
+                >
+                  <div className="pinned-group" style={{ width: PINNED_WIDTH }}>
+                    {PINNED.map((column) =>
+                      renderDraftCell(column, META.indexOf(column), renderRow, rowIndex, column.id === "name"),
+                    )}
+                  </div>
+                  {NON_PINNED.map((column, index) => (
+                    <div
+                      key={column.id}
+                      className="cell-slot"
+                      style={{ left: NON_PINNED_LEFT[index], width: column.width }}
+                    >
+                      {renderDraftCell(column, META.indexOf(column), renderRow, rowIndex, false)}
+                    </div>
+                  ))}
+                  {dayVirtualizer.getVirtualItems().map((virtualDay) => (
+                    <div
+                      key={virtualDay.key}
+                      className="daily-cell daily-cell--readonly daily-cell--draft"
+                      style={{ left: virtualDay.start, width: DAILY_COL_W }}
+                      aria-readonly
+                    />
+                  ))}
+                </div>
+              );
+            }
+            const { row, depth, canExpand, isExpanded, onToggleExpand } = renderRow;
             return (
               <DndRow
                 key={virtualRow.key}
                 id={row.id}
                 parentId={row.parentId}
                 name={row.name}
-                enabled={treeMode}
               >
                 {(dnd) => (
               <div
@@ -1631,6 +1742,10 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                 data-row-id={row.id}
                 data-depth={depth}
                 style={{ top: virtualRow.start, height: ROW_H, width: dayVirtualizer.getTotalSize() }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openRowMenu(row.id, event.clientX, event.clientY);
+                }}
               >
                 <div className="pinned-group" style={{ width: PINNED_WIDTH }}>
                   {PINNED.map((column) =>
@@ -1639,12 +1754,12 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                       META.indexOf(column),
                       row,
                       rowIndex,
-                      treeMode && column.id === "name"
+                      column.id === "name"
                         ? {
                             depth,
                             canExpand,
                             isExpanded,
-                            onToggleExpand: toggleExpand,
+                            onToggleExpand,
                             dragRef: dnd.dragRef,
                             dragListeners: dnd.dragListeners,
                             dragAttributes: dnd.dragAttributes,
@@ -1676,18 +1791,14 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
                   // Cross-project overlay + overflow, per the row's assignee.
                   const assignee = row.assigneeMemberId;
                   const externalMinutes =
-                    showExternalLoad && assignee !== null
-                      ? externalMinutesFor(externalLoad, assignee, date)
-                      : 0;
+                    assignee !== null ? externalMinutesFor(externalLoad, assignee, date) : 0;
                   const capacity = assignee !== null ? capacityByMember.get(assignee) : undefined;
                   const loadFraction =
                     externalMinutes > 0 && capacity !== undefined
                       ? Math.min(1, externalMinutes / capacity)
                       : 0;
                   const overloadEntry =
-                    showExternalLoad && assignee !== null
-                      ? overloadByKey.get(overloadKey(assignee, date))
-                      : undefined;
+                    assignee !== null ? overloadByKey.get(overloadKey(assignee, date)) : undefined;
                   const classes = ["daily-cell"];
                   if (minutes > 0) classes.push("daily-cell--filled");
                   if (nonWorking) classes.push("daily-cell--nonworking");
@@ -1756,6 +1867,82 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         ) : null}
       </DragOverlay>
       </DndContext>
+
+      {/* §C-4 — grow the tail draft rows by n (1–1000). Minimal footer control, not
+          a toolbar: it just appends empty rows a person then types into. */}
+      <footer className="add-rows" data-testid="add-rows">
+        <button
+          type="button"
+          className="add-rows-button"
+          data-testid="add-rows-button"
+          disabled={!editable}
+          onClick={() => setDraftCount((current) => current + addRowsCount)}
+        >
+          + {addRowsCount} 行追加
+        </button>
+        <input
+          type="number"
+          className="add-rows-count"
+          data-testid="add-rows-count"
+          min={1}
+          max={1000}
+          value={addRowsCount}
+          aria-label="追加する行数"
+          onChange={(event) => {
+            const next = Math.trunc(Number(event.target.value));
+            if (!Number.isFinite(next)) return;
+            setAddRowsCount(Math.max(1, Math.min(1000, next)));
+          }}
+        />
+      </footer>
+
+      {/* §C-5 — the row action menu (⋯ / right-click). Fixed-positioned at the
+          click, closed on outside-click / Escape (see effect above). */}
+      {rowMenu !== null && (
+        <div
+          className="row-menu"
+          data-testid="row-menu"
+          role="menu"
+          style={{ position: "fixed", left: rowMenu.x, top: rowMenu.y }}
+        >
+          {rowMenu.showTemplates ? (
+            SUBTASK_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                className="row-menu-item"
+                role="menuitem"
+                data-testid="row-menu-template"
+                data-template-id={template.id}
+                onClick={() => generateSubtasks(rowMenu.taskId, template.id)}
+              >
+                {template.name}
+              </button>
+            ))
+          ) : (
+            <>
+              <button
+                type="button"
+                className="row-menu-item"
+                role="menuitem"
+                data-testid="row-menu-add-subtask"
+                onClick={() => addSubtaskDraft(rowMenu.taskId)}
+              >
+                サブタスクを追加
+              </button>
+              <button
+                type="button"
+                className="row-menu-item"
+                role="menuitem"
+                data-testid="row-menu-templates"
+                onClick={() => setRowMenu((menu) => (menu === null ? null : { ...menu, showTemplates: true }))}
+              >
+                テンプレートから生成…
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

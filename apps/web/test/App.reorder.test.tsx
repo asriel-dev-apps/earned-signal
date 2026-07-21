@@ -153,12 +153,10 @@ describe("App sibling reorder", () => {
     expect(moveButton("down", parentB.id).disabled).toBe(true);
   });
 
-  it("reorders root siblings (and their subtrees) in tree mode", async () => {
+  it("reorders root siblings (and their subtrees) in the tree", async () => {
     const { client, execute } = statefulFakeClient(project);
     render(<App client={client} />);
     await ready();
-    fireEvent.click(screen.getByTestId("view-mode-tree"));
-    await waitFor(() => expect(document.querySelector('[data-testid="drag-grip"]')).not.toBeNull());
 
     // Before: parent A precedes parent B.
     expect(rowOrder().indexOf(parentA.id)).toBeLessThan(rowOrder().indexOf(parentB.id));
