@@ -112,17 +112,36 @@ Full gate green at `f0c77b3`: lint + typecheck + tests (domain 32, application 5
 32, web 96). Screenshot the demo with `VITE_VECTA_PREVIEW=1 pnpm exec vite build --config
 scratchpad/vite.screenshot.config.ts` (login screen renders without the flag).
 
-### Still open / next
+### Progress after P0
 
-1. **Deploy** (user-gated): the two destructive migrations `0002` (drop `daily_plan_locked`) +
-   `0003` (drop `review_ref`/`change_ref`) must run against the live Neon DB at deploy, AFTER
-   the pending Neon password rotation (then update the `vecta-database-url` Keychain item + re-run
-   `wrangler secret put DATABASE_URL --name vecta`). Also set `VITE_GOOGLE_*` so the login screen
-   shows the real sign-in (prod already has the client id) and confirm `VITE_VECTA_PREVIEW` is unset.
-2. **Push**: 14 local commits (`ab46631..f0c77b3`) are unpushed — awaiting the user's go.
-3. **P1/P2/P3** from design 0003: P1 leftovers = C-3 drag-reorder-only semantics, C-6 dropdown
-   inputs, C-7 collapse roll-up (C-4/C-5 already landed in P0); P2 = E-1/E-2 master + template
-   screens (+ schema); P3 = F-1 numbering + G-1 member daily-total panel.
+- **Pushed**: P0 (`ab46631..8755185`) is on `origin/adr-0011-effort-wbs-realignment` (git-haiku,
+  fast-forward). The P1 + this HANDOFF commit push on top.
+- **P1 done** `3c2aba5` — **C-3** drag is reorder-only (no re-parent; ⠿ grip moved to the No.
+  column, ▲▼ removed; sibling-scope-only reorder rewriting sortOrder) and **C-7** a collapsed
+  parent rolls up its subtree effort + per-day daily sums (read-only summary). All tests green.
+
+### Deploy is BLOCKED (needs the user) — do not hand-run it
+
+Deploy is CI-only via `.github/workflows/deploy.yml` (`workflow_dispatch` + `github.ref ==
+refs/heads/main`), so pushing the feature branch does NOT deploy (no prod migration ran). Before
+it can work: (a) **`deploy.yml` is stale** — it deploys `apps/optimizer` + `apps/simulator`
+(both removed by the ADR-0011 excision) and runs `scripts/beta-smoke.mjs` (missing), so it would
+fail; needs modernizing to the single `apps/web` worker; (b) the code must be on **`main`**; (c)
+the migrate step needs the private guards `EXPECTED_DATABASE_HOST`/`DATABASE_NAME` (GitHub
+`vars`) and `DATABASE_URL` (secret), and the **pending Neon password rotation** must be done +
+that secret refreshed, else the destructive `0002`/`0003` migration fails; (d) it is a
+destructive prod migration. `wrangler` is authed locally as the owner and the `vecta-database-url`
+Keychain item exists, so a careful *manual* deploy (build+`wrangler deploy` for the web worker,
+then a guarded `db:migrate`) is possible once the rotation is confirmed and the guard values are
+supplied — but confirm with the user first.
+
+### Remaining backlog (design 0003)
+
+- **C-6** (dropdown inputs for 工程/プロダクト/担当) — deferred: it validates against the E-2
+  master, which is **P2**. Do C-6 together with E-2.
+- **P2**: E-2 master screen + schema, E-1 subtask-template screen, then C-6's full master binding.
+- **P3**: F-1 unique numbering (approved: internal UUID + project-scoped immutable display seq),
+  G-1 member daily-total bottom panel (option a).
 
 Local screenshot pipeline (the Cloudflare vite plugin needs local Postgres so `pnpm dev`
 fails): a React-only build of the preview `App` renders without a backend —
