@@ -120,20 +120,41 @@ scratchpad/vite.screenshot.config.ts` (login screen renders without the flag).
   column, ▲▼ removed; sibling-scope-only reorder rewriting sortOrder) and **C-7** a collapsed
   parent rolls up its subtree effort + per-day daily sums (read-only summary). All tests green.
 
-### Deploy is BLOCKED (needs the user) — do not hand-run it
+### Deployed 2026-07-21 (manual reconstruction) — LIVE
 
-Deploy is CI-only via `.github/workflows/deploy.yml` (`workflow_dispatch` + `github.ref ==
-refs/heads/main`), so pushing the feature branch does NOT deploy (no prod migration ran). Before
-it can work: (a) **`deploy.yml` is stale** — it deploys `apps/optimizer` + `apps/simulator`
-(both removed by the ADR-0011 excision) and runs `scripts/beta-smoke.mjs` (missing), so it would
-fail; needs modernizing to the single `apps/web` worker; (b) the code must be on **`main`**; (c)
-the migrate step needs the private guards `EXPECTED_DATABASE_HOST`/`DATABASE_NAME` (GitHub
-`vars`) and `DATABASE_URL` (secret), and the **pending Neon password rotation** must be done +
-that secret refreshed, else the destructive `0002`/`0003` migration fails; (d) it is a
-destructive prod migration. `wrangler` is authed locally as the owner and the `vecta-database-url`
-Keychain item exists, so a careful *manual* deploy (build+`wrangler deploy` for the web worker,
-then a guarded `db:migrate`) is possible once the rotation is confirmed and the guard values are
-supplied — but confirm with the user first.
+Production is updated: P0+P1 code is live at **https://vecta.tt-dev.workers.dev** (worker
+`vecta`, Version `4ce0c229`), showing the A-1 login screen (real Google sign-in, no public
+preview — verified). Migrations `0002`+`0003` are applied to prod Neon (verified: the three
+dropped columns are gone, 4 migrations applied; `tasks` was empty so zero data loss). The Neon
+`vecta-database-url` Keychain connection string works — no rotation issue.
+
+CI is NOT usable as-is despite the modernized `deploy.yml` (single `apps/web`, production-only
+dispatch, on `main`): GitHub Actions has no secrets (only the 3 vars I set — `GOOGLE_CLIENT_ID`,
+`PRODUCTION_TENANT_ID`, `PRODUCTION_PROJECT_ID`), no Hyperdrive config exists on the account, and
+the repo `wrangler.jsonc` targets `vecta-local`/`-staging`/`-production` — none is the live
+`vecta`. So the deploy was done MANUALLY.
+
+**Manual deploy recipe (reuse next time):**
+1. Temporarily overwrite `apps/web/wrangler.jsonc` with a FLAT config: `name:"vecta"`, `main`,
+   `assets`(ASSETS), OIDC `vars` = Google standard (issuer `https://accounts.google.com`,
+   audience = the Google client id, jwks `https://www.googleapis.com/oauth2/v3/certs`), three
+   `ratelimits` (ids 1001/1002/1003), **NO `hyperdrive` binding** (worker uses the `DATABASE_URL`
+   Neon secret; Hyperdrive is a never-reached fallback), no `env` blocks.
+2. Build with frontend auth: `VITE_GOOGLE_CLIENT_ID=<id> VITE_VECTA_TENANT_ID=<t>
+   VITE_VECTA_PROJECT_ID=<p> pnpm --dir apps/web build` (values in private memory
+   `earned-signal-realignment.md`). **Gotcha:** do NOT pass `--mode production` — it sets
+   `CLOUDFLARE_ENV=production` and the cloudflare vite plugin suffixes the worker to
+   `vecta-production` (wrong worker). Always deploy with an explicit `--name vecta`.
+3. `pnpm --dir apps/web exec wrangler deploy --name vecta` (dry-run first).
+4. Secret (persists across deploys, only to set/refresh): `printf '%s' "$(security
+   find-generic-password -w -s vecta-database-url)" | wrangler secret put DATABASE_URL --name vecta`.
+5. Migrate: `DEPLOY_ENV=production DATABASE_URL=<keychain> EXPECTED_DATABASE_HOST=<url host>
+   EXPECTED_DATABASE_NAME=<url dbname> pnpm --dir packages/persistence db:migrate`.
+6. Restore `apps/web/wrangler.jsonc` (never commit the flat override).
+
+To make CI usable later: reconcile the repo wrangler config to the real `vecta` name + drop the
+dead Hyperdrive binding, and populate all GitHub Actions secrets/vars (`CLOUDFLARE_API_TOKEN`,
+`DATABASE_URL`, `DATABASE_HOST/NAME`, hyperdrive/OIDC/rate-limit values, operations-evidence).
 
 ### Remaining backlog (design 0003)
 
