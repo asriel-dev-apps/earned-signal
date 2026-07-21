@@ -22,9 +22,10 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
 
 ## Current live state
 
-- **P0–P2 COMPLETE and DEPLOYED**. Live: **https://vecta.tt-dev.workers.dev** (worker `vecta`,
-  worker version **`ac03a65e`** as of the last frontend deploy). Auth = Google OIDC; persistence =
-  Neon serverless (`DATABASE_URL` secret).
+- **P0–P2 COMPLETE and DEPLOYED**, plus header + login redesigns and **P3 F-1**. Live:
+  **https://vecta.tt-dev.workers.dev** (worker `vecta`, worker version **`826cbd89`** = latest F-1
+  deploy). Auth = Google OIDC; persistence = Neon serverless (`DATABASE_URL` secret). After a deploy,
+  allow **~30 s propagation** before the served `index-*.js` hash matches the build.
 - **DB schema at migration 0005** (Neon, prod): `tasks` model + `members` + project-scoped masters
   `processes`/`products` + `subtask_templates`; review/change refs and `daily_plan_locked` dropped.
 - **Prod project holds 48 synthetic test tasks** (8 phases × 5 subtasks) + 8 processes / 6 products /
@@ -35,16 +36,19 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
 
 ## Active work / backlog
 
-- **Login screen redesign** (in progress, a subagent): the pre-sign-in view was "ダサい" — being
-  rebuilt (asymmetric layout + a WBS/Gantt hero motif using the app-bar glyph). Latest iteration:
-  tagline → VECTA's origin (README: "Earned Value, Cost & Timeline Analytics" / derives from
-  *vector*), richer hero, plus an **app-wide theme toggle** (System/Light/Dark via `data-theme`,
-  because pure `prefers-color-scheme` wasn't switching live for the user). Verify screenshots →
-  commit → deploy when done.
-- **P3** (design 0003): **F-1** unique numbering (approved: internal UUID + project-scoped immutable
-  display seq — DB `seq` column, `(tenant,project,seq)` unique); **G-1** member daily-total bottom
-  panel (option a: rows=members, day-axis heatmap, capacity-overflow red, horizontal-scroll synced,
-  toggle; include ExternalLoad in the sums).
+- **Login screen redesign** — DONE + deployed (`5ea0775`, worker `d536542b`): asymmetric layout,
+  VECTA-origin tagline ("Earned Value, Cost & Timeline Analytics" + the *vector* origin), enriched
+  WBS/EVM hero (schedule bars + dependency links + milestones + earned-value S-curve → vector arrow),
+  and an **app-wide theme toggle** (System/Light/Dark via `data-theme` on `<html>`, instant live
+  switching; the pure `prefers-color-scheme` didn't switch live). Toggle in the app bar + on login.
+- **P3 — F-1 DONE + deployed** (`26d51df`, worker `826cbd89`): project-scoped **immutable display
+  No.** — `tasks.seq` + `projects.next_task_seq`, No. shows `0001`-style. **Migration 0006 applied to
+  live Neon** (verified: 48 tasks → seq 1..48, all unique, `next_task_seq`=49); 7 migrations applied.
+  Assigned at creation, never renumbered (gaps ok, structural via seq excluded from updates),
+  tasks+subtasks share the counter.
+- **P3 — G-1 IN PROGRESS** (a subagent): member daily-total bottom panel (option a: rows=members,
+  day-axis heatmap aligned + horizontal-scroll synced with the grid, capacity-overflow red, toggle;
+  include ExternalLoad in the sums). Frontend-only (App.tsx/styles.css) — no schema/migration.
 - **Performance / real-time** (design 0004): DEFERRED — align with the user on the fundamentals
   (Phase 0 free quick-wins vs Phase 1 Durable-Object real-time; cost/free tradeoff) before building.
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
