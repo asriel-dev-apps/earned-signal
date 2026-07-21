@@ -66,8 +66,12 @@ export interface WbsGridTaskRow {
   readonly sortOrder: number;
   // Meta columns B/C/D-F/E/G/H/I/J.
   readonly name: string;
-  readonly process: string;
-  readonly product: string;
+  readonly processId: string | null;
+  readonly productId: string | null;
+  /** Resolved 工程 master name (empty string when unset). */
+  readonly processName: string;
+  /** Resolved プロダクト master name (empty string when unset). */
+  readonly productName: string;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
@@ -123,6 +127,8 @@ export function projectWbsGrid(
   // GENERAL by construction.
   const scopedMembers = projectWorkspaceView(project, role).members;
   const memberNameById = new Map(scopedMembers.map((member) => [member.id, member.name]));
+  const processNameById = new Map(project.processes.map((process) => [process.id, process.name]));
+  const productNameById = new Map(project.products.map((product) => [product.id, product.name]));
 
   const leaves = leafTaskIds(project.tasks);
   // Σ of each parent's direct children's planned effort, for the parent-vs-child
@@ -164,8 +170,10 @@ export function projectWbsGrid(
         parentId: task.parentId,
         sortOrder: task.sortOrder,
         name: task.name,
-        process: task.process,
-        product: task.product,
+        processId: task.processId,
+        productId: task.productId,
+        processName: task.processId === null ? "" : processNameById.get(task.processId) ?? "",
+        productName: task.productId === null ? "" : productNameById.get(task.productId) ?? "",
         note: task.note,
         contract: task.contract,
         assigneeMemberId: task.assigneeMemberId,

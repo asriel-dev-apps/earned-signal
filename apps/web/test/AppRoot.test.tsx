@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppRoot } from "../src/AppRoot.js";
 
@@ -62,6 +62,28 @@ describe("AppRoot authentication gate (Design 0003 §A-1)", () => {
     expect(screen.getByTestId("google-sign-out")).toBeTruthy();
     expect(screen.getByTestId("auth-identity").textContent).toBe("admin@example.com");
     expect(screen.queryByTestId("login-screen")).toBeNull();
+  });
+
+  it("switches to the master screen via the top-bar nav (Design 0003 §E-2)", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network in test"))));
+    const token = fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3_600, email: "admin@example.com" });
+    window.sessionStorage.setItem("vecta-auth-id-token", token);
+
+    render(<AppRoot config={CONFIG} />);
+    // Default view is the WBS grid; the nav offers WBS + マスタ (no テンプレート).
+    expect(screen.getByTestId("wbs-grid")).toBeTruthy();
+    expect(screen.getByTestId("nav-tabs")).toBeTruthy();
+    expect(screen.queryByText("テンプレート")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("nav-master"));
+    expect(screen.getByTestId("master-screen")).toBeTruthy();
+    expect(screen.queryByTestId("wbs-grid")).toBeNull();
+    // The identity + sign-out controls survive the nav switch.
+    expect(screen.getByTestId("auth-identity").textContent).toBe("admin@example.com");
+    expect(screen.getByTestId("google-sign-out")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("nav-wbs"));
+    expect(screen.getByTestId("wbs-grid")).toBeTruthy();
   });
 
   it("renders the ephemeral demo grid regardless of auth when VITE_VECTA_PREVIEW is set", () => {

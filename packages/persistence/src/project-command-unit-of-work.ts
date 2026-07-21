@@ -15,6 +15,8 @@ import {
   auditEvents,
   commandReceipts,
   members,
+  processes,
+  products,
   projectCalendars,
   projects,
   schema,
@@ -160,6 +162,20 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         .from(members)
         .where(and(eq(members.tenantId, request.tenantId), eq(members.projectId, request.projectId)))
         .orderBy(asc(members.id));
+      const processRows = await transaction
+        .select()
+        .from(processes)
+        .where(
+          and(eq(processes.tenantId, request.tenantId), eq(processes.projectId, request.projectId)),
+        )
+        .orderBy(asc(processes.sortOrder), asc(processes.id));
+      const productRows = await transaction
+        .select()
+        .from(products)
+        .where(
+          and(eq(products.tenantId, request.tenantId), eq(products.projectId, request.projectId)),
+        )
+        .orderBy(asc(products.sortOrder), asc(products.id));
       const dependencyRows = await transaction
         .select()
         .from(taskDependencies)
@@ -208,13 +224,23 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
           calendarId: member.calendarId,
           dailyCapacityMinutes: member.dailyCapacityMinutes,
         })),
+        processes: processRows.map((process) => ({
+          id: process.id,
+          name: process.name,
+          sortOrder: process.sortOrder,
+        })),
+        products: productRows.map((product) => ({
+          id: product.id,
+          name: product.name,
+          sortOrder: product.sortOrder,
+        })),
         tasks: taskRows.map((task) => ({
           id: task.id,
           parentId: task.parentTaskId,
           sortOrder: task.sortOrder,
           name: task.name,
-          process: task.process,
-          product: task.product,
+          processId: task.processId,
+          productId: task.productId,
           note: task.note,
           contract: task.contract,
           assigneeMemberId: task.assigneeMemberId,
@@ -251,9 +277,13 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       const nextTaskById = new Map(next.tasks.map((task) => [task.id, task]));
       const nextMemberById = new Map(next.members.map((member) => [member.id, member]));
       const currentMemberIds = new Set(memberRows.map((member) => member.id));
+      const nextProcessById = new Map(next.processes.map((process) => [process.id, process]));
+      const currentProcessIds = new Set(processRows.map((process) => process.id));
+      const nextProductById = new Map(next.products.map((product) => [product.id, product]));
+      const currentProductIds = new Set(productRows.map((product) => product.id));
 
-      // Free all self-FK (parent) and assignee references so deletes and inserts
-      // never collide with RESTRICT constraints.
+      // Free all self-FK (parent), assignee, process, and product references so
+      // deletes and inserts never collide with RESTRICT constraints.
       await transaction
         .delete(taskDependencies)
         .where(
@@ -265,7 +295,7 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
       if (taskRows.length > 0) {
         await transaction
           .update(tasks)
-          .set({ parentTaskId: null, assigneeMemberId: null })
+          .set({ parentTaskId: null, assigneeMemberId: null, processId: null, productId: null })
           .where(and(eq(tasks.tenantId, request.tenantId), eq(tasks.projectId, request.projectId)));
       }
 
@@ -310,6 +340,80 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         }
       }
 
+      // Processes: insert / update present, delete removed (now unreferenced).
+      for (const process of next.processes) {
+        const values = { name: process.name, sortOrder: process.sortOrder };
+        if (currentProcessIds.has(process.id)) {
+          await transaction
+            .update(processes)
+            .set({ ...values, updatedAt: sql`now()` })
+            .where(
+              and(
+                eq(processes.tenantId, request.tenantId),
+                eq(processes.projectId, request.projectId),
+                eq(processes.id, process.id),
+              ),
+            );
+        } else {
+          await transaction.insert(processes).values({
+            id: process.id,
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            ...values,
+          });
+        }
+      }
+      for (const process of processRows) {
+        if (!nextProcessById.has(process.id)) {
+          await transaction
+            .delete(processes)
+            .where(
+              and(
+                eq(processes.tenantId, request.tenantId),
+                eq(processes.projectId, request.projectId),
+                eq(processes.id, process.id),
+              ),
+            );
+        }
+      }
+
+      // Products: insert / update present, delete removed (now unreferenced).
+      for (const product of next.products) {
+        const values = { name: product.name, sortOrder: product.sortOrder };
+        if (currentProductIds.has(product.id)) {
+          await transaction
+            .update(products)
+            .set({ ...values, updatedAt: sql`now()` })
+            .where(
+              and(
+                eq(products.tenantId, request.tenantId),
+                eq(products.projectId, request.projectId),
+                eq(products.id, product.id),
+              ),
+            );
+        } else {
+          await transaction.insert(products).values({
+            id: product.id,
+            tenantId: request.tenantId,
+            projectId: request.projectId,
+            ...values,
+          });
+        }
+      }
+      for (const product of productRows) {
+        if (!nextProductById.has(product.id)) {
+          await transaction
+            .delete(products)
+            .where(
+              and(
+                eq(products.tenantId, request.tenantId),
+                eq(products.projectId, request.projectId),
+                eq(products.id, product.id),
+              ),
+            );
+        }
+      }
+
       // Delete removed tasks (parent references already nulled above).
       for (const task of taskRows) {
         if (!nextTaskById.has(task.id)) {
@@ -332,8 +436,8 @@ export class PostgresProjectCommandUnitOfWork implements ProjectCommandUnitOfWor
         const values = {
           sortOrder: task.sortOrder,
           name: task.name,
-          process: task.process,
-          product: task.product,
+          processId: task.processId,
+          productId: task.productId,
           note: task.note,
           contract: task.contract,
           assigneeMemberId: task.assigneeMemberId,

@@ -85,8 +85,8 @@ describe("PostgresProjectCommandUnitOfWork", () => {
   it("persists all native task columns and reloads them identically", async () => {
     const changes: Partial<Omit<ProjectTask, "id">> = {
       name: "Reworked subtask",
-      process: "Phase Z",
-      product: "Product 9",
+      processId: demoProjectRecord.processes[1]!.id,
+      productId: demoProjectRecord.products[1]!.id,
       note: "Reworked note",
       contract: "Contract 9",
       plannedEffortMinutes: 960,
@@ -140,8 +140,8 @@ describe("PostgresProjectCommandUnitOfWork", () => {
       parentId: parentTask.id,
       sortOrder: 9_000,
       name: "Post-launch review",
-      process: "Phase A",
-      product: "Product 1",
+      processId: demoProjectRecord.processes[0]!.id,
+      productId: demoProjectRecord.products[0]!.id,
       note: "",
       contract: "Contract 1",
       assigneeMemberId: demoProjectRecord.members[0]!.id,
@@ -241,6 +241,45 @@ describe("PostgresProjectCommandUnitOfWork", () => {
     });
     reloaded = await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
     expect(reloaded?.members.some((member) => member.id === memberId)).toBe(false);
+  });
+
+  it("adds, renames, and removes a process master", async () => {
+    const processId = "70000000-0000-4000-8000-0000000000ff";
+    await service().execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 1n,
+      idempotencyKey: "add-process",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: { type: "process.add", process: { id: processId, name: "Phase Z", sortOrder: 99 } },
+    });
+    let reloaded = await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    expect(reloaded?.processes.find((process) => process.id === processId)).toMatchObject({
+      name: "Phase Z",
+      sortOrder: 99,
+    });
+
+    await service().execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 2n,
+      idempotencyKey: "rename-process",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: { type: "process.update", processId, changes: { name: "Phase ZZ" } },
+    });
+    reloaded = await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    expect(reloaded?.processes.find((process) => process.id === processId)?.name).toBe("Phase ZZ");
+
+    await service().execute({
+      tenantId: demoProjectRecord.tenant.id,
+      projectId: demoProjectRecord.project.id,
+      expectedRevision: 3n,
+      idempotencyKey: "delete-process",
+      actor: { type: "HUMAN", id: "user-001" },
+      command: { type: "process.delete", processId },
+    });
+    reloaded = await repository.load(demoProjectRecord.tenant.id, demoProjectRecord.project.id);
+    expect(reloaded?.processes.some((process) => process.id === processId)).toBe(false);
   });
 
   it("replays the original result for a repeated command", async () => {

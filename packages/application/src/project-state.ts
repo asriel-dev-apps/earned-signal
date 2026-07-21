@@ -21,6 +21,20 @@ export interface ProjectMember {
   readonly dailyCapacityMinutes: number;
 }
 
+/** Project-scoped 工程 master (name-only). Supplies the grid's 工程 dropdown. */
+export interface ProjectProcess {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+}
+
+/** Project-scoped プロダクト master (name-only). Supplies the grid's プロダクト dropdown. */
+export interface ProjectProduct {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+}
+
 export interface ProjectDependency {
   readonly predecessorId: string;
   readonly type: DependencyType;
@@ -32,8 +46,8 @@ export interface ProjectTask {
   readonly parentId: string | null;
   readonly sortOrder: number;
   readonly name: string;
-  readonly process: string;
-  readonly product: string;
+  readonly processId: string | null;
+  readonly productId: string | null;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
@@ -61,6 +75,8 @@ export interface ProjectState {
   readonly defaultCalendarId: string;
   readonly calendars: readonly ProjectCalendar[];
   readonly members: readonly ProjectMember[];
+  readonly processes: readonly ProjectProcess[];
+  readonly products: readonly ProjectProduct[];
   readonly tasks: readonly ProjectTask[];
 }
 
@@ -116,6 +132,38 @@ export interface DeleteMemberCommand {
   readonly memberId: string;
 }
 
+export interface AddProcessCommand {
+  readonly type: "process.add";
+  readonly process: ProjectProcess;
+}
+
+export interface UpdateProcessCommand {
+  readonly type: "process.update";
+  readonly processId: string;
+  readonly changes: Partial<Omit<ProjectProcess, "id">>;
+}
+
+export interface DeleteProcessCommand {
+  readonly type: "process.delete";
+  readonly processId: string;
+}
+
+export interface AddProductCommand {
+  readonly type: "product.add";
+  readonly product: ProjectProduct;
+}
+
+export interface UpdateProductCommand {
+  readonly type: "product.update";
+  readonly productId: string;
+  readonly changes: Partial<Omit<ProjectProduct, "id">>;
+}
+
+export interface DeleteProductCommand {
+  readonly type: "product.delete";
+  readonly productId: string;
+}
+
 export type ProjectCommand =
   | AddTaskCommand
   | UpdateTaskCommand
@@ -123,7 +171,13 @@ export type ProjectCommand =
   | GenerateSubtasksCommand
   | AddMemberCommand
   | UpdateMemberCommand
-  | DeleteMemberCommand;
+  | DeleteMemberCommand
+  | AddProcessCommand
+  | UpdateProcessCommand
+  | DeleteProcessCommand
+  | AddProductCommand
+  | UpdateProductCommand
+  | DeleteProductCommand;
 
 const DEPENDENCY_TYPES: ReadonlySet<DependencyType> = new Set(["FS", "SS", "FF", "SF"]);
 
@@ -163,6 +217,40 @@ function validateMembers(project: ProjectState): void {
   }
 }
 
+function validateProcesses(project: ProjectState): void {
+  const processIds = new Set<string>();
+  for (const process of project.processes) {
+    if (process.id.trim().length === 0 || processIds.has(process.id)) {
+      throw new Error(`Process ID must be unique: ${process.id}`);
+    }
+    processIds.add(process.id);
+    if (process.name.trim().length === 0) {
+      throw new Error(`Process ${process.id} requires a name`);
+    }
+    validateWholeNonNegative(
+      process.sortOrder,
+      `Process ${process.id} sort order must be a whole number >= 0`,
+    );
+  }
+}
+
+function validateProducts(project: ProjectState): void {
+  const productIds = new Set<string>();
+  for (const product of project.products) {
+    if (product.id.trim().length === 0 || productIds.has(product.id)) {
+      throw new Error(`Product ID must be unique: ${product.id}`);
+    }
+    productIds.add(product.id);
+    if (product.name.trim().length === 0) {
+      throw new Error(`Product ${product.id} requires a name`);
+    }
+    validateWholeNonNegative(
+      product.sortOrder,
+      `Product ${product.id} sort order must be a whole number >= 0`,
+    );
+  }
+}
+
 function validateParentHierarchy(project: ProjectState, taskIds: ReadonlySet<string>): void {
   const parentById = new Map(project.tasks.map((task) => [task.id, task.parentId]));
   for (const task of project.tasks) {
@@ -187,7 +275,11 @@ function validateParentHierarchy(project: ProjectState, taskIds: ReadonlySet<str
 
 function validateProject(project: ProjectState): void {
   validateMembers(project);
+  validateProcesses(project);
+  validateProducts(project);
   const memberIds = new Set(project.members.map((member) => member.id));
+  const processIds = new Set(project.processes.map((process) => process.id));
+  const productIds = new Set(project.products.map((product) => product.id));
 
   const taskIds = new Set<string>();
   for (const task of project.tasks) {
@@ -227,6 +319,12 @@ function validateProject(project: ProjectState): void {
     }
     if (task.assigneeMemberId !== null && !memberIds.has(task.assigneeMemberId)) {
       throw new Error(`Task ${task.id} references an unknown member: ${task.assigneeMemberId}`);
+    }
+    if (task.processId !== null && !processIds.has(task.processId)) {
+      throw new Error(`Task ${task.id} references an unknown process: ${task.processId}`);
+    }
+    if (task.productId !== null && !productIds.has(task.productId)) {
+      throw new Error(`Task ${task.id} references an unknown product: ${task.productId}`);
     }
     for (const [date, value] of Object.entries(task.dailyPlan)) {
       if (!isIsoDate(date)) {
@@ -307,8 +405,8 @@ function generateSubtaskTasks(
     parentId: parent.id,
     sortOrder: baseSortOrder + index,
     name: step.name,
-    process: "",
-    product: "",
+    processId: null,
+    productId: null,
     note: "",
     contract: "",
     assigneeMemberId: parent.assigneeMemberId,
@@ -423,7 +521,7 @@ export function applyProjectCommand(
         member.id === command.memberId ? { ...member, ...command.changes } : member,
       ),
     };
-  } else {
+  } else if (command.type === "member.delete") {
     if (!state.members.some((member) => member.id === command.memberId)) {
       throw new Error(`Unknown member: ${command.memberId}`);
     }
@@ -433,6 +531,58 @@ export function applyProjectCommand(
     next = {
       ...state,
       members: state.members.filter((member) => member.id !== command.memberId),
+    };
+  } else if (command.type === "process.add") {
+    next = { ...state, processes: [...state.processes, command.process] };
+  } else if (command.type === "process.update") {
+    if (Object.keys(command.changes).length === 0) {
+      throw new Error("Process update requires at least one change");
+    }
+    if (!state.processes.some((process) => process.id === command.processId)) {
+      throw new Error(`Unknown process: ${command.processId}`);
+    }
+    next = {
+      ...state,
+      processes: state.processes.map((process) =>
+        process.id === command.processId ? { ...process, ...command.changes } : process,
+      ),
+    };
+  } else if (command.type === "process.delete") {
+    if (!state.processes.some((process) => process.id === command.processId)) {
+      throw new Error(`Unknown process: ${command.processId}`);
+    }
+    if (state.tasks.some((task) => task.processId === command.processId)) {
+      throw new Error(`Process ${command.processId} is used by a task`);
+    }
+    next = {
+      ...state,
+      processes: state.processes.filter((process) => process.id !== command.processId),
+    };
+  } else if (command.type === "product.add") {
+    next = { ...state, products: [...state.products, command.product] };
+  } else if (command.type === "product.update") {
+    if (Object.keys(command.changes).length === 0) {
+      throw new Error("Product update requires at least one change");
+    }
+    if (!state.products.some((product) => product.id === command.productId)) {
+      throw new Error(`Unknown product: ${command.productId}`);
+    }
+    next = {
+      ...state,
+      products: state.products.map((product) =>
+        product.id === command.productId ? { ...product, ...command.changes } : product,
+      ),
+    };
+  } else {
+    if (!state.products.some((product) => product.id === command.productId)) {
+      throw new Error(`Unknown product: ${command.productId}`);
+    }
+    if (state.tasks.some((task) => task.productId === command.productId)) {
+      throw new Error(`Product ${command.productId} is used by a task`);
+    }
+    next = {
+      ...state,
+      products: state.products.filter((product) => product.id !== command.productId),
     };
   }
   next = { ...next, tasks: reprorateSubtasks(next.tasks) };

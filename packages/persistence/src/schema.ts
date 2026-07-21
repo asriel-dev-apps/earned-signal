@@ -165,6 +165,52 @@ export const members = pgTable(
   ],
 );
 
+export const processes = pgTable(
+  "processes",
+  {
+    id: uuid().defaultRandom().notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "processes_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("processes_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check("processes_sort_order_non_negative", sql`${table.sortOrder} >= 0`),
+  ],
+);
+
+export const products = pgTable(
+  "products",
+  {
+    id: uuid().defaultRandom().notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    name: text().notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: auditTimestamp("created_at").notNull().defaultNow(),
+    updatedAt: auditTimestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.projectId, table.id] }),
+    foreignKey({
+      name: "products_project_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [projects.tenantId, projects.id],
+    }).onDelete("cascade"),
+    check("products_name_not_blank", sql`length(trim(${table.name})) > 0`),
+    check("products_sort_order_non_negative", sql`${table.sortOrder} >= 0`),
+  ],
+);
+
 export const projectMemberships = pgTable(
   "project_memberships",
   {
@@ -199,8 +245,8 @@ export const tasks = pgTable(
     parentTaskId: uuid("parent_task_id"),
     sortOrder: integer("sort_order").notNull().default(0),
     name: text().notNull(),
-    process: text().notNull().default(""),
-    product: text().notNull().default(""),
+    processId: uuid("process_id"),
+    productId: uuid("product_id"),
     note: text().notNull().default(""),
     contract: text().notNull().default(""),
     assigneeMemberId: uuid("assignee_member_id"),
@@ -232,6 +278,16 @@ export const tasks = pgTable(
       name: "tasks_assignee_fk",
       columns: [table.tenantId, table.projectId, table.assigneeMemberId],
       foreignColumns: [members.tenantId, members.projectId, members.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "tasks_process_fk",
+      columns: [table.tenantId, table.projectId, table.processId],
+      foreignColumns: [processes.tenantId, processes.projectId, processes.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "tasks_product_fk",
+      columns: [table.tenantId, table.projectId, table.productId],
+      foreignColumns: [products.tenantId, products.projectId, products.id],
     }).onDelete("restrict"),
     check("tasks_name_not_blank", sql`length(trim(${table.name})) > 0`),
     check("tasks_sort_order_non_negative", sql`${table.sortOrder} >= 0`),
@@ -368,6 +424,8 @@ export const schema = {
   projects,
   projectCalendars,
   members,
+  processes,
+  products,
   projectMemberships,
   tasks,
   taskDependencies,

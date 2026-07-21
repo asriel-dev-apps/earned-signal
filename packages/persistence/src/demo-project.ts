@@ -2,6 +2,8 @@ import type {
   AuditEventRecord,
   MemberRecord,
   PersistedProjectRecord,
+  ProcessRecord,
+  ProductRecord,
   ProjectCalendarRecord,
   TaskDependencyRecord,
   TaskRecord,
@@ -92,6 +94,27 @@ export function createSeedProjectRecord(
     dailyCapacityMinutes: 480,
   }));
 
+  // 工程 / プロダクト masters: one row per distinct synthetic phase/product used
+  // by the tasks below. Tasks reference these by id (Design 0003 §E-2 / §C-6).
+  const processes: ProcessRecord[] = [];
+  const processIdByName = new Map<string, string>();
+  const products: ProductRecord[] = [];
+  const productIdByName = new Map<string, string>();
+  for (let parentIndex = 0; parentIndex < parentCount; parentIndex += 1) {
+    const processName = `Phase ${PHASE_LETTERS[parentIndex % PHASE_LETTERS.length]}`;
+    if (!processIdByName.has(processName)) {
+      const id = makeUuid("7", processes.length + 1);
+      processIdByName.set(processName, id);
+      processes.push({ id, tenantId, projectId, name: processName, sortOrder: processes.length });
+    }
+    const productName = `Product ${(parentIndex % 6) + 1}`;
+    if (!productIdByName.has(productName)) {
+      const id = makeUuid("8", products.length + 1);
+      productIdByName.set(productName, id);
+      products.push({ id, tenantId, projectId, name: productName, sortOrder: products.length });
+    }
+  }
+
   const tasks: TaskRecord[] = [];
   const dependencies: TaskDependencyRecord[] = [];
   let sortOrder = 0;
@@ -109,8 +132,8 @@ export function createSeedProjectRecord(
       parentTaskId: null,
       sortOrder: sortOrder++,
       name: `Phase ${phase} deliverable ${parentIndex + 1}`,
-      process: `Phase ${phase}`,
-      product,
+      processId: processIdByName.get(`Phase ${phase}`)!,
+      productId: productIdByName.get(product)!,
       note: "",
       contract: `Contract ${(parentIndex % 4) + 1}`,
       assigneeMemberId: null,
@@ -150,8 +173,8 @@ export function createSeedProjectRecord(
         parentTaskId: parentId,
         sortOrder: sortOrder++,
         name: `Subtask ${parentIndex + 1}.${subtaskIndex + 1}`,
-        process: `Phase ${phase}`,
-        product,
+        processId: processIdByName.get(`Phase ${phase}`)!,
+        productId: productIdByName.get(product)!,
         note: subtaskIndex % 3 === 0 ? `Note ${leafCounter}` : "",
         contract: `Contract ${(parentIndex % 4) + 1}`,
         assigneeMemberId: members[leafCounter % memberCount]!.id,
@@ -209,6 +232,8 @@ export function createSeedProjectRecord(
     },
     calendars,
     members,
+    processes,
+    products,
     tasks,
     dependencies,
     auditEvents,

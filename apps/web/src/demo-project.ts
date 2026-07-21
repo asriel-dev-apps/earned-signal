@@ -1,6 +1,8 @@
 import type {
   ProjectDependency,
   ProjectMember,
+  ProjectProcess,
+  ProjectProduct,
   ProjectState,
   ProjectTask,
 } from "@vecta/application";
@@ -120,6 +122,27 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
     };
   });
 
+  // 工程 / プロダクト masters: one row per distinct synthetic phase/product used
+  // by the tasks below. Tasks reference these by id (Design 0003 §E-2 / §C-6).
+  const processes: ProjectProcess[] = [];
+  const processIdByName = new Map<string, string>();
+  const products: ProjectProduct[] = [];
+  const productIdByName = new Map<string, string>();
+  for (let parentIndex = 0; parentIndex < parentCount; parentIndex += 1) {
+    const processName = `Phase ${PHASE_LETTERS[parentIndex % PHASE_LETTERS.length]}`;
+    if (!processIdByName.has(processName)) {
+      const id = makeUuid("7", processes.length + 1);
+      processIdByName.set(processName, id);
+      processes.push({ id, name: processName, sortOrder: processes.length });
+    }
+    const productName = `Product ${(parentIndex % 6) + 1}`;
+    if (!productIdByName.has(productName)) {
+      const id = makeUuid("8", products.length + 1);
+      productIdByName.set(productName, id);
+      products.push({ id, name: productName, sortOrder: products.length });
+    }
+  }
+
   const tasks: ProjectTask[] = [];
   let sortOrder = 0;
   let leafCounter = 0;
@@ -133,8 +156,8 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       parentId: null,
       sortOrder: sortOrder++,
       name: `Phase ${phase} deliverable ${parentIndex + 1}`,
-      process: `Phase ${phase}`,
-      product,
+      processId: processIdByName.get(`Phase ${phase}`)!,
+      productId: productIdByName.get(product)!,
       note: "",
       contract: `Contract ${(parentIndex % 4) + 1}`,
       assigneeMemberId: null,
@@ -180,8 +203,8 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
         parentId,
         sortOrder: sortOrder++,
         name: `Subtask ${parentIndex + 1}.${subtaskIndex + 1}`,
-        process: `Phase ${phase}`,
-        product,
+        processId: processIdByName.get(`Phase ${phase}`)!,
+        productId: productIdByName.get(product)!,
         note: showcaseDemo ? "Hand-entered plan" : subtaskIndex % 3 === 0 ? `Note ${leafCounter}` : "",
         contract: `Contract ${(parentIndex % 4) + 1}`,
         assigneeMemberId: members[leafCounter % memberCount]!.id,
@@ -222,6 +245,8 @@ export function createDemoProject(options: DemoProjectOptions = {}): ProjectStat
       })),
     ],
     members,
+    processes,
+    products,
     tasks,
   };
 }

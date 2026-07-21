@@ -12,14 +12,16 @@ const project: ProjectState = {
     { id: "standard", name: "Standard", workingWeekdays: [1, 2, 3, 4, 5], nonWorkingDates: [] },
   ],
   members: [],
+  processes: [],
+  products: [],
   tasks: [
     {
       id: "task-1",
       parentId: null,
       sortOrder: 0,
       name: "Subtask 1.1",
-      process: "Phase A",
-      product: "Product 1",
+      processId: null,
+      productId: null,
       note: "",
       contract: "",
       assigneeMemberId: null,

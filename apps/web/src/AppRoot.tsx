@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { App } from "./App";
+import { MasterScreen } from "./MasterScreen";
 import {
   beginGoogleSignIn,
   completeGoogleSignIn,
@@ -10,6 +11,47 @@ import {
   type GoogleAuthConfig,
 } from "./google-auth";
 import { createProjectApiClient } from "./project-api-client";
+
+/** The destinations of the top-bar nav for this slice (Design 0003 §E-2). */
+type View = "wbs" | "master";
+
+/**
+ * Segmented top-bar nav (Design 0003 §E-2): switches which screen renders below
+ * the bar. Only WBS + マスタ for this slice — no テンプレート link (E-1 is out of
+ * scope, so no dead link).
+ */
+function NavTabs({
+  view,
+  onChange,
+}: {
+  readonly view: View;
+  readonly onChange: (view: View) => void;
+}) {
+  return (
+    <div className="nav-tabs" role="tablist" aria-label="画面切り替え" data-testid="nav-tabs">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "wbs"}
+        className={`nav-tab${view === "wbs" ? " nav-tab--active" : ""}`}
+        data-testid="nav-wbs"
+        onClick={() => onChange("wbs")}
+      >
+        WBS
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "master"}
+        className={`nav-tab${view === "master" ? " nav-tab--active" : ""}`}
+        data-testid="nav-master"
+        onClick={() => onChange("master")}
+      >
+        マスタ
+      </button>
+    </div>
+  );
+}
 
 /**
  * The unauthenticated view (Design 0003 §A-1): a centered login card, never the
@@ -66,6 +108,7 @@ export function AppRoot({
     // still-valid token from this browser session.
     return completeGoogleSignIn() ?? loadActiveToken();
   });
+  const [view, setView] = useState<View>("wbs");
 
   const client = useMemo(() => {
     if (config === null || idToken === null) return undefined;
@@ -86,9 +129,17 @@ export function AppRoot({
   }, []);
 
   // Dev/local-only demo (Design 0003 §A-1): the ephemeral preview grid, gated
-  // behind a build-time flag so it never appears in production.
+  // behind a build-time flag so it never appears in production. The nav still
+  // works here, switching between the in-memory demo WBS and master screens.
   if (import.meta.env.VITE_VECTA_PREVIEW) {
-    return <App />;
+    return (
+      <>
+        <div className="auth-bar" data-testid="auth-bar">
+          <NavTabs view={view} onChange={setView} />
+        </div>
+        {view === "wbs" ? <App /> : <MasterScreen />}
+      </>
+    );
   }
 
   // Not signed in → login screen only; no grid, no preview.
@@ -102,6 +153,7 @@ export function AppRoot({
   return (
     <>
       <div className="auth-bar" data-testid="auth-bar">
+        <NavTabs view={view} onChange={setView} />
         <span className="auth-identity" data-testid="auth-identity">
           {email ?? "Signed in"}
         </span>
@@ -114,7 +166,7 @@ export function AppRoot({
           Sign out
         </button>
       </div>
-      <App client={client} />
+      {view === "wbs" ? <App client={client} /> : <MasterScreen client={client} />}
     </>
   );
 }

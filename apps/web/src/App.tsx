@@ -64,6 +64,8 @@ type ColKind =
   | "index"
   | "text"
   | "assignee"
+  | "process"
+  | "product"
   | "hours"
   | "progress"
   | "date"
@@ -104,10 +106,10 @@ interface MetaColumn {
 // abbreviations survive in the grouped header bands and the top totals strip.
 const META: readonly MetaColumn[] = [
   { id: "no", header: "No.", width: 72, pinned: true, editable: false, kind: "index" },
-  { id: "process", header: "工程", width: 104, pinned: true, editable: true, kind: "text", field: "process" },
+  { id: "process", header: "工程", width: 104, pinned: true, editable: true, kind: "process", field: "processId" },
   { id: "name", header: "タスク・サブタスク", width: 240, pinned: true, editable: true, kind: "text", field: "name" },
   { id: "assignee", header: "担当", width: 120, pinned: true, editable: true, kind: "assignee", field: "assigneeMemberId" },
-  { id: "product", header: "プロダクト", width: 108, pinned: false, editable: true, kind: "text", field: "product" },
+  { id: "product", header: "プロダクト", width: 108, pinned: false, editable: true, kind: "product", field: "productId" },
   { id: "note", header: "備考", width: 140, pinned: false, editable: true, kind: "text", field: "note" },
   { id: "contract", header: "契約", width: 96, pinned: false, editable: true, kind: "text", field: "contract" },
   { id: "plannedEffortDays", header: "工数(人日)", width: 92, pinned: false, editable: false, kind: "derivedNum", band: "estimate" },
@@ -385,6 +387,10 @@ function displayValue(column: MetaColumn, row: WbsGridTaskRow, index: number): s
       return String(row[column.field as keyof WbsGridTaskRow] ?? "");
     case "assignee":
       return row.assigneeName ?? "";
+    case "process":
+      return row.processName;
+    case "product":
+      return row.productName;
     case "hours":
       return formatNumber((row[column.field as keyof WbsGridTaskRow] as number) / 60);
     case "progress":
@@ -410,6 +416,10 @@ function editInitialValue(column: MetaColumn, row: WbsGridTaskRow): string {
       return row.progress.toFixed(2);
     case "assignee":
       return row.assigneeMemberId ?? "";
+    case "process":
+      return row.processId ?? "";
+    case "product":
+      return row.productId ?? "";
     case "date":
       return String(row[column.field as keyof WbsGridTaskRow] ?? "");
     default:
@@ -446,9 +456,9 @@ function buildChanges(
     case "assignee":
       return { assigneeMemberId: trimmed === "" ? null : trimmed };
     case "process":
-      return { process: raw };
+      return { processId: trimmed === "" ? null : trimmed };
     case "product":
-      return { product: raw };
+      return { productId: trimmed === "" ? null : trimmed };
     case "name":
       return { name: raw };
     case "note":
@@ -501,6 +511,8 @@ const EMPTY_PROJECT: ProjectState = {
   defaultCalendarId: "standard",
   calendars: [{ id: "standard", name: "Standard", workingWeekdays: [1, 2, 3, 4, 5], nonWorkingDates: [] }],
   members: [],
+  processes: [],
+  products: [],
   tasks: [],
 };
 
@@ -557,6 +569,22 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
   const memberOptions = useMemo(
     () => project.members.map((member) => ({ id: member.id, name: member.name })),
     [project.members],
+  );
+  // 工程 / プロダクト dropdown options (Design 0003 §C-6), ordered by the master's
+  // sortOrder so the grid select mirrors the master screen's ordering.
+  const processOptions = useMemo(
+    () =>
+      [...project.processes]
+        .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
+        .map((process) => ({ id: process.id, name: process.name })),
+    [project.processes],
+  );
+  const productOptions = useMemo(
+    () =>
+      [...project.products]
+        .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
+        .map((product) => ({ id: product.id, name: product.name })),
+    [project.products],
   );
 
   // Continuous calendar axis: every ISO date from the first to the last planned
@@ -1029,8 +1057,8 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         parentId: draft.parentId,
         sortOrder,
         name: "",
-        process: "",
-        product: "",
+        processId: null,
+        productId: null,
         note: "",
         contract: "",
         assigneeMemberId: null,
@@ -1256,10 +1284,19 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     [finishDailyEdit],
   );
 
-  // The inline editor for one editable cell — a member <select> for the assignee
-  // column, a text <input> otherwise. Shared by real rows and draft rows.
-  const cellEditor = (column: MetaColumn): ReactNode =>
-    column.kind === "assignee" ? (
+  // The inline editor for one editable cell — a master-backed <select> for the
+  // 担当 / 工程 / プロダクト columns (Design 0003 §C-6), a text <input> otherwise.
+  // Shared by real rows and draft rows. Option value = master id, label = name;
+  // the empty option clears the reference.
+  const cellEditorSelect = (column: MetaColumn) => {
+    if (column.kind === "assignee") return { options: memberOptions, emptyLabel: "— 未割り当て —" };
+    if (column.kind === "process") return { options: processOptions, emptyLabel: "—" };
+    if (column.kind === "product") return { options: productOptions, emptyLabel: "—" };
+    return null;
+  };
+  const cellEditor = (column: MetaColumn): ReactNode => {
+    const select = cellEditorSelect(column);
+    return select !== null ? (
       <select
         className="cell-editor"
         autoFocus
@@ -1268,9 +1305,9 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         onBlur={() => finishEdit(true)}
         onKeyDown={onEditorKeyDown}
       >
-        <option value="">— 未割り当て —</option>
-        {memberOptions.map((member) => (
-          <option key={member.id} value={member.id}>{member.name}</option>
+        <option value="">{select.emptyLabel}</option>
+        {select.options.map((option) => (
+          <option key={option.id} value={option.id}>{option.name}</option>
         ))}
       </select>
     ) : (
@@ -1283,6 +1320,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
         onKeyDown={onEditorKeyDown}
       />
     );
+  };
 
   const renderMetaCell = (
     column: MetaColumn,
@@ -1374,7 +1412,7 @@ export function App({ client }: { readonly client?: ProjectApiClient }) {
     if (rollupText !== null) classes.push("cell--rollup");
     const style: CSSProperties =
       column.id === "process"
-        ? { width: column.width, borderLeft: `3px solid hsl(${processHue(row.process)} 50% 55%)` }
+        ? { width: column.width, borderLeft: `3px solid hsl(${processHue(row.processName)} 50% 55%)` }
         : { width: column.width };
     return (
       <div

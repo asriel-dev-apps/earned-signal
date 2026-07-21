@@ -3,12 +3,16 @@ import type { NodePgDatabase, NodePgTransaction } from "drizzle-orm/node-postgre
 import type {
   MemberRecord,
   PersistedProjectRecord,
+  ProcessRecord,
+  ProductRecord,
   TaskDependencyRecord,
   TaskRecord,
 } from "./project-record.js";
 import {
   auditEvents,
   members,
+  processes,
+  products,
   projectCalendars,
   projects,
   schema,
@@ -51,6 +55,12 @@ export class ProjectRepository {
       }
       if (record.members.length > 0) {
         await transaction.insert(members).values([...record.members]);
+      }
+      if (record.processes.length > 0) {
+        await transaction.insert(processes).values([...record.processes]);
+      }
+      if (record.products.length > 0) {
+        await transaction.insert(products).values([...record.products]);
       }
       if (record.tasks.length > 0) {
         // Self-referential parent FK is satisfied within a single batched
@@ -101,6 +111,16 @@ export class ProjectRepository {
       .from(members)
       .where(and(eq(members.tenantId, tenantId), eq(members.projectId, projectId)))
       .orderBy(asc(members.id));
+    const processRows = await this.database
+      .select()
+      .from(processes)
+      .where(and(eq(processes.tenantId, tenantId), eq(processes.projectId, projectId)))
+      .orderBy(asc(processes.sortOrder), asc(processes.id));
+    const productRows = await this.database
+      .select()
+      .from(products)
+      .where(and(eq(products.tenantId, tenantId), eq(products.projectId, projectId)))
+      .orderBy(asc(products.sortOrder), asc(products.id));
     const taskRows = await this.database
       .select()
       .from(tasks)
@@ -139,6 +159,12 @@ export class ProjectRepository {
       ),
       members: memberRows.map(
         (row): MemberRecord => withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
+      processes: processRows.map(
+        (row): ProcessRecord => withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
+      ),
+      products: productRows.map(
+        (row): ProductRecord => withoutGeneratedFields(row, ["createdAt", "updatedAt"]),
       ),
       tasks: taskRows.map(
         (row): TaskRecord => ({

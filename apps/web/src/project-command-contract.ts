@@ -25,8 +25,8 @@ const TaskFieldsSchema = z.object({
   parentId: UuidSchema.nullable(),
   sortOrder: SortOrderSchema,
   name: z.string().trim().min(1).max(2_000),
-  process: MetaTextSchema,
-  product: MetaTextSchema,
+  processId: UuidSchema.nullable(),
+  productId: UuidSchema.nullable(),
   note: MetaTextSchema,
   contract: MetaTextSchema,
   assigneeMemberId: UuidSchema.nullable(),
@@ -58,6 +58,28 @@ export const MemberChangesSchema = MemberSchema.omit({ id: true })
   .strict()
   .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
 
+export const ProcessSchema = z.object({
+  id: UuidSchema,
+  name: z.string().trim().min(1).max(200),
+  sortOrder: SortOrderSchema,
+}).strict();
+
+export const ProcessChangesSchema = ProcessSchema.omit({ id: true })
+  .partial()
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
+
+export const ProductSchema = z.object({
+  id: UuidSchema,
+  name: z.string().trim().min(1).max(200),
+  sortOrder: SortOrderSchema,
+}).strict();
+
+export const ProductChangesSchema = ProductSchema.omit({ id: true })
+  .partial()
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, "At least one change is required");
+
 export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("task.add"), task: TaskSchema }),
   z.object({ type: z.literal("task.update"), taskId: UuidSchema, changes: TaskChangesSchema }),
@@ -70,6 +92,12 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("member.add"), member: MemberSchema }),
   z.object({ type: z.literal("member.update"), memberId: UuidSchema, changes: MemberChangesSchema }),
   z.object({ type: z.literal("member.delete"), memberId: UuidSchema }),
+  z.object({ type: z.literal("process.add"), process: ProcessSchema }),
+  z.object({ type: z.literal("process.update"), processId: UuidSchema, changes: ProcessChangesSchema }),
+  z.object({ type: z.literal("process.delete"), processId: UuidSchema }),
+  z.object({ type: z.literal("product.add"), product: ProductSchema }),
+  z.object({ type: z.literal("product.update"), productId: UuidSchema, changes: ProductChangesSchema }),
+  z.object({ type: z.literal("product.delete"), productId: UuidSchema }),
 ]);
 
 function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
@@ -78,8 +106,8 @@ function toTask(task: z.infer<typeof TaskSchema>): ProjectTask {
     parentId: task.parentId,
     sortOrder: task.sortOrder,
     name: task.name,
-    process: task.process,
-    product: task.product,
+    processId: task.processId,
+    productId: task.productId,
     note: task.note,
     contract: task.contract,
     assigneeMemberId: task.assigneeMemberId,
@@ -101,8 +129,8 @@ function toTaskChanges(
     ...(changes.parentId === undefined ? {} : { parentId: changes.parentId }),
     ...(changes.sortOrder === undefined ? {} : { sortOrder: changes.sortOrder }),
     ...(changes.name === undefined ? {} : { name: changes.name }),
-    ...(changes.process === undefined ? {} : { process: changes.process }),
-    ...(changes.product === undefined ? {} : { product: changes.product }),
+    ...(changes.processId === undefined ? {} : { processId: changes.processId }),
+    ...(changes.productId === undefined ? {} : { productId: changes.productId }),
     ...(changes.note === undefined ? {} : { note: changes.note }),
     ...(changes.contract === undefined ? {} : { contract: changes.contract }),
     ...(changes.assigneeMemberId === undefined
@@ -160,6 +188,36 @@ export function toCommand(command: z.infer<typeof ApiCommandSchema>): ProjectCom
       },
     };
   }
+  if (command.type === "process.add") {
+    return { type: command.type, process: { ...command.process } };
+  }
+  if (command.type === "process.update") {
+    return {
+      type: command.type,
+      processId: command.processId,
+      changes: {
+        ...(command.changes.name === undefined ? {} : { name: command.changes.name }),
+        ...(command.changes.sortOrder === undefined
+          ? {}
+          : { sortOrder: command.changes.sortOrder }),
+      },
+    };
+  }
+  if (command.type === "product.add") {
+    return { type: command.type, product: { ...command.product } };
+  }
+  if (command.type === "product.update") {
+    return {
+      type: command.type,
+      productId: command.productId,
+      changes: {
+        ...(command.changes.name === undefined ? {} : { name: command.changes.name }),
+        ...(command.changes.sortOrder === undefined
+          ? {}
+          : { sortOrder: command.changes.sortOrder }),
+      },
+    };
+  }
   return command;
 }
 
@@ -169,8 +227,8 @@ function fromTask(task: ProjectTask): z.infer<typeof TaskSchema> {
     parentId: task.parentId,
     sortOrder: task.sortOrder,
     name: task.name,
-    process: task.process,
-    product: task.product,
+    processId: task.processId,
+    productId: task.productId,
     note: task.note,
     contract: task.contract,
     assigneeMemberId: task.assigneeMemberId,
@@ -192,8 +250,8 @@ function fromTaskChanges(
     ...(changes.parentId === undefined ? {} : { parentId: changes.parentId }),
     ...(changes.sortOrder === undefined ? {} : { sortOrder: changes.sortOrder }),
     ...(changes.name === undefined ? {} : { name: changes.name }),
-    ...(changes.process === undefined ? {} : { process: changes.process }),
-    ...(changes.product === undefined ? {} : { product: changes.product }),
+    ...(changes.processId === undefined ? {} : { processId: changes.processId }),
+    ...(changes.productId === undefined ? {} : { productId: changes.productId }),
     ...(changes.note === undefined ? {} : { note: changes.note }),
     ...(changes.contract === undefined ? {} : { contract: changes.contract }),
     ...(changes.assigneeMemberId === undefined
@@ -244,6 +302,26 @@ export function fromCommand(command: ProjectCommand): z.infer<typeof ApiCommandS
     return {
       type: command.type,
       memberId: command.memberId,
+      changes: { ...command.changes },
+    };
+  }
+  if (command.type === "process.add") {
+    return { type: command.type, process: { ...command.process } };
+  }
+  if (command.type === "process.update") {
+    return {
+      type: command.type,
+      processId: command.processId,
+      changes: { ...command.changes },
+    };
+  }
+  if (command.type === "product.add") {
+    return { type: command.type, product: { ...command.product } };
+  }
+  if (command.type === "product.update") {
+    return {
+      type: command.type,
+      productId: command.productId,
       changes: { ...command.changes },
     };
   }

@@ -16,8 +16,8 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     parentId: null,
     sortOrder: 0,
     name: "Task",
-    process: "",
-    product: "",
+    processId: null,
+    productId: null,
     note: "",
     contract: "",
     assigneeMemberId: null,
@@ -47,6 +47,8 @@ function baseProject(parentEffortMinutes: number): ProjectState {
     members: [
       { id: "member-1", name: "Member 01", calendarId: "standard", dailyCapacityMinutes: 480 },
     ],
+    processes: [],
+    products: [],
     tasks: [
       makeTask({
         id: "parent-1",

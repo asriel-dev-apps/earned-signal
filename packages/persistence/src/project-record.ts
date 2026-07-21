@@ -35,6 +35,22 @@ export interface MemberRecord {
   readonly dailyCapacityMinutes: number;
 }
 
+export interface ProcessRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly sortOrder: number;
+}
+
+export interface ProductRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly sortOrder: number;
+}
+
 export interface TaskRecord {
   readonly id: string;
   readonly tenantId: string;
@@ -42,8 +58,8 @@ export interface TaskRecord {
   readonly parentTaskId: string | null;
   readonly sortOrder: number;
   readonly name: string;
-  readonly process: string;
-  readonly product: string;
+  readonly processId: string | null;
+  readonly productId: string | null;
   readonly note: string;
   readonly contract: string;
   readonly assigneeMemberId: string | null;
@@ -84,6 +100,8 @@ export interface PersistedProjectRecord {
   readonly project: ProjectRecord;
   readonly calendars: readonly ProjectCalendarRecord[];
   readonly members: readonly MemberRecord[];
+  readonly processes: readonly ProcessRecord[];
+  readonly products: readonly ProductRecord[];
   readonly tasks: readonly TaskRecord[];
   readonly dependencies: readonly TaskDependencyRecord[];
   readonly auditEvents: readonly AuditEventRecord[];

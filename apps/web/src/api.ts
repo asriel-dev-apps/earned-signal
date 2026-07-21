@@ -84,13 +84,21 @@ const DependencyResponseSchema = z.object({
   lagWorkingDays: z.number().int(),
 });
 
+// Project-scoped 工程 / プロダクト masters (name-only) surfaced on the workspace
+// read model so the grid and master screen can resolve/select by id (§E-2).
+const MasterResponseSchema = z.object({
+  id: UuidSchema,
+  name: z.string(),
+  sortOrder: z.number().int(),
+});
+
 const TaskResponseSchema = z.object({
   id: UuidSchema,
   parentId: UuidSchema.nullable(),
   sortOrder: z.number().int(),
   name: z.string(),
-  process: z.string(),
-  product: z.string(),
+  processId: UuidSchema.nullable(),
+  productId: UuidSchema.nullable(),
   note: z.string(),
   contract: z.string(),
   assigneeMemberId: UuidSchema.nullable(),
@@ -112,6 +120,8 @@ const ProjectStateResponseSchema = z.object({
   defaultCalendarId: z.string(),
   calendars: z.array(CalendarSchema),
   members: z.array(MemberResponseSchema),
+  processes: z.array(MasterResponseSchema),
+  products: z.array(MasterResponseSchema),
   tasks: z.array(TaskResponseSchema),
 });
 
@@ -137,8 +147,10 @@ const WbsGridRowSchema = z.object({
   parentId: UuidSchema.nullable(),
   sortOrder: z.number().int(),
   name: z.string(),
-  process: z.string(),
-  product: z.string(),
+  processId: UuidSchema.nullable(),
+  productId: UuidSchema.nullable(),
+  processName: z.string(),
+  productName: z.string(),
   note: z.string(),
   contract: z.string(),
   assigneeMemberId: UuidSchema.nullable(),
@@ -190,6 +202,8 @@ function projectStateResponse(project: ProjectStateView): z.infer<typeof Project
     // Spread keeps the general member absent of dailyCapacityMinutes: the view
     // has already removed the key, so it never reaches the JSON response.
     members: project.members.map((member) => ({ ...member })),
+    processes: project.processes.map((process) => ({ ...process })),
+    products: project.products.map((product) => ({ ...product })),
     tasks: project.tasks.map((task) => ({
       ...task,
       dailyPlan: { ...task.dailyPlan },

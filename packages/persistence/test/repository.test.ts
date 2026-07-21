@@ -45,6 +45,8 @@ describe("ProjectRepository", () => {
     expect(loaded?.project.revision).toBe(1n);
     expect(loaded?.tasks).toHaveLength(demoProjectRecord.tasks.length);
     expect(loaded?.members).toHaveLength(demoProjectRecord.members.length);
+    expect(loaded?.processes).toHaveLength(demoProjectRecord.processes.length);
+    expect(loaded?.products).toHaveLength(demoProjectRecord.products.length);
     expect(loaded?.dependencies).toHaveLength(demoProjectRecord.dependencies.length);
     expect(loaded?.auditEvents).toEqual(demoProjectRecord.auditEvents);
 

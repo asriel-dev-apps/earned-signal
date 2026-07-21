@@ -60,6 +60,8 @@ describe("persistence migrations", () => {
       "command_receipts",
       "members",
       "principals",
+      "processes",
+      "products",
       "project_calendars",
       "project_memberships",
       "projects",
@@ -171,6 +173,33 @@ describe("persistence migrations", () => {
         [tenantId, projectId, taskId],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("enforces process/product master invariants and the task master FKs", async () => {
+    const processId = "70000000-0000-4000-8000-000000000001";
+    await client.query(
+      "insert into processes (id, tenant_id, project_id, name, sort_order) values ($1, $2, $3, 'Phase A', 0)",
+      [processId, tenantId, projectId],
+    );
+    // A task may reference a master row in the same project.
+    await client.query(
+      "insert into tasks (tenant_id, project_id, name, process_id) values ($1, $2, 'Bound', $3)",
+      [tenantId, projectId, processId],
+    );
+    // A blank master name is rejected.
+    await expect(
+      client.query(
+        "insert into products (tenant_id, project_id, name) values ($1, $2, '  ')",
+        [tenantId, projectId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    // A task referencing an unknown process is rejected by the restrict FK.
+    await expect(
+      client.query(
+        "insert into tasks (tenant_id, project_id, name, process_id) values ($1, $2, 'Bad', $3)",
+        [tenantId, projectId, "70000000-0000-4000-8000-0000000000ff"],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
   });
 
   it("keeps audit events append-only and timezone-normalized", async () => {

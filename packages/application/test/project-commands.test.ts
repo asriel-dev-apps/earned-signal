@@ -12,8 +12,8 @@ function makeTask(overrides: Partial<ProjectTask> & Pick<ProjectTask, "id">): Pr
     parentId: null,
     sortOrder: 0,
     name: "Task",
-    process: "",
-    product: "",
+    processId: null,
+    productId: null,
     note: "",
     contract: "",
     assigneeMemberId: null,
@@ -42,8 +42,10 @@ const project: ProjectState = {
   members: [
     { id: "member-1", name: "Member 01", calendarId: "standard", dailyCapacityMinutes: 480 },
   ],
+  processes: [],
+  products: [],
   tasks: [
-    makeTask({ id: "task-1", sortOrder: 0, name: "Phase A", process: "Phase A" }),
+    makeTask({ id: "task-1", sortOrder: 0, name: "Phase A" }),
     makeTask({
       id: "task-2",
       parentId: "task-1",
