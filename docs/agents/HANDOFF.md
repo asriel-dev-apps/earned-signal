@@ -51,18 +51,31 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   rows=members, columns=the grid's own dayVirtualizer (pixel-aligned), per-day Σ dailyPlan +
   ExternalLoad shown in hours, capacity-overflow red (reuses `detectOverloads`/`overloadByKey`),
   horizontal-scroll mirrored with the grid, quiet "メンバー日次負荷" toggle (closed by default).
-- **→ design 0003 is now fully implemented + live. The next major work is the architecture migration:**
-- **NEXT: implement ADR `docs/adr/0012-react-router-cloudflare-ssr-architecture.md`** — the agreed
-  direction after a full grilling (2026-07-22). Migrate the SPA to **React Router v8 (framework mode) on
-  Cloudflare**: SSR loaders kill the initial-load flash; `action`s + client-side optimism/derived values
-  make saves instant; **Neon (Postgres) + Hyperdrive** kept (no D1); **one command core** exposed via RR
-  loader/action (app + in-app LLM), Hono `/api/*` (zod-openapi) and Hono `/mcp`; **server-side OIDC
-  auth-code flow + httpOnly cookie session** (amends 0002); **multi-project router** (`/projects` →
-  `/projects/:id/*`, role-authz); staged migration reusing the React components + pure-TS packages + the
-  **unchanged Neon schema (no data migration)**. This is the foundation for the full vision (project
-  list, Gantt, CPI/SPI/EAC dashboard, budget, member/permission admin, CSV, **LLM-driven operation via
-  the command core**). Live real-time = Phase 1 (Cloudflare DO + WebSocket, free) later. **See the ADR's
-  "Implementation order" section — it is self-contained; implement from it.**
+- **design 0003 is fully implemented + live.** The current major work is the architecture migration in
+  **ADR `docs/adr/0012-react-router-cloudflare-ssr-architecture.md`** (agreed 2026-07-22): migrate the SPA
+  to **React Router v8 (framework mode) SSR on Cloudflare**. Staged migration — a NEW parallel app is built
+  at **`apps/web-next`** while the live `apps/web` stays untouched; at cutover `apps/web` is deleted and
+  `web-next` renamed → `web`. Implement from the ADR's **"Implementation order"** (6 steps; self-contained).
+- **ADR 0012 Step 1 — DONE** (`5acea4f`): `apps/web-next` scaffold = RR **v8.2.0** framework mode
+  (`ssr:true`) on Cloudflare Workers. `workers/app.ts` dispatches `/api` + `/mcp` → **Hono** (skeleton:
+  `/api/health` ok, `/mcp` 501 placeholder), else → the RR request handler. Home route `loader` runs
+  server-side and reuses `@vecta/domain`'s EVM calc over a synthetic fixture → value is in first-paint HTML
+  (SSR proven, `data-ssr-spi="0.75"`). Reuses the pure-TS packages (workspace deps) + unchanged Neon schema.
+  Versions pinned to the monorepo; `wrangler` name `vecta-next-local`. **Root `pnpm check` green** with
+  web-next included (web-next test 1); `apps/web` byte-for-byte unchanged. Not deployed.
+  - **Known local-dev limitation**: this machine's bundled workerd/miniflare caps `compatibility_date` at
+    `2026-07-15`, but `web-next/wrangler.jsonc` uses `2026-07-17` (same as `apps/web`). So `react-router
+    dev`/miniflare won't boot locally without a **temporary** date toggle to `2026-07-15` (revert after).
+    Build / typecheck / test / `pnpm check` are unaffected (they don't invoke workerd).
+- **NEXT — ADR 0012 Step 2**: server-side **OIDC authorization-code flow → httpOnly signed cookie session**
+  (RR `createCookieSessionStorage`; amends 0002); per-request principal + role authz. `workers/app.ts`
+  currently passes **no load context** — Step 2 wires env/session into loaders/actions (RR v8 uses the new
+  `RouterContextProvider` middleware-context API, not the v7 plain-object context). Then Step 3 multi-project
+  router (`/projects` → `/projects/:id/*`, loader-enforced access/role), Step 4 port WBS grid + master/
+  template/member routes (loader SSRs data, grid client-hydrates; actions apply commands w/ `expectedRevision`
+  + optimistic client-derived values, no settle), Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` fully,
+  Step 6 verify → careful cutover deploy → then vision features (Gantt, dashboard, budget, CSV, member admin,
+  LLM-via-commands). Live real-time = Phase 1 (Cloudflare DO + WebSocket, free) later.
 - `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
   framing is resolved there).
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
