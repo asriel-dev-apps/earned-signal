@@ -4,6 +4,9 @@ Active plan for Step 4 (port the WBS grid + master/template/member screens into
 `apps/web-next` `/projects/:id/*`). Delete this doc when Step 4 is complete. Steps 1–3
 are done; this builds on the Step-3 access gate + `requireProjectAccess(context)`.
 
+**Progress**: 4-pre DONE (`37ad335`), 4a DONE (`135e4b6`, fable-reviewed, no open P0).
+**NEXT = 4b** (write path). 4c, 4d after.
+
 ## §0 The load-bearing invariant (why "instant save, no re-settle" is sound here)
 The server write path (`packages/persistence/src/project-command-unit-of-work.ts` ~279–297)
 is exactly `applyProjectCommand` + `applyEffortSchedule` — the latter **only** for
@@ -72,6 +75,22 @@ reintroduces drift and nothing fails loudly.
   throw); client triggers revalidation + **explicitly adopts** fresh loader data into component state
   (effect comparing adopted revision to `loaderData.revision`, replacing `reload()` at `App.tsx:1048`).
   Do NOT remount/key the component on revision (destroys scroll/selection/focus).
+- **Obligations carried from 4a's fable review (do these in 4b):**
+  1. **Confirmed-revision state.** `wbs-app.tsx`'s `onExecute` currently passes the static
+     `initialRevision` prop → with `shouldRevalidate` economy the prop never advances → every batch after
+     the first sends revision N → spurious `VERSION_CONFLICT`. 4b must track a **confirmed revision** in
+     component state, seeded from `initialRevision` and advanced from each successful action result, and
+     pass THAT to the dispatch.
+  2. **Reintroduce the rollback snapshot** the 4a port deleted (original `App.tsx:994–995`
+     `previousProject`/`previousGrid`): on a rejected save, restore the pre-optimistic state + grid.
+  3. **§0 convergence test** (the single most important Step-4 test): for every command type, client
+     transition === the unit-of-work transition — but **PRIVILEGED only**. For GENERAL the invariant is
+     **false by construction** (a capacity-stripped view ≠ the server's full-capacity `generateSubtasks`
+     scheduling); the server 403s VIEWER writes anyway, and 4a's P0 fix already degrades the client to a
+     notice. Pin PRIVILEGED equivalence and assert the GENERAL-write path is server-denied.
+  4. **Scheduler-throw notice test**: a `generateSubtasks` (or any command) whose placement fails →
+     `executeCommands` returns false + a notice, **no throw, state unchanged** (pins 4a's P0 fix — the
+     `applyEffortSchedule` branch now lives inside the `try`).
 
 ### 4c — master / template / member routes
 - `MasterScreen`/`TemplateSection` use the same `client.load()`/`execute()` seams

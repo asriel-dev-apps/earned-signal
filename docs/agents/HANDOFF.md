@@ -110,6 +110,10 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   SSR grid (proving slice) → **4b** write path → **4c** master/template/member → **4d** queue + revalidate.
   **Spec-parity**: mirror the real spreadsheet; add nothing not in `apps/web`. The single most important test:
   client-optimistic transition === the unit-of-work transition for every command (see plan §0).
+  **Progress**: **4-pre DONE** (`37ad335`) + **4a DONE** (`135e4b6`, fable-reviewed, no open P0) — the SSR grid
+  renders real rows in first paint (virtualizer `initialRect` verified) and edits work in preview mode
+  (nothing persists). **NEXT = 4b** (write path): see the plan's "4b" §, esp. the carried obligations
+  (confirmed-revision state, rollback snapshot, §0 convergence test PRIVILEGED-only, scheduler-throw notice).
 - **Then**: Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` over the command core (token-auth, never the
   cookie); Step 6 verify → careful cutover deploy (`apps/web` deleted, `web-next`→`web`) → then vision
   features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare
@@ -129,6 +133,16 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
     pins (0.45.2) in lockstep.
   - **Local dev**: real login needs `.dev.vars` (OIDC client secret + `SESSION_SECRET`) + the workerd
     compat-date toggle noted under Step 1.
+  - **SSR-over-HTTP smoke (from 4a)**: 4a proved the SSR grid via `renderToString` (no-DOM) + bundle grep,
+    NOT a live HTTP request (the root middleware's eager `DATABASE_URL` + the auth gate blocked a headless
+    curl). Do a one-time local run behind the compat-date toggle, and add to the deploy check:
+    **view-source of `/projects/:id/wbs` shows `data-row-id` rows on first paint**.
+  - **Grid CPU at scale (from 4a)**: SSR of a **5000-row** grid ≈107 ms in node (nothing O(n²); ~1–2 ms at
+    prod's 48 tasks — fine now). If a project ever grows large, the ADR fallbacks apply (per-route
+    `clientLoader`/SPA-mode for the wbs route, or the $5 Workers Paid plan).
+  - **Shared-core hygiene (deferred, not now)**: `projectWbsGrid`/projection sorts use `localeCompare`
+    (`packages/application/src/project-projection.ts:211`); byte-identical both SSR sides today (lowercase-hex
+    data), but a codepoint compare would make determinism unconditional. A core pass, out of Step-4 scope.
 - `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
   framing is resolved there).
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
