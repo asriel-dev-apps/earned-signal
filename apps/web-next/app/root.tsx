@@ -33,6 +33,15 @@ export const middleware: Route.MiddlewareFunction[] = [
   },
 ];
 
+// Apply the stored theme choice on <html> before first paint, so an explicit
+// light/dark pick never flashes the OS theme under SSR (ADR 0012 Step 4a). Mirrors
+// `apps/web`'s AppRoot: "system"/absent leaves the attribute off (the stylesheet's
+// `prefers-color-scheme` governs), an explicit pick sets `data-theme`. Runs inline
+// in <head> before the body renders; the served markup is identical on both sides.
+const THEME_INIT_SCRIPT =
+  "(function(){try{var t=localStorage.getItem('vecta-theme');" +
+  "if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();";
+
 export function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
@@ -41,6 +50,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
         {children}
