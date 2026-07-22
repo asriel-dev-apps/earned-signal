@@ -82,38 +82,50 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   parallel loaders). `oidc_tx` cleared on **every** callback outcome incl. backend failure (503, not 500);
   root `ErrorBoundary` backstop; error screens carry status (403/400/503). **50 web-next unit tests** (no
   net/DB). Fable security review: **no open P0**. Root `pnpm check` green; `apps/web` untouched. Not deployed.
-- **NEXT — ADR 0012 Step 3**: multi-project router (`/projects` → `/projects/:id/*`). **Fable-reviewed
-  design (key corrections)**: (a) enforce `:id` access in the **`/projects/:id` layout MIDDLEWARE, in-memory**
-  — Step 2's `loadPrincipal` already returns all `projectMemberships`, so `find(m => m.projectId === id)`
-  (zero extra DB); do **NOT** call `PostgresProjectAccessGrantResolver` here (that's the token-identity seam
-  for Step 5 Hono). Extract the find-membership rule into one small pure fn. Deny (and unknown/malformed-UUID)
-  → **`throw data(null,{status:404})`** BEFORE `next()` (renders at root boundary, no chrome — OK). VIEWER
-  passes (read); write-gating is Step 4. (b) Context `{project, membership:{tenantId, projectRole, tenantRole}}`
-  via memoized thunk + `requireProjectAccess` helper; `tenantId` from the **membership** row, fetch project by
-  `(tenantId,id)`. (c) The ADR's "two-role field projection" = **`projectionRoleForProjectRole`** in
-  `packages/application/src/project-projection.ts` (OWNER/EDITOR→PRIVILEGED, VIEWER→GENERAL); Step 3 only puts
-  `projectRole` in context, Step 4 maps it + routes reads via `projectWorkspaceView`. (d) Project-list =
-  **one principal-keyed `project_memberships⨝projects` query added to `@vecta/persistence`** (Step 5 Hono
-  needs it too; can't import web-next). (e) **DELETE the Step-2 demo home route** (`routes/home.tsx`,
-  `lib/home-metrics.ts`, `test/home-metrics.test.ts`); `/` → `throw redirect("/projects")`. (f) Give each
-  child placeholder route a loader that awaits `requireProjectAccess` (forces `.data` round trip → revoked
-  access re-checked; RR server middleware skips pure client-nav). Headline test: **on deny, child loaders
-  never run**. Persistence driver is **Neon serverless WebSocket Pool** (node-pg Drizzle), not HTTP.
-- **Then**: Step 4 port WBS grid + master/template/member routes (loader SSRs data, grid client-hydrates;
-  actions apply commands w/ `expectedRevision` + optimistic client-derived values, no settle), Step 5 mount
-  Hono `/api/*` (zod-openapi) + `/mcp` over the command core, Step 6 verify → careful cutover deploy → then
-  vision features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1
-  (Cloudflare DO + WebSocket, free) later.
+- **ADR 0012 Step 3 — DONE** (`4bf70da`): multi-project router under the protected layout. `/` → redirect
+  `/projects`; `/projects` = principal's accessible-project list; `/projects/:id` = layout whose
+  **middleware** is the fail-closed access gate + children `{index→wbs, wbs, dashboard, members, templates}`
+  (Step-4 stubs). Gate: UUID-validate `params.id` → `await` the Step-2 memoized principal → **in-memory**
+  `findProjectMembership` (NOT the resolver) → deny/unknown/malformed-or-uppercase-UUID = **`throw
+  data(null,{status:404})` BEFORE `next()`** (indistinguishable, no existence oracle; no DB on deny). VIEWER
+  passes (read); write-authz is Step 4. Context `{project, membership:{tenantId, projectId, projectRole,
+  tenantRole}}` via a per-request **memoized thunk** (one project-row fetch by `(tenantId,id)` under parallel
+  loaders); `requireProjectAccess(context)` helper. Each child route has a loader awaiting it → forces the
+  `.data` round trip so the gate re-runs on client nav. Project-list = **`PostgresProjectListReader.
+  listForPrincipal` in `@vecta/persistence`** (one `project_memberships⨝projects` query; Step-5 Hono reuses
+  it). Deleted the Step-1 SSR demo home route. **59 web-next tests** (headline: on deny child loaders never
+  run; IDOR/tenant + memoization + malformed/uppercase-id pinned) + persistence testcontainers test. Fable
+  security review: **no open P0**; fixes applied (canonical-lowercase-only UUID guard, identical-404 payload
+  assert, `close().catch` so close errors don't mask query errors). Root `pnpm check` green. Not deployed.
+- **NEXT — ADR 0012 Step 4**: port the **WBS grid** + master/template/member-panel screens into
+  `/projects/:id/{wbs,…}` routes. Loader **SSRs the project/grid data** server-side (no flash); the heavy
+  TanStack virtualized grid is a **client component that hydrates** (server serializes data, does not
+  server-render every row — keeps under the free-plan 10 ms CPU). `action`s apply commands through the
+  command service with **`expectedRevision`**; **optimistic UI + client-derived EVM/scheduler values** (reuse
+  `@vecta/domain`/`@vecta/application`) so edits are perceived-instant with **no post-save re-settle**; edits
+  queue (not block) during an in-flight save; `shouldRevalidate` scoped so background revalidation causes no
+  jump. Map `projectRole` through **`projectionRoleForProjectRole`** (OWNER/EDITOR→PRIVILEGED, VIEWER→GENERAL)
+  and route reads via **`projectWorkspaceView`** (single choke point); authorize writes via
+  `createProjectCommandAuthorizer` (NOT the shell gate). Reuse the existing React grid components from
+  `apps/web` (port, don't rewrite). **Spec-parity**: the WBS grid mirrors the user's real spreadsheet — add
+  no columns/UI/features not present in `apps/web`.
+- **Then**: Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` over the command core (token-auth, never the
+  cookie); Step 6 verify → careful cutover deploy (`apps/web` deleted, `web-next`→`web`) → then vision
+  features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare
+  DO + WebSocket, free) later.
 - **ADR 0012 cutover gates / debt** (before treating the migration done):
   - **Prod principal identity (R1, P1-2)**: the old app resolved access via a `subject="email:<addr>"`
     fallback (admin-seed path); web-next matches **exact `(issuer,subject)`** only. If the prod admin
     `principals` row still carries an `email:` subject, the first web-next login → forbidden / empty list.
     **Verify prod `principals.subject` values carry the real provider `sub` before cutover** (or do a
     one-time deliberate migration). Do NOT add the email fallback to the session login.
-  - **drizzle-orm debt**: web-next has a direct `drizzle-orm` dep + `principal-directory.neon.server.ts`
-    (a thin read-seam importing persistence schema/conn). **Before Step 4**, move the Drizzle impl into
-    `@vecta/persistence` (beside `project-access.ts`), keep the `PrincipalDirectory` interface, drop the
-    direct dep. Interim: keep both `drizzle-orm` pins (0.45.2) in lockstep.
+  - **web-next Neon-reader debt**: web-next has a direct `drizzle-orm` dep + two thin Neon read-seams that
+    import persistence schema/conn: `app/server/auth/principal-directory.neon.server.ts` and
+    `app/server/project/project-reader.neon.server.ts`. **Consider consolidating before/during Step 4**:
+    move both Drizzle impls into `@vecta/persistence` (beside `project-access.ts`/`project-list.ts`), keep the
+    `PrincipalDirectory`/`ProjectReader` interfaces in web-next, drop the direct `drizzle-orm` dep. The
+    project-list read already lives in persistence (the right precedent). Interim: keep both `drizzle-orm`
+    pins (0.45.2) in lockstep.
   - **Local dev**: real login needs `.dev.vars` (OIDC client secret + `SESSION_SECRET`) + the workerd
     compat-date toggle noted under Step 1.
 - `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
