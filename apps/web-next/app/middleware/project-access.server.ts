@@ -1,13 +1,17 @@
-import { data, type MiddlewareFunction } from "react-router";
+import {
+  data,
+  type MiddlewareFunction,
+  type RouterContextProvider,
+} from "react-router";
 import { findProjectMembership } from "~/server/auth/principal-directory";
 import { requirePrincipal } from "~/server/auth/require-principal";
-import { appContext, projectAccessContext } from "~/server/context";
+import { dbSessionContext, projectAccessContext } from "~/server/context";
 import {
   isProjectId,
   type ProjectReader,
   type ResolvedProjectAccess,
 } from "~/server/project/project-access";
-import { projectReaderFromEnv } from "~/server/project/project-reader.neon.server";
+import { createNeonProjectReader } from "~/server/project/project-reader.neon.server";
 
 /**
  * The `/projects/:id` access gate (ADR 0012 §Decision 2), enforced as MIDDLEWARE
@@ -28,16 +32,26 @@ import { projectReaderFromEnv } from "~/server/project/project-reader.neon.serve
  * Hono surface): it is exact-equivalent here and costs zero extra round trips.
  *
  * `readerFor` is injectable so tests can supply a fake project reader; production
- * defaults to the Neon-backed one built from `env`.
+ * defaults to the Neon-backed one built over the per-request session from
+ * context. The reader is resolved lazily inside the memoised thunk, so a denied
+ * request never touches the project database.
  */
 export interface ProjectAccessMiddlewareOptions {
-  readonly readerFor?: (env: Env) => ProjectReader;
+  readonly readerFor?: (
+    context: Readonly<RouterContextProvider>,
+  ) => ProjectReader;
+}
+
+function readerFromContext(
+  context: Readonly<RouterContextProvider>,
+): ProjectReader {
+  return createNeonProjectReader(context.get(dbSessionContext));
 }
 
 export function createProjectAccessMiddleware(
   options: ProjectAccessMiddlewareOptions = {},
 ): MiddlewareFunction<Response> {
-  const readerFor = options.readerFor ?? projectReaderFromEnv;
+  const readerFor = options.readerFor ?? readerFromContext;
   return async ({ context, params }) => {
     const projectId = params.id;
     if (!isProjectId(projectId)) {
@@ -51,17 +65,16 @@ export function createProjectAccessMiddleware(
     const tenantRole = principal.tenantMemberships.find(
       (tenant) => tenant.tenantId === membership.tenantId,
     )?.role;
-    const { env } = context.get(appContext);
-    const reader = readerFor(env);
     // Access granted. Install the memoised project-row thunk; it issues no query
-    // until a loader/component first calls `requireProjectAccess`, then caches it
-    // so parallel loaders share one round trip. The deny paths above never reach
+    // (and does not even resolve the reader/open a connection) until a
+    // loader/component first calls `requireProjectAccess`, then caches it so
+    // parallel loaders share one round trip. The deny paths above never reach
     // here, so a denied request touches no project database.
     let cached: Promise<ResolvedProjectAccess> | undefined;
     context.set(
       projectAccessContext,
       () =>
-        (cached ??= reader
+        (cached ??= readerFor(context)
           .loadProject(membership.tenantId, projectId)
           .then((project): ResolvedProjectAccess => {
             if (project === null) {

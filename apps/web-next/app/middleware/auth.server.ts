@@ -1,10 +1,18 @@
-import { redirect, type MiddlewareFunction } from "react-router";
-import { appContext, principalContext } from "~/server/context";
+import {
+  redirect,
+  type MiddlewareFunction,
+  type RouterContextProvider,
+} from "react-router";
+import {
+  appContext,
+  dbSessionContext,
+  principalContext,
+} from "~/server/context";
 import type {
   AuthenticatedPrincipal,
   PrincipalDirectory,
 } from "~/server/auth/principal-directory";
-import { principalDirectoryFromEnv } from "~/server/auth/principal-directory.neon.server";
+import { createNeonPrincipalDirectory } from "~/server/auth/principal-directory.neon.server";
 import { safeReturnTo } from "~/server/auth/redirect";
 import { readSession } from "~/server/auth/session.server";
 
@@ -23,16 +31,27 @@ import { readSession } from "~/server/auth/session.server";
  * `/logout`) live outside it and never trigger a lookup.
  *
  * `directoryFor` is injectable so tests can supply a fake directory; production
- * defaults to the Neon-backed one built from `env`.
+ * defaults to the Neon-backed one built over the per-request session from
+ * context. The directory is resolved lazily inside the memoised thunk, so a
+ * request that never reaches `requirePrincipal` (e.g. the project gate rejects a
+ * malformed id first) never opens a connection.
  */
 export interface AuthMiddlewareOptions {
-  readonly directoryFor?: (env: Env) => PrincipalDirectory;
+  readonly directoryFor?: (
+    context: Readonly<RouterContextProvider>,
+  ) => PrincipalDirectory;
+}
+
+function directoryFromContext(
+  context: Readonly<RouterContextProvider>,
+): PrincipalDirectory {
+  return createNeonPrincipalDirectory(context.get(dbSessionContext));
 }
 
 export function createAuthMiddleware(
   options: AuthMiddlewareOptions = {},
 ): MiddlewareFunction<Response> {
-  const directoryFor = options.directoryFor ?? principalDirectoryFromEnv;
+  const directoryFor = options.directoryFor ?? directoryFromContext;
   return async ({ request, context }) => {
     const { env } = context.get(appContext);
     const session = await readSession(env, request);
@@ -41,11 +60,11 @@ export function createAuthMiddleware(
       const returnTo = safeReturnTo(url.pathname + url.search);
       throw redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
-    const directory = directoryFor(env);
     let cached: Promise<AuthenticatedPrincipal | null> | undefined;
     context.set(
       principalContext,
-      () => (cached ??= directory.loadPrincipal(session.principalId)),
+      () =>
+        (cached ??= directoryFor(context).loadPrincipal(session.principalId)),
     );
   };
 }

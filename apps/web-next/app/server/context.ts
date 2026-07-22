@@ -1,5 +1,6 @@
 import { createContext } from "react-router";
 import type { AuthenticatedPrincipal } from "./auth/principal-directory";
+import type { DbSession } from "./db-session.server";
 import type { ResolvedProjectAccess } from "./project/project-access";
 
 /**
@@ -14,6 +15,16 @@ export const appContext = createContext<{
   readonly env: Env;
   readonly ctx: ExecutionContext;
 }>();
+
+/**
+ * The per-request database session (ADR 0012 §4-pre). The root middleware
+ * installs it for EVERY request and closes it after the response; it opens a
+ * single Neon WebSocket-Pool connection lazily on first use, so a request that
+ * reads the principal, the project row, and the workspace shares ONE connection
+ * and a DB-free request (e.g. `/login`) opens none. Readers pull the shared
+ * connection from here instead of opening one per call.
+ */
+export const dbSessionContext = createContext<DbSession>();
 
 /**
  * A memoised, per-request loader for the authenticated principal. The auth

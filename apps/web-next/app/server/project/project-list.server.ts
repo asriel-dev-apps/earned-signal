@@ -1,17 +1,16 @@
 import {
-  openNeonPersistenceConnection,
   PostgresProjectListReader,
   type AccessibleProject,
 } from "@vecta/persistence";
 import type { RouterContextProvider } from "react-router";
 import { requirePrincipal } from "../auth/require-principal";
-import { appContext } from "../context";
+import { dbSessionContext } from "../context";
 
 /**
- * A short-lived source of the current principal's accessible projects: the
- * persistence reader plus the connection that owns it. `close()` releases the
- * connection when the loader finishes. Injectable so the `/projects` loader test
- * can supply a fake list without a database.
+ * A source of the current principal's accessible projects. `close()` exists for
+ * the injectable seam (tests assert it runs), but the Neon-backed source now
+ * reads the shared per-request {@link DbSession} and closes NOTHING itself — the
+ * root middleware owns the connection lifecycle (ADR 0012 §4-pre).
  */
 export interface ProjectListSource {
   listForPrincipal(
@@ -20,17 +19,22 @@ export interface ProjectListSource {
   close(): Promise<void>;
 }
 
-/** Open a Neon-backed list source (reused by the later Hono surface via persistence). */
-export function projectListSourceFromEnv(env: Env): ProjectListSource {
-  const databaseUrl = env.DATABASE_URL;
-  if (databaseUrl === undefined || databaseUrl.length === 0) {
-    throw new Error("DATABASE_URL is not configured for the project list");
-  }
-  const connection = openNeonPersistenceConnection(databaseUrl);
-  const reader = new PostgresProjectListReader(connection.database);
+/**
+ * A Neon-backed list source over the shared per-request session (reused by the
+ * later Hono surface via persistence). It opens no connection of its own and its
+ * `close()` is a no-op: the session's single connection is opened lazily on the
+ * first read and closed by the root middleware after the response.
+ */
+export function projectListSourceFromContext(
+  context: Readonly<RouterContextProvider>,
+): ProjectListSource {
+  const session = context.get(dbSessionContext);
   return {
-    listForPrincipal: (principalId) => reader.listForPrincipal(principalId),
-    close: () => connection.close(),
+    listForPrincipal: (principalId) =>
+      new PostgresProjectListReader(session.database()).listForPrincipal(
+        principalId,
+      ),
+    close: async () => undefined,
   };
 }
 
@@ -39,23 +43,24 @@ export interface ProjectListData {
 }
 
 export interface LoadProjectListOptions {
-  readonly sourceFor?: (env: Env) => ProjectListSource;
+  readonly sourceFor?: (
+    context: Readonly<RouterContextProvider>,
+  ) => ProjectListSource;
 }
 
 /**
  * Load the signed-in principal's accessible projects for the `/projects` list.
  * The principal is the memoised one from the auth middleware; the list is read
- * over a single connection that is always closed. `sourceFor` is injectable for
- * tests; production opens a Neon connection.
+ * over the shared per-request connection. `sourceFor` is injectable for tests;
+ * production reads the session from context.
  */
 export async function loadProjectList(
   context: Readonly<RouterContextProvider>,
   options: LoadProjectListOptions = {},
 ): Promise<ProjectListData> {
   const principal = await requirePrincipal(context);
-  const sourceFor = options.sourceFor ?? projectListSourceFromEnv;
-  const { env } = context.get(appContext);
-  const source = sourceFor(env);
+  const sourceFor = options.sourceFor ?? projectListSourceFromContext;
+  const source = sourceFor(context);
   try {
     const projects = await source.listForPrincipal(principal.principal.id);
     return { projects };

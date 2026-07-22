@@ -7,8 +7,8 @@ import {
 import { createIdTokenVerifier } from "~/server/auth/id-token";
 import { oidcConfigFromEnv } from "~/server/auth/oidc-config";
 import { clearOidcTx } from "~/server/auth/oidc-tx.server";
-import { principalDirectoryFromEnv } from "~/server/auth/principal-directory.neon.server";
-import { appContext } from "~/server/context";
+import { createNeonPrincipalDirectory } from "~/server/auth/principal-directory.neon.server";
+import { appContext, dbSessionContext } from "~/server/context";
 
 // Module-scoped so the remote JWKS is fetched and cached per isolate across
 // logins (the verifier builds `createRemoteJWKSet` lazily on first `verify`).
@@ -30,7 +30,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       config: oidcConfigFromEnv(env),
       request,
       verifier: idTokenVerifier,
-      directory: principalDirectoryFromEnv(env),
+      directory: createNeonPrincipalDirectory(context.get(dbSessionContext)),
     });
 
     const headers = new Headers();

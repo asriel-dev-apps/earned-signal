@@ -8,6 +8,30 @@ import {
   ScrollRestoration,
   useRouteError,
 } from "react-router";
+import type { Route } from "./+types/root";
+import { appContext, dbSessionContext } from "~/server/context";
+import { createDbSession } from "~/server/db-session.server";
+
+/**
+ * Root middleware (ADR 0012 §4-pre): install a per-request database session and
+ * close it deterministically after the response. It runs for EVERY request —
+ * public and protected — but the session opens its Neon connection lazily, so a
+ * DB-free request (`/login`, `/logout`) pays nothing. Loaders/actions await
+ * their reads and return before render, so closing in the `finally` after
+ * `next()` is safe (no reader holds the connection past this point).
+ */
+export const middleware: Route.MiddlewareFunction[] = [
+  async ({ context }, next) => {
+    const { env } = context.get(appContext);
+    const session = createDbSession(env);
+    context.set(dbSessionContext, session);
+    try {
+      return await next();
+    } finally {
+      await session.close();
+    }
+  },
+];
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
