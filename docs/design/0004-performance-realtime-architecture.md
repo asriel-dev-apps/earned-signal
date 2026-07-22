@@ -1,6 +1,11 @@
 # Design 0004 — Performance, real-time & architecture direction
 
-**Status: DRAFT / not yet approved.** This records the guiding principles and the analysed
+**Status: SUPERSEDED by `docs/adr/0012-react-router-cloudflare-ssr-architecture.md`** (2026-07-22, after
+a full grilling). The direction was resolved: React Router v8 SSR on Cloudflare kills the flash and
+makes saves instant; Neon+Hyperdrive kept; real-time (DO+WebSocket) deferred to Phase 1. Implement from
+ADR 0012. The principles + diagnosis below remain a useful record of *why*.
+
+_(original draft below)_ This records the guiding principles and the analysed
 approach so we can align on the fundamentals in detail BEFORE implementing. Do **not** start the
 Phase 1 (architecture) work until the direction below is worked through with the user and approved.
 Phase 0 (free, no-infra quick wins) may proceed once the user gives the go.

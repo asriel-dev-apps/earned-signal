@@ -51,11 +51,20 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   rows=members, columns=the grid's own dayVirtualizer (pixel-aligned), per-day Σ dailyPlan +
   ExternalLoad shown in hours, capacity-overflow red (reuses `detectOverloads`/`overloadByKey`),
   horizontal-scroll mirrored with the grid, quiet "メンバー日次負荷" toggle (closed by default).
-- **→ design 0003 is now fully implemented + live. Remaining work is NOT in 0003:**
-- **Performance / real-time** (design 0004): the user's top priority — DEFERRED pending **detailed
-  alignment with the user on the fundamentals BEFORE building** (Phase 0 free quick-wins vs Phase 1
-  Durable-Object real-time; the "無料/最小コスト" constraint; the open questions in 0004). Their words:
-  抜本的な部分は細部まですり合わせてから、方針が決まれば最後まで走り切る。
+- **→ design 0003 is now fully implemented + live. The next major work is the architecture migration:**
+- **NEXT: implement ADR `docs/adr/0012-react-router-cloudflare-ssr-architecture.md`** — the agreed
+  direction after a full grilling (2026-07-22). Migrate the SPA to **React Router v8 (framework mode) on
+  Cloudflare**: SSR loaders kill the initial-load flash; `action`s + client-side optimism/derived values
+  make saves instant; **Neon (Postgres) + Hyperdrive** kept (no D1); **one command core** exposed via RR
+  loader/action (app + in-app LLM), Hono `/api/*` (zod-openapi) and Hono `/mcp`; **server-side OIDC
+  auth-code flow + httpOnly cookie session** (amends 0002); **multi-project router** (`/projects` →
+  `/projects/:id/*`, role-authz); staged migration reusing the React components + pure-TS packages + the
+  **unchanged Neon schema (no data migration)**. This is the foundation for the full vision (project
+  list, Gantt, CPI/SPI/EAC dashboard, budget, member/permission admin, CSV, **LLM-driven operation via
+  the command core**). Live real-time = Phase 1 (Cloudflare DO + WebSocket, free) later. **See the ADR's
+  "Implementation order" section — it is self-contained; implement from it.**
+- `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
+  framing is resolved there).
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
   adopted (deploy is still manual). `deploy.yml` is manual-only + main-only + non-functional (needs
   GH secrets/vars).
