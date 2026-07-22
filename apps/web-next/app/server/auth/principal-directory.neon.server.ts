@@ -29,7 +29,8 @@ export function createNeonPrincipalDirectory(
     try {
       return await run(connection.database);
     } finally {
-      await connection.close();
+      // Never let a close failure mask the original query error.
+      await connection.close().catch(() => undefined);
     }
   }
 

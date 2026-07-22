@@ -22,4 +22,5 @@ export * from "./project-record.js";
 export * from "./project-repository.js";
 export * from "./project-command-unit-of-work.js";
 export * from "./project-access.js";
+export * from "./project-list.js";
 export * from "./project-workspace.js";

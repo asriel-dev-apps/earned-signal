@@ -1,5 +1,6 @@
 import { createContext } from "react-router";
 import type { AuthenticatedPrincipal } from "./auth/principal-directory";
+import type { ResolvedProjectAccess } from "./project/project-access";
 
 /**
  * Router context handles shared between the Worker entry (`workers/app.ts`,
@@ -22,3 +23,15 @@ export const appContext = createContext<{
  */
 export const principalContext =
   createContext<() => Promise<AuthenticatedPrincipal | null>>();
+
+/**
+ * A memoised, per-request loader for the current project's access grant (the
+ * resolved project row + the principal's membership). The `/projects/:id`
+ * layout's access middleware installs it *after* the fail-closed membership
+ * check, so a denied request never sets it and never touches the database. The
+ * thunk itself defers the single project-row fetch until a loader/component
+ * first calls `requireProjectAccess`, and memoises it so parallel loaders share
+ * one round trip. Present only under `/projects/:id`.
+ */
+export const projectAccessContext =
+  createContext<() => Promise<ResolvedProjectAccess>>();

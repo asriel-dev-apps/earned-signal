@@ -34,6 +34,25 @@ export interface AuthenticatedPrincipal {
   readonly projectMemberships: readonly ProjectMembership[];
 }
 
+/**
+ * Find the principal's membership for a project by its (globally unique) id. A
+ * project id is a primary key, so it maps to exactly one tenant and at most one
+ * membership row per principal; the caller reads the tenant from the returned
+ * row. Pure and DB-free so the access gate and its tests share one check
+ * (ADR 0012 §Decision 2). Returns `null` when the principal is not a member —
+ * the gate treats that identically to a nonexistent project.
+ */
+export function findProjectMembership(
+  principal: AuthenticatedPrincipal,
+  projectId: string,
+): ProjectMembership | null {
+  return (
+    principal.projectMemberships.find(
+      (membership) => membership.projectId === projectId,
+    ) ?? null
+  );
+}
+
 export interface PrincipalDirectory {
   /**
    * Resolve a verified `(issuer, subject)` to an active principal, or `null`
