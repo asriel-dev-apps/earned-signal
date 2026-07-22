@@ -67,15 +67,55 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
     `2026-07-15`, but `web-next/wrangler.jsonc` uses `2026-07-17` (same as `apps/web`). So `react-router
     dev`/miniflare won't boot locally without a **temporary** date toggle to `2026-07-15` (revert after).
     Build / typecheck / test / `pnpm check` are unaffected (they don't invoke workerd).
-- **NEXT — ADR 0012 Step 2**: server-side **OIDC authorization-code flow → httpOnly signed cookie session**
-  (RR `createCookieSessionStorage`; amends 0002); per-request principal + role authz. `workers/app.ts`
-  currently passes **no load context** — Step 2 wires env/session into loaders/actions (RR v8 uses the new
-  `RouterContextProvider` middleware-context API, not the v7 plain-object context). Then Step 3 multi-project
-  router (`/projects` → `/projects/:id/*`, loader-enforced access/role), Step 4 port WBS grid + master/
-  template/member routes (loader SSRs data, grid client-hydrates; actions apply commands w/ `expectedRevision`
-  + optimistic client-derived values, no settle), Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` fully,
-  Step 6 verify → careful cutover deploy → then vision features (Gantt, dashboard, budget, CSV, member admin,
-  LLM-via-commands). Live real-time = Phase 1 (Cloudflare DO + WebSocket, free) later.
+- **ADR 0012 Step 2 — DONE** (`e5aaeb1`): server-side **OIDC authorization-code flow → httpOnly signed
+  cookie session** in `apps/web-next` (amends 0002). `__Host-` session cookie (httpOnly/Secure/SameSite=Lax,
+  `SESSION_SECRET`(+`_PREVIOUS`) signed), payload `{principalId, exp}` with **`exp` enforced server-side**
+  (RR doesn't enforce cookie maxAge server-side), 7-day absolute. Flow: `/login` (PKCE S256 + state + nonce,
+  validated `returnTo`, `__Secure-oidc_tx` transient cookie) → provider → `/auth/callback` (error-branch first,
+  state check, code exchange, jose **RS256** verify iss/aud=client_id/exp/nonce, **`(issuer,subject)` →
+  principal, no JIT**) → session; `/logout`. Config env-driven (`OIDC_*` `.invalid` placeholder vars; secrets
+  `OIDC_CLIENT_SECRET`/`SESSION_SECRET` via `.dev.vars`/Worker secrets, **audience = client_id**, no discovery
+  fetch). RR v8 load context via **`RouterContextProvider`** (typed `appContext`/`principalContext`) wired in
+  `workers/app.ts`; `/api`+`/mcp` dispatched to Hono **before** RR (never cookie-auth), exact-prefix matched.
+  **Fail-closed**: a protected pathless-layout middleware requires auth; `/login`,`/auth/callback`,`/logout`
+  public. Principal+memberships resolved **once per request** (memoized promise → one DB hit under single-fetch
+  parallel loaders). `oidc_tx` cleared on **every** callback outcome incl. backend failure (503, not 500);
+  root `ErrorBoundary` backstop; error screens carry status (403/400/503). **50 web-next unit tests** (no
+  net/DB). Fable security review: **no open P0**. Root `pnpm check` green; `apps/web` untouched. Not deployed.
+- **NEXT — ADR 0012 Step 3**: multi-project router (`/projects` → `/projects/:id/*`). **Fable-reviewed
+  design (key corrections)**: (a) enforce `:id` access in the **`/projects/:id` layout MIDDLEWARE, in-memory**
+  — Step 2's `loadPrincipal` already returns all `projectMemberships`, so `find(m => m.projectId === id)`
+  (zero extra DB); do **NOT** call `PostgresProjectAccessGrantResolver` here (that's the token-identity seam
+  for Step 5 Hono). Extract the find-membership rule into one small pure fn. Deny (and unknown/malformed-UUID)
+  → **`throw data(null,{status:404})`** BEFORE `next()` (renders at root boundary, no chrome — OK). VIEWER
+  passes (read); write-gating is Step 4. (b) Context `{project, membership:{tenantId, projectRole, tenantRole}}`
+  via memoized thunk + `requireProjectAccess` helper; `tenantId` from the **membership** row, fetch project by
+  `(tenantId,id)`. (c) The ADR's "two-role field projection" = **`projectionRoleForProjectRole`** in
+  `packages/application/src/project-projection.ts` (OWNER/EDITOR→PRIVILEGED, VIEWER→GENERAL); Step 3 only puts
+  `projectRole` in context, Step 4 maps it + routes reads via `projectWorkspaceView`. (d) Project-list =
+  **one principal-keyed `project_memberships⨝projects` query added to `@vecta/persistence`** (Step 5 Hono
+  needs it too; can't import web-next). (e) **DELETE the Step-2 demo home route** (`routes/home.tsx`,
+  `lib/home-metrics.ts`, `test/home-metrics.test.ts`); `/` → `throw redirect("/projects")`. (f) Give each
+  child placeholder route a loader that awaits `requireProjectAccess` (forces `.data` round trip → revoked
+  access re-checked; RR server middleware skips pure client-nav). Headline test: **on deny, child loaders
+  never run**. Persistence driver is **Neon serverless WebSocket Pool** (node-pg Drizzle), not HTTP.
+- **Then**: Step 4 port WBS grid + master/template/member routes (loader SSRs data, grid client-hydrates;
+  actions apply commands w/ `expectedRevision` + optimistic client-derived values, no settle), Step 5 mount
+  Hono `/api/*` (zod-openapi) + `/mcp` over the command core, Step 6 verify → careful cutover deploy → then
+  vision features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1
+  (Cloudflare DO + WebSocket, free) later.
+- **ADR 0012 cutover gates / debt** (before treating the migration done):
+  - **Prod principal identity (R1, P1-2)**: the old app resolved access via a `subject="email:<addr>"`
+    fallback (admin-seed path); web-next matches **exact `(issuer,subject)`** only. If the prod admin
+    `principals` row still carries an `email:` subject, the first web-next login → forbidden / empty list.
+    **Verify prod `principals.subject` values carry the real provider `sub` before cutover** (or do a
+    one-time deliberate migration). Do NOT add the email fallback to the session login.
+  - **drizzle-orm debt**: web-next has a direct `drizzle-orm` dep + `principal-directory.neon.server.ts`
+    (a thin read-seam importing persistence schema/conn). **Before Step 4**, move the Drizzle impl into
+    `@vecta/persistence` (beside `project-access.ts`), keep the `PrincipalDirectory` interface, drop the
+    direct dep. Interim: keep both `drizzle-orm` pins (0.45.2) in lockstep.
+  - **Local dev**: real login needs `.dev.vars` (OIDC client secret + `SESSION_SECRET`) + the workerd
+    compat-date toggle noted under Step 1.
 - `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
   framing is resolved there).
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet
