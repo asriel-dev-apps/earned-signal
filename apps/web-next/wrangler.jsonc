@@ -10,5 +10,17 @@
   },
   "observability": {
     "enabled": true
+  },
+  // Public OIDC configuration (ADR 0012 §Decision 4). Placeholder `.invalid`
+  // URLs only — real values are supplied per deploy. Secrets (OIDC_CLIENT_SECRET,
+  // SESSION_SECRET[, SESSION_SECRET_PREVIOUS]) are NOT here; they live in
+  // `.dev.vars` locally / Worker secrets in production. Audience = OIDC_CLIENT_ID.
+  "vars": {
+    "OIDC_ISSUER": "https://accounts.google.example.invalid",
+    "OIDC_CLIENT_ID": "vecta-web-next-local.apps.googleusercontent.invalid",
+    "OIDC_JWKS_URL": "https://www.googleapis.example.invalid/oauth2/v3/certs",
+    "OIDC_REDIRECT_URI": "https://vecta-next.example.invalid/auth/callback",
+    "OIDC_AUTH_ENDPOINT": "https://accounts.google.example.invalid/o/oauth2/v2/auth",
+    "OIDC_TOKEN_ENDPOINT": "https://oauth2.googleapis.example.invalid/token"
   }
 }
