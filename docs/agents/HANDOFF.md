@@ -97,18 +97,19 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   run; IDOR/tenant + memoization + malformed/uppercase-id pinned) + persistence testcontainers test. Fable
   security review: **no open P0**; fixes applied (canonical-lowercase-only UUID guard, identical-404 payload
   assert, `close().catch` so close errors don't mask query errors). Root `pnpm check` green. Not deployed.
-- **NEXT — ADR 0012 Step 4**: port the **WBS grid** + master/template/member-panel screens into
-  `/projects/:id/{wbs,…}` routes. Loader **SSRs the project/grid data** server-side (no flash); the heavy
-  TanStack virtualized grid is a **client component that hydrates** (server serializes data, does not
-  server-render every row — keeps under the free-plan 10 ms CPU). `action`s apply commands through the
-  command service with **`expectedRevision`**; **optimistic UI + client-derived EVM/scheduler values** (reuse
-  `@vecta/domain`/`@vecta/application`) so edits are perceived-instant with **no post-save re-settle**; edits
-  queue (not block) during an in-flight save; `shouldRevalidate` scoped so background revalidation causes no
-  jump. Map `projectRole` through **`projectionRoleForProjectRole`** (OWNER/EDITOR→PRIVILEGED, VIEWER→GENERAL)
-  and route reads via **`projectWorkspaceView`** (single choke point); authorize writes via
-  `createProjectCommandAuthorizer` (NOT the shell gate). Reuse the existing React grid components from
-  `apps/web` (port, don't rewrite). **Spec-parity**: the WBS grid mirrors the user's real spreadsheet — add
-  no columns/UI/features not present in `apps/web`.
+- **NEXT — ADR 0012 Step 4**: port the **WBS grid** + master/template/member screens into `/projects/:id/*`.
+  Full fable-reviewed execution plan (decomposition + load-bearing invariants) is in
+  **`docs/agents/adr-0012-step4-plan.md`** — implement from it (delete that doc when Step 4 is done). TL;DR:
+  loader **SSRs the state view** (no flash), grid **client-hydrates** (virtualizer `initialRect` is the crux —
+  spike first); `action` applies a one-POST command batch with **`expectedRevision`**, client keeps its
+  optimistic + client-derived state with **no post-save re-settle** (`useState` survives revalidation;
+  `shouldRevalidate` scoped on all active routes); conflict → action returns `data(409,…)` → adopt fresh
+  loader data (no remount). Reads projected via `projectionRoleForProjectRole`+`projectWorkspaceView`; writes
+  authorized via `createProjectCommandAuthorizer`. **Port `apps/web/src/App.tsx` wholesale, swap 2 data-plane
+  seams** (no pure-view extraction). Sub-slices: **4-pre** per-request memoized DB session → **4a** read-only
+  SSR grid (proving slice) → **4b** write path → **4c** master/template/member → **4d** queue + revalidate.
+  **Spec-parity**: mirror the real spreadsheet; add nothing not in `apps/web`. The single most important test:
+  client-optimistic transition === the unit-of-work transition for every command (see plan §0).
 - **Then**: Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` over the command core (token-auth, never the
   cookie); Step 6 verify → careful cutover deploy (`apps/web` deleted, `web-next`→`web`) → then vision
   features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare
