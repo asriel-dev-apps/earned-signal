@@ -15,13 +15,20 @@
   // URLs only — real values are supplied per deploy. Secrets (OIDC_CLIENT_SECRET,
   // SESSION_SECRET[, SESSION_SECRET_PREVIOUS]) are NOT here; they live in
   // `.dev.vars` locally / Worker secrets in production. Audience = OIDC_CLIENT_ID.
+  //
+  // MCP_RESOURCE_URL (ADR 0012 Step 5b / ADR 0003) is the RFC 9728 protected-
+  // resource identifier AND the exact JWT audience for the `/mcp` surface —
+  // separate from the REST audience (OIDC_CLIENT_ID). It must be an https URL
+  // whose path is the MCP route (`/mcp`); loopback http is accepted only for
+  // local tests. The Step-6 deploy recipe must carry it (per-environment origin).
   "vars": {
     "OIDC_ISSUER": "https://accounts.google.example.invalid",
     "OIDC_CLIENT_ID": "vecta-web-next-local.apps.googleusercontent.invalid",
     "OIDC_JWKS_URL": "https://www.googleapis.example.invalid/oauth2/v3/certs",
     "OIDC_REDIRECT_URI": "https://vecta-next.example.invalid/auth/callback",
     "OIDC_AUTH_ENDPOINT": "https://accounts.google.example.invalid/o/oauth2/v2/auth",
-    "OIDC_TOKEN_ENDPOINT": "https://oauth2.googleapis.example.invalid/token"
+    "OIDC_TOKEN_ENDPOINT": "https://oauth2.googleapis.example.invalid/token",
+    "MCP_RESOURCE_URL": "https://vecta-next.example.invalid/mcp"
   },
   // Free-tier rate-limiting bindings for the token `/api` surface (ADR 0012
   // Step 5a; mirrors the old `apps/web` namespaces). `PRE_AUTH_RATE_LIMIT` keys

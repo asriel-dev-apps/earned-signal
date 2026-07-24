@@ -24,6 +24,7 @@ import {
   signAccessToken,
   type ApiTestKeys,
 } from "./fixtures/api";
+import { MCP_RESOURCE_URL } from "./fixtures/mcp";
 import { FakeProjectCommandUnitOfWork } from "./fixtures/fake-unit-of-work";
 import { scheduledProject } from "./fixtures/wbs";
 
@@ -163,6 +164,22 @@ describe("/api auth (token-only, cookie never grants)", () => {
       expect(response.status).toBe(401);
       expect(response.headers.get("www-authenticate")).toBe("Bearer");
     }
+  });
+
+  it("rejects a token minted for the /mcp audience with 401 (cross-surface replay), opening no DB session", async () => {
+    // A token whose aud is MCP_RESOURCE_URL, replayed at /api: it must fail the
+    // OIDC_CLIENT_ID audience check with a 401 and never open the DB session.
+    const mcpAudienceToken = await signAccessToken(keys.privateKey, { aud: MCP_RESOURCE_URL });
+    const { app, session } = buildApiApp({ authenticate: realAuthenticate(keys) });
+    const databaseSpy = vi.spyOn(session, "database");
+    const response = await app.request(
+      "/api/projects",
+      { headers: { authorization: `Bearer ${mcpAudienceToken}` } },
+      apiEnv(),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    expect(databaseSpy).not.toHaveBeenCalled();
   });
 
   it("derives the identity (subject, scopes, verified email) from a valid token", async () => {

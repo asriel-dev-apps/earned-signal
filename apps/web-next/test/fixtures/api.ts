@@ -149,8 +149,13 @@ export interface ApiDepsOverrides {
   createSession?: (env: Env) => DbSession;
 }
 
-/** Build an app + deps for a test, wiring the given fakes. */
-export function buildApiApp(overrides: ApiDepsOverrides = {}) {
+/**
+ * Build the injectable {@link ApiDeps} + the fakes a test can assert on, wiring
+ * the given overrides. Shared by both the `/api` app and the `/mcp` handler
+ * fixtures so the two mouths are exercised against the SAME persistence/auth/
+ * session seams (ADR 0012 Step 5).
+ */
+export function buildApiDeps(overrides: ApiDepsOverrides = {}) {
   const session = fakeSession();
   const grantResolver = overrides.grantResolver ?? fakeGrantResolver(null);
   const workspace = overrides.workspace ?? fakeWorkspaceLoader(null);
@@ -170,7 +175,13 @@ export function buildApiApp(overrides: ApiDepsOverrides = {}) {
     createSession: overrides.createSession ?? (() => session),
     persistence,
   };
-  return { app: createApiApp(deps), deps, session, grantResolver, listReader };
+  return { deps, session, grantResolver, listReader };
+}
+
+/** Build an app + deps for a test, wiring the given fakes. */
+export function buildApiApp(overrides: ApiDepsOverrides = {}) {
+  const built = buildApiDeps(overrides);
+  return { app: createApiApp(built.deps), ...built };
 }
 
 export function apiEnv(): Env {

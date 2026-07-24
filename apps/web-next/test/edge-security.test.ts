@@ -37,6 +37,16 @@ describe("edge request security", () => {
     expect(routeKey(new Request("https://app.test/assets/index.js"))).toBe("GET:static-or-unknown");
   });
 
+  it("buckets the /mcp surface (JSON-RPC + RFC 9728 metadata) under its own mcp label", () => {
+    expect(routeKey(new Request("https://app.test/mcp", { method: "POST" }))).toBe("POST:mcp");
+    expect(routeKey(new Request("https://app.test/mcp", { method: "GET" }))).toBe("GET:mcp");
+    expect(
+      routeKey(new Request("https://app.test/.well-known/oauth-protected-resource/mcp")),
+    ).toBe("GET:mcp");
+    // A near-miss path is NOT the MCP surface and stays static-or-unknown.
+    expect(routeKey(new Request("https://app.test/mcpfoo"))).toBe("GET:static-or-unknown");
+  });
+
   it("applies a pre-authentication IP+route limit without exposing the raw key", async () => {
     const rateLimit = limiter();
     await enforcePreAuthenticationLimit(

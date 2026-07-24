@@ -27,6 +27,13 @@ export function routeKey(request: Request): string {
   const url = new URL(request.url);
   const parts = routeParts(url.pathname);
   const method = request.method.toUpperCase();
+  // The `/mcp` surface (JSON-RPC + its RFC 9728 metadata) gets its own bucket so
+  // its pre-auth/authed rate limits are per-surface and its request logs carry an
+  // `mcp` label instead of being lumped into `static-or-unknown`.
+  if (parts[0] === "mcp") return `${method}:mcp`;
+  if (parts[0] === ".well-known" && parts[1] === "oauth-protected-resource") {
+    return `${method}:mcp`;
+  }
   if (parts[0] !== "api") return `${method}:static-or-unknown`;
   if (parts[1] === "health") return `${method}:api-health`;
   if (parts[1] === "projects") return `${method}:projects`;

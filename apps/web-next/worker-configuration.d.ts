@@ -12,6 +12,7 @@ interface __BaseEnv_Env {
 	OIDC_REDIRECT_URI: "https://vecta-next.example.invalid/auth/callback";
 	OIDC_AUTH_ENDPOINT: "https://accounts.google.example.invalid/o/oauth2/v2/auth";
 	OIDC_TOKEN_ENDPOINT: "https://oauth2.googleapis.example.invalid/token";
+	MCP_RESOURCE_URL: "https://vecta-next.example.invalid/mcp";
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -24,7 +25,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "OIDC_ISSUER" | "OIDC_CLIENT_ID" | "OIDC_JWKS_URL" | "OIDC_REDIRECT_URI" | "OIDC_AUTH_ENDPOINT" | "OIDC_TOKEN_ENDPOINT">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "OIDC_ISSUER" | "OIDC_CLIENT_ID" | "OIDC_JWKS_URL" | "OIDC_REDIRECT_URI" | "OIDC_AUTH_ENDPOINT" | "OIDC_TOKEN_ENDPOINT" | "MCP_RESOURCE_URL">> {}
 }
 
 // Begin runtime types

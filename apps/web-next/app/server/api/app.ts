@@ -186,7 +186,13 @@ const ErrorResponseSchema = z
   })
   .openapi("ErrorResponse");
 
-function projectStateResponse(project: ProjectStateView): z.infer<typeof ProjectStateResponseSchema> {
+// Exported so the `/mcp` `get_project` tool serializes the role-scoped view with
+// the SAME codec as `/api` (ADR 0012 Step 5b): both read paths run the projection
+// choke point `projectWorkspaceView` and this serializer, so the GENERAL-view
+// `dailyCapacityMinutes` omission (D18) can never fork between the two mouths.
+export function projectStateResponse(
+  project: ProjectStateView,
+): z.infer<typeof ProjectStateResponseSchema> {
   return {
     id: project.id,
     name: project.name,
