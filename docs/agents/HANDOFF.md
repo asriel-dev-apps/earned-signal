@@ -153,7 +153,9 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   login + `/api/health` + `/mcp` metadata, allow ~30 s propagation, then delete `apps/web` and rename
   `web-next`→`web`. **(D) vision features** (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands) are
   follow-on work, not the cutover. Real-time = Phase 1 (Cloudflare DO + WebSocket, free) later.
-- **Step 6 cutover checklist — user-required inputs (blockers)**:
+- **Step 6 cutover — full executable runbook (fable-reviewed): `docs/agents/adr-0012-step6-cutover-runbook.md`**
+  (phases 0–7: user blockers, R1 principal fix, local smokes, deploy, verify, retire, rollback + risk register).
+  User-required inputs (blockers) in brief:
   1. **Google OAuth *confidential* client secret** — ADR 0012 amended auth to a **server-side authorization-code
      flow**, which needs `OIDC_CLIENT_SECRET` (the old app used a client-side flow with NO secret). Create/enable a
      confidential client secret in Google Cloud Console and register the **redirect URI** `https://<host>/auth/callback`.
