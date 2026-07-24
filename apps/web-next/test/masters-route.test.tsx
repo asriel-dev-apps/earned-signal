@@ -223,8 +223,8 @@ describe("ProjectMasters — shared optimistic pipeline", () => {
     expect(server.expectedRevisions[1]).toBe("9");
   });
 
-  it("blocks a concurrent edit while a save is in flight", async () => {
-    // A gated action holds the save in flight so the "saving" lock is observable.
+  it("keeps inputs editable (does not disable) while a save is in flight", async () => {
+    // A gated action holds the save in flight so the "saving" state is observable.
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -245,10 +245,11 @@ describe("ProjectMasters — shared optimistic pipeline", () => {
     fireEvent.change(screen.getByLabelText("工程を追加…"), { target: { value: "Phase Z" } });
     fireEvent.click(screen.getByTestId("master-add-工程"));
 
-    // Save in flight: the screen is locked (badge "saving", add controls disabled).
+    // Queue-not-block (Step 4d): the badge is "saving" but the inputs no longer flash
+    // disabled — a concurrent edit is queued, not blocked (the sanctioned delta).
     await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("saving"));
-    expect((screen.getByLabelText("プロダクトを追加…") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByTestId("master-add-プロダクト") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("プロダクトを追加…") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByTestId("master-add-プロダクト") as HTMLButtonElement).disabled).toBe(false);
 
     release();
     await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("saved"));

@@ -35,6 +35,19 @@ import type { ShouldRevalidateFunctionArgs } from "react-router";
  * Shared verbatim by each write route and every active ancestor, so one commit
  * never fans out into a workspace + project-row reload.
  */
+// ADR 0012 Step 4d — verification pass. The queue-not-block change adds NO new
+// result shapes: every queue-drained POST returns the same `{ ok, kind, revision }`
+// / `{ ok: false, code }` shapes as a single 4b save, so this predicate is already
+// correct for the queue and its logic is UNCHANGED. It is the SINGLE revalidation
+// mechanism (the fetcher-submit `defaultShouldRevalidate` option is deliberately
+// unused). The pinned truth table (see self-save-revalidation.test.ts):
+//   success + known self-save kind        → false   (skip the no-op re-settle)
+//   success + unknown kind                 → default (never suppress a foreign re-read)
+//   { ok:false, code:"VERSION_CONFLICT" }  → true    (override RR's status>=400 false)
+//   { ok:false, code: FORBIDDEN|NOT_FOUND|INVALID } → default (>=400 ⇒ false: local
+//                                            rollback, no read needed)
+//   actionResult null/undefined (a navigation, not a fetcher submit) → default
+//                                            (never suppress a legit nav re-read)
 const SELF_SAVE_KINDS: ReadonlySet<string> = new Set([
   "wbs-save",
   "masters-save",

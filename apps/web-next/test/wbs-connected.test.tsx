@@ -174,7 +174,7 @@ describe("ADR 0012 Step 4b — connected optimistic pipeline", () => {
     expect(screen.getByTestId("wbs-grid")).toBe(gridBefore);
   });
 
-  it("blocks a concurrent dispatch while a save is in flight", async () => {
+  it("queues (does not drop) a concurrent edit while a save is in flight", async () => {
     const onExecute = vi.fn();
     render(
       <WbsApp
@@ -190,13 +190,14 @@ describe("ADR 0012 Step 4b — connected optimistic pipeline", () => {
     await editFirstName("First edit");
     await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
 
-    // The badge is now "saving" → editing is blocked; a second attempt opens no
-    // editor and dispatches nothing (block-during-save; the queue is 4d).
+    // Queue-not-block (Step 4d): the badge is "saving" but editing is still allowed;
+    // a second edit opens its editor and applies optimistically, yet does NOT submit
+    // (queued behind the in-flight save — the fetcher is never abort-and-replaced).
     expect(screen.getByTestId("save-state").textContent).toBe("saving");
-    const cell = await firstNameCell();
-    fireEvent.doubleClick(cell);
-    expect(cell.querySelector("input.cell-editor")).toBeNull();
+    await editFirstName("Second edit");
+    await waitFor(() => expect(screen.getByText("Second edit")).toBeTruthy());
     expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("save-state").textContent).toBe("saving");
   });
 });
 

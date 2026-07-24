@@ -50,6 +50,7 @@ import {
   type ExternalLoad,
   type OverloadEntry,
 } from "./cross-project-load";
+import { emptyQueue, reduceQueue, type QueueState } from "./save-queue";
 
 // ADR 0012 Step 4a — `useLayoutEffect` runs only in the browser; on the server
 // React logs a warning for it. This isomorphic variant falls back to
@@ -586,18 +587,18 @@ export interface WbsAppProps {
   readonly initialRevision: string;
   readonly projectionRole: ProjectionRole;
   /**
-   * Step 4b write-path dispatch seam. Its PRESENCE selects connected mode: each
+   * Step 4b/4d write-path dispatch seam. Its PRESENCE selects connected mode: each
    * applied command batch is forwarded (with the CONFIRMED revision, not the
    * static initial one) after the local optimistic apply, and the save lifecycle
-   * (block-during-save, confirmed-revision advance, rollback, conflict adopt)
-   * runs. Absent = preview mode (4a): edits stay in-memory and nothing persists,
-   * so the SSR/hydration/preview harness renders the grid with no router.
+   * (queue-not-block, confirmed-revision advance, rollback, conflict adopt) runs.
+   * Absent = preview mode (4a): edits stay in-memory and nothing persists, so the
+   * SSR/hydration/preview harness renders the grid with no router.
    */
   readonly onExecute?: (commands: readonly ProjectCommand[], expectedRevision: string) => void;
   /**
    * Connected mode: is a save in flight? The route passes `fetcher.state !==
-   * "idle"`. Drives the block-during-save badge and the settle edge that
-   * processes the outcome. Ignored in preview mode.
+   * "idle"`. Drives the "saving" badge and the settle edge that processes the
+   * outcome (and drains the coalesced queue). Ignored in preview mode.
    */
   readonly saveInFlight?: boolean;
   /**
@@ -658,14 +659,26 @@ export function App({
   // Id of a just-added task awaiting its first appearance in the rendered rows,
   // so it can be selected (and scrolled to) once the grid re-renders with it.
   const [pendingAddedTaskId, setPendingAddedTaskId] = useState<string | null>(null);
-  // Block-during-save (ADR 0012 Step 4b keeps the SPA's behaviour; the queue is
-  // 4d): true from dispatch until the fetcher settles, so a concurrent edit is
-  // dropped. The pre-optimistic snapshot (original `App.tsx:994–995`) restores
-  // state + grid if the save is rejected. `settleWasInFlight` tracks the
-  // in-flight→settled edge of the fetcher so the outcome is processed exactly once.
-  const saving = useRef(false);
-  const rollbackSnapshot = useRef<{ project: ProjectState; grid: WbsGridProjection } | null>(null);
-  const settleWasInFlight = useRef(false);
+  // Queue-not-block (ADR 0012 Step 4d, ADR §7): a two-slot save queue replaces the
+  // 4b `saving.current` + `rollbackSnapshot` refs. `inFlight` holds the save on the
+  // wire (its snapshot = the last confirmed boundary, the rollback target);
+  // `pending` coalesces edits accepted while a save is in flight into ONE wire
+  // batch, drained when the in-flight save settles. Held in a ref (read/written
+  // synchronously in the settle effect + on each edit), consistent with the refs it
+  // replaces. `lastProcessedResult` is the LAST `saveResult` object the settle
+  // effect consumed: a settle is detected by result-object IDENTITY (each response
+  // decodes to a fresh object), NOT an in-flight→idle edge — RR 8.2.0 wraps router
+  // state updates in `startTransition`, so the "submitting" render can collapse and
+  // the edge is never observed (the P1 wedge). Identity settles exactly once even
+  // then, and a lingering `fetcher.data` (same object) is never reprocessed.
+  const queueRef = useRef<QueueState<{ project: ProjectState; grid: WbsGridProjection }>>(emptyQueue());
+  const lastProcessedResult = useRef<SaveActionResult | undefined>(undefined);
+  // The latest `onExecute` captured for the settle effect's DRAIN dispatch (below),
+  // so that effect can submit the coalesced pending batch without listing the
+  // route's per-render fetcher callback in its deps (which would churn the edge
+  // detector). Every render refreshes it; the edit path calls `onExecute` directly.
+  const onExecuteRef = useRef(onExecute);
+  onExecuteRef.current = onExecute;
   // The loader revision this component has reconciled with. Successful saves skip
   // revalidation (`shouldRevalidate`), so `initialRevision` only changes when a
   // conflict-triggered revalidation delivers fresh loader data — the adopt signal.
@@ -677,7 +690,10 @@ export function App({
   const [memberPanelOpen, setMemberPanelOpen] = useState(false);
 
   const rows = grid.rows as WbsGridTaskRow[];
-  const editable = saveState === "preview" || saveState === "saved";
+  // Queue-not-block (ADR 0012 Step 4d): editing is allowed WHILE a save is in
+  // flight — the edit is queued, not dropped — so "saving" is editable now.
+  // "error" stays locked (the grid waits for the conflict resync/adopt).
+  const editable = saveState === "preview" || saveState === "saved" || saveState === "saving";
 
   const memberOptions = useMemo(
     () => project.members.map((member) => ({ id: member.id, name: member.name })),
@@ -1056,44 +1072,74 @@ export function App({
     setPendingAddedTaskId(null);
   }, [renderRows, pendingAddedTaskId, rowVirtualizer]);
 
-  // ADR 0012 Step 4b — process the save outcome on the fetcher's in-flight→settled
-  // edge (connected mode). Block-during-save means at most one dispatch is in
-  // flight, so the just-settled `saveResult` is unambiguously its outcome:
-  //   • success  → advance the confirmed revision, drop the snapshot, badge "saved".
-  //                NO reload/re-settle — the optimistic state is already correct
-  //                (§0: client state@N ≡ server state@N+1). `useState` survives.
-  //   • conflict → the fetcher's own revalidation reloads the loader (the wbs
-  //                `shouldRevalidate` returns default on a non-ok result); the
-  //                adopt effect below reconciles when the fresh data lands. Badge
-  //                "error", matching the SPA (the grid locks until resync).
-  //   • else     → roll back state + grid from the snapshot, badge "error", notice.
+  // ADR 0012 Step 4d — process the save outcome on the fetcher's in-flight→settled
+  // edge (connected mode). At most one save is ever on the wire (the queue submits
+  // only when idle), so the just-settled `saveResult` is unambiguously the
+  // in-flight batch's outcome. The queue machine (`reduceQueue`) computes the next
+  // slots + effect; dispatch happens HERE (the drain) and in the edit@idle path —
+  // the ONLY two submit sites:
+  //   • success  → advance the confirmed revision from the SETTLED result. If a
+  //                coalesced batch is pending, DRAIN it (dispatch with that same
+  //                settled revision — NOT the stale `confirmedRevision` state var —
+  //                and keep the badge "saving"); else badge "saved". NO reload/
+  //                re-settle — the optimistic state is already correct (§0). Only
+  //                when both slots empty does the badge read "saved" (truthful).
+  //   • conflict → clear BOTH slots (queued edits dropped, §7), no rollback. The
+  //                fetcher's own revalidation reloads the loader (409 forces
+  //                `shouldRevalidate` true); the adopt effect below reconciles when
+  //                the fresh data lands. Badge "error" (the grid locks until resync).
+  //   • else     → roll back state + grid to `inFlight.snapshot` (which discards any
+  //                pending edits too), clear both slots, badge "error", notice.
   useEffect(() => {
     if (!connected) return;
-    const settled = settleWasInFlight.current && saveInFlight !== true;
-    settleWasInFlight.current = saveInFlight === true;
-    if (!settled || !saving.current) return;
-    saving.current = false;
+    // Detect a settle by result-object IDENTITY, not an in-flight→idle edge: RR
+    // 8.2.0 wraps router state updates in `startTransition`, so the "submitting"
+    // render can collapse and the edge is never observed (the P1 wedge). Each
+    // response decodes to a fresh `saveResult`, so a value we have not yet consumed —
+    // while the fetcher is idle and a save is in flight in the queue — IS the settle.
+    // During the "loading"/revalidation phase `saveInFlight` is still true, so we
+    // correctly wait for idle. A lingering `fetcher.data` across unrelated re-renders
+    // keeps the SAME identity, so it is never reprocessed (exactly-once).
+    if (
+      saveInFlight === true ||
+      saveResult === undefined ||
+      saveResult === lastProcessedResult.current ||
+      queueRef.current.inFlight === null
+    ) {
+      return;
+    }
+    // Mark this result consumed FIRST, so a re-render carrying the same object (or a
+    // re-entrant flush) cannot reprocess it.
+    lastProcessedResult.current = saveResult;
     const result = saveResult;
     if (result?.ok === true && result.kind === "wbs-save") {
       setConfirmedRevision(result.revision);
-      rollbackSnapshot.current = null;
-      setSaveState("saved");
+      const transition = reduceQueue(queueRef.current, { type: "settle-success", revision: result.revision });
+      queueRef.current = transition.queue;
       setNotice(null);
+      if (transition.dispatch !== undefined) {
+        // Drain the coalesced pending batch. Badge stays "saving" (a save is again
+        // on the wire); the drained batch settles with its OWN fresh result object,
+        // so the identity check re-arms for it (this settle's object is already
+        // recorded in `lastProcessedResult`, so it will not reprocess).
+        onExecuteRef.current?.(transition.dispatch.commands, transition.dispatch.expectedRevision);
+      } else {
+        setSaveState("saved");
+      }
     } else if (result?.ok === false && result.code === "VERSION_CONFLICT") {
-      // The server is ahead — either a true optimistic-lock conflict or a partial
-      // commit (P1-2: some commands of the batch landed before a later one failed).
-      // Both mean the server committed state the client's pre-batch snapshot no
+      // The server is ahead — a true optimistic-lock conflict or a partial commit
+      // (P1-2). Either way the server committed state the pre-batch snapshot no
       // longer matches, so we do NOT roll back: the loader-revision effect adopts
       // the fresh server state after the forced revalidation.
-      rollbackSnapshot.current = null;
+      queueRef.current = reduceQueue(queueRef.current, { type: "settle-conflict" }).queue;
       setSaveState("error");
     } else {
-      const snapshot = rollbackSnapshot.current;
-      if (snapshot !== null) {
-        setProject(snapshot.project);
-        setGrid(snapshot.grid);
+      const transition = reduceQueue(queueRef.current, { type: "settle-failure" });
+      queueRef.current = transition.queue;
+      if (transition.rollback !== undefined) {
+        setProject(transition.rollback.project);
+        setGrid(transition.rollback.grid);
       }
-      rollbackSnapshot.current = null;
       setSaveState("error");
       setNotice(
         result?.ok === false && result.code === "INVALID" && result.message !== undefined
@@ -1118,9 +1164,16 @@ export function App({
     // Defer while a save is still in flight: adopting mid-save would clobber the
     // optimistic state of the in-flight edit and raise a false notice. The outcome
     // effect above (declared first, so flushed first in this same commit) clears
-    // `saving.current` on the settle edge, so a real conflict resync — whose fresh
+    // the queue's `inFlight` on settle, so a real conflict resync — whose fresh
     // loader data lands together with the fetcher settling — still adopts here.
-    if (saving.current) return;
+    // P2-3 — a DEFERRED adopt re-arms only when this effect re-runs, and its deps
+    // (`initialRevision`/`initialState`/`projectionRole`/`confirmedRevision`) only
+    // change mid-save via `confirmedRevision` (advanced by the outcome effect on a
+    // drain-success). It therefore relies on nothing ELSE triggering a revalidation
+    // mid-save on these routes — true today: `shouldRevalidate` skips self-saves, so
+    // the only loader re-run that overlaps a save is the conflict one, which clears
+    // `inFlight` in the same commit (above), so this effect is never actually deferred.
+    if (queueRef.current.inFlight !== null) return;
     adoptedLoaderRevision.current = initialRevision;
     // A benign catch-up revalidation (the loader merely caught up to the revision
     // we already confirmed, e.g. an ancestor re-read after our own save) is NOT a
@@ -1146,15 +1199,22 @@ export function App({
   // a capacity-stripped GENERAL view feeding the scheduler — becomes a notice +
   // no-op, never an uncaught throw that silently drops the edit.
   //
-  // Connected mode (ADR 0012 Step 4b) then snapshots the pre-optimistic state for
-  // rollback, marks the save in flight (block-during-save), and dispatches the
-  // batch with the CONFIRMED revision. There is NO post-save reload: on success
-  // the outcome effect just advances the confirmed revision (the no-re-settle
-  // win). Preview mode applies locally and persists nothing.
+  // Connected mode (ADR 0012 Step 4d) then feeds the batch through the save queue:
+  // edit@idle opens a new in-flight save (snapshot the confirmed boundary + dispatch
+  // with the CONFIRMED revision); edit@in-flight QUEUES it (coalesced, NO dispatch)
+  // instead of dropping it — the sanctioned queue-not-block delta. There is NO
+  // post-save reload: on success the outcome effect advances the confirmed revision
+  // (the no-re-settle win). Preview mode applies locally and persists nothing.
   const executeCommands = useCallback(
     (commands: readonly ProjectCommand[]): boolean => {
       if (commands.length === 0) return false;
-      if (saving.current) return false;
+      // P2-1 — in connected mode a rejected save LOCKS the grid ("error") until the
+      // conflict resync/adopt lands. An editor left open across that settle→adopt gap
+      // must NOT dispatch: its command carries the stale (pre-conflict) revision and
+      // would 409 again, dropping the typed edit. Mirror how `commitDraft`/`onDragEnd`
+      // gate on `editable` (which is false in "error"), since `commit`/`finishDailyEdit`
+      // reach here without their own gate once the editor is already open.
+      if (connected && saveState === "error") return false;
       let optimistic: ProjectState;
       try {
         optimistic = deriveOptimisticState(project, commands);
@@ -1164,20 +1224,30 @@ export function App({
       }
       const nextGrid = projectWbsGrid(optimistic, { role: projectionRole });
       if (connected) {
-        // Snapshot BEFORE mutating so a rejected save restores state + grid
-        // (original `App.tsx:994–995`).
-        rollbackSnapshot.current = { project, grid };
-        saving.current = true;
-        settleWasInFlight.current = false;
+        // The pre-apply snapshot is captured (project + grid, both coherent) so a
+        // rejected save rolls back to the confirmed boundary; the queue keeps the
+        // first pending snapshot when coalescing.
+        const transition = reduceQueue(queueRef.current, {
+          type: "edit",
+          snapshot: { project, grid },
+          commands,
+          confirmedRevision,
+        });
+        queueRef.current = transition.queue;
         setSaveState("saving");
+        if (transition.dispatch !== undefined) {
+          // edit@idle: this batch goes on the wire now. Its settle is detected by the
+          // fresh result object it will produce — no edge/flag to reset.
+          onExecute?.(transition.dispatch.commands, transition.dispatch.expectedRevision);
+        }
+        // else edit@in-flight: queued only (no submit — the correctness invariant).
       }
       setProject(optimistic);
       setGrid(nextGrid);
       setNotice(null);
-      onExecute?.(commands, confirmedRevision);
       return true;
     },
-    [connected, confirmedRevision, grid, onExecute, project, projectionRole],
+    [connected, confirmedRevision, grid, onExecute, project, projectionRole, saveState],
   );
 
   const executeCommand = useCallback(
