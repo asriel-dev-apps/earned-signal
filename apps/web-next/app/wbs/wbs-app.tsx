@@ -521,6 +521,48 @@ function buildDailyPlanChange(
 }
 
 /**
+ * The connected-mode save outcome the route derives from its `useFetcher` and
+ * feeds back to the grid (ADR 0012 Step 4b). Revisions cross as strings.
+ */
+export type SaveActionResult =
+  | { readonly ok: true; readonly kind: "wbs-save"; readonly revision: string }
+  | { readonly ok: false; readonly code: "VERSION_CONFLICT"; readonly actualRevision: string }
+  | { readonly ok: false; readonly code: "FORBIDDEN" }
+  | { readonly ok: false; readonly code: "NOT_FOUND" }
+  | { readonly ok: false; readonly code: "INVALID"; readonly message?: string };
+
+/**
+ * The client-optimistic state transition for a command batch (ADR 0012 §0 — the
+ * convergence invariant). Fold the whole batch through the shared
+ * `applyProjectCommand`, then — ONLY for a `task.generateSubtasks` batch — run the
+ * deterministic scheduler over just the newly-created leaf ids, EXACTLY as the
+ * server unit of work does (`packages/persistence` project-command-unit-of-work
+ * ~285–297). Both transitions are pure functions of (state, command) and task
+ * ids are client-generated, so the client-derived state@N is identical to the
+ * server's state@N+1 — the guarantee that makes "instant save, no re-settle"
+ * sound. Extracted so the §0 test pins this exact code path against the server's.
+ *
+ * May throw (an unplaceable task, or a capacity-stripped GENERAL view feeding the
+ * scheduler): the caller runs it inside a try so a throw becomes a notice, never
+ * a dropped edit (the 4a P0 fix — this branch lives INSIDE `executeCommands`' try).
+ */
+export function deriveOptimisticState(
+  state: ProjectState,
+  commands: readonly ProjectCommand[],
+): ProjectState {
+  let candidate: ProjectState = state;
+  for (const command of commands) candidate = applyProjectCommand(candidate, command);
+  if (commands.some((command) => command.type === "task.generateSubtasks")) {
+    const existingTaskIds = new Set(state.tasks.map((task) => task.id));
+    const newTaskIds = new Set(
+      candidate.tasks.filter((task) => !existingTaskIds.has(task.id)).map((task) => task.id),
+    );
+    return applyEffortSchedule(candidate, newTaskIds);
+  }
+  return candidate;
+}
+
+/**
  * ADR 0012 Step 4a — the WBS grid, ported wholesale from `apps/web/src/App.tsx`
  * with exactly two data-plane seams swapped:
  *   (a) Initial data — the role-scoped project state view, its revision, and the
@@ -544,22 +586,53 @@ export interface WbsAppProps {
   readonly initialRevision: string;
   readonly projectionRole: ProjectionRole;
   /**
-   * Step 4b write-path seam. When provided, each applied command batch is
-   * forwarded (with the expected revision) after the local optimistic apply;
-   * absent (4a) means edits stay in-memory and nothing persists.
+   * Step 4b write-path dispatch seam. Its PRESENCE selects connected mode: each
+   * applied command batch is forwarded (with the CONFIRMED revision, not the
+   * static initial one) after the local optimistic apply, and the save lifecycle
+   * (block-during-save, confirmed-revision advance, rollback, conflict adopt)
+   * runs. Absent = preview mode (4a): edits stay in-memory and nothing persists,
+   * so the SSR/hydration/preview harness renders the grid with no router.
    */
   readonly onExecute?: (commands: readonly ProjectCommand[], expectedRevision: string) => void;
+  /**
+   * Connected mode: is a save in flight? The route passes `fetcher.state !==
+   * "idle"`. Drives the block-during-save badge and the settle edge that
+   * processes the outcome. Ignored in preview mode.
+   */
+  readonly saveInFlight?: boolean;
+  /**
+   * Connected mode: the latest action outcome (`fetcher.data`). On settle it
+   * advances the confirmed revision (success), rolls back (denied/invalid), or
+   * lets the conflict resync run. Ignored in preview mode.
+   */
+  readonly saveResult?: SaveActionResult | undefined;
 }
 
-export function App({ initialState, initialRevision, projectionRole, onExecute }: WbsAppProps) {
+export function App({
+  initialState,
+  initialRevision,
+  projectionRole,
+  onExecute,
+  saveInFlight,
+  saveResult,
+}: WbsAppProps) {
+  // Connected mode ⇔ a dispatch seam is wired (the route's fetcher). Preview mode
+  // (no `onExecute`) keeps the 4a in-memory behaviour so the SSR/hydration/preview
+  // harness renders the grid with no router.
+  const connected = onExecute !== undefined;
   const [project, setProject] = useState<ProjectState>(initialState);
   const [grid, setGrid] = useState<WbsGridProjection>(() =>
     projectWbsGrid(initialState, { role: projectionRole }),
   );
-  // 4a preview: the grid is read-only-persisted (SSR-seeded, edited locally,
-  // nothing saved), so the save badge stays "preview". Step 4b introduces the
-  // "saving"/"saved"/"error" transitions off the fetcher state.
-  const [saveState] = useState<SaveState>("preview");
+  // Preview stays "preview" (read-only-persisted); connected starts "saved"
+  // (loaded, editable) and moves through "saving"/"error" off the fetcher.
+  const [saveState, setSaveState] = useState<SaveState>(connected ? "saved" : "preview");
+  // The confirmed server revision (ADR 0012 Step 4b obligation 1): seeded from
+  // the loader's revision, advanced from each successful action result, and reset
+  // by the conflict-adopt effect. Dispatch passes THIS — not the static
+  // `initialRevision` prop — so batch 2+ carries the up-to-date revision (else a
+  // spurious VERSION_CONFLICT). Preview mode never reads it.
+  const [confirmedRevision, setConfirmedRevision] = useState(initialRevision);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<CellAddress>({ rowIndex: 0, colIndex: 0 });
   const [editing, setEditing] = useState<CellAddress | null>(null);
@@ -585,7 +658,18 @@ export function App({ initialState, initialRevision, projectionRole, onExecute }
   // Id of a just-added task awaiting its first appearance in the rendered rows,
   // so it can be selected (and scrolled to) once the grid re-renders with it.
   const [pendingAddedTaskId, setPendingAddedTaskId] = useState<string | null>(null);
+  // Block-during-save (ADR 0012 Step 4b keeps the SPA's behaviour; the queue is
+  // 4d): true from dispatch until the fetcher settles, so a concurrent edit is
+  // dropped. The pre-optimistic snapshot (original `App.tsx:994–995`) restores
+  // state + grid if the save is rejected. `settleWasInFlight` tracks the
+  // in-flight→settled edge of the fetcher so the outcome is processed exactly once.
   const saving = useRef(false);
+  const rollbackSnapshot = useRef<{ project: ProjectState; grid: WbsGridProjection } | null>(null);
+  const settleWasInFlight = useRef(false);
+  // The loader revision this component has reconciled with. Successful saves skip
+  // revalidation (`shouldRevalidate`), so `initialRevision` only changes when a
+  // conflict-triggered revalidation delivers fresh loader data — the adopt signal.
+  const adoptedLoaderRevision = useRef(initialRevision);
   const scrollerRef = useRef<HTMLDivElement>(null);
   // §G-1 — the member daily-total panel: its own horizontal scroll container,
   // kept in lockstep with the grid, and a component-local open/closed toggle.
@@ -972,52 +1056,128 @@ export function App({ initialState, initialRevision, projectionRole, onExecute }
     setPendingAddedTaskId(null);
   }, [renderRows, pendingAddedTaskId, rowVirtualizer]);
 
-  // Apply one or more commands as a single atomic edit (ADR 0012 Step 4a — data
-  // seam (b)). The whole batch is applied locally first via the shared
-  // `applyProjectCommand`, then the derived columns are recomputed with the same
-  // projection role the loader used, so the client re-derives the grid exactly as
-  // the server does. The deterministic scheduler runs only for
-  // `task.generateSubtasks`, placing just the newly-created leaf children as
-  // initial values, exactly as the server write path does (Design 0003 §C-2);
-  // every other command applies with no rescheduling. 4a persists NOTHING — edits
-  // are in-memory only; `onExecute` (Step 4b) is where the batch, with its
-  // expected revision, will be dispatched to the route action. `saving.current`
-  // is retained (always false in 4a) so 4b's block-during-save reads clean.
+  // ADR 0012 Step 4b — process the save outcome on the fetcher's in-flight→settled
+  // edge (connected mode). Block-during-save means at most one dispatch is in
+  // flight, so the just-settled `saveResult` is unambiguously its outcome:
+  //   • success  → advance the confirmed revision, drop the snapshot, badge "saved".
+  //                NO reload/re-settle — the optimistic state is already correct
+  //                (§0: client state@N ≡ server state@N+1). `useState` survives.
+  //   • conflict → the fetcher's own revalidation reloads the loader (the wbs
+  //                `shouldRevalidate` returns default on a non-ok result); the
+  //                adopt effect below reconciles when the fresh data lands. Badge
+  //                "error", matching the SPA (the grid locks until resync).
+  //   • else     → roll back state + grid from the snapshot, badge "error", notice.
+  useEffect(() => {
+    if (!connected) return;
+    const settled = settleWasInFlight.current && saveInFlight !== true;
+    settleWasInFlight.current = saveInFlight === true;
+    if (!settled || !saving.current) return;
+    saving.current = false;
+    const result = saveResult;
+    if (result?.ok === true && result.kind === "wbs-save") {
+      setConfirmedRevision(result.revision);
+      rollbackSnapshot.current = null;
+      setSaveState("saved");
+      setNotice(null);
+    } else if (result?.ok === false && result.code === "VERSION_CONFLICT") {
+      // The server is ahead — either a true optimistic-lock conflict or a partial
+      // commit (P1-2: some commands of the batch landed before a later one failed).
+      // Both mean the server committed state the client's pre-batch snapshot no
+      // longer matches, so we do NOT roll back: the loader-revision effect adopts
+      // the fresh server state after the forced revalidation.
+      rollbackSnapshot.current = null;
+      setSaveState("error");
+    } else {
+      const snapshot = rollbackSnapshot.current;
+      if (snapshot !== null) {
+        setProject(snapshot.project);
+        setGrid(snapshot.grid);
+      }
+      rollbackSnapshot.current = null;
+      setSaveState("error");
+      setNotice(
+        result?.ok === false && result.code === "INVALID" && result.message !== undefined
+          ? result.message
+          : "The edit could not be saved",
+      );
+    }
+  }, [saveInFlight, saveResult, connected]);
+
+  // ADR 0012 Step 4b — conflict resync (replaces the SPA's `reload()`). A
+  // successful self-save skips revalidation, so `initialRevision` (the loader
+  // value) only changes when a VERSION_CONFLICT triggered a revalidation that
+  // delivered fresh data. On that change, ADOPT the fresh state view + revision
+  // into component state — no remount/key (scroll/selection/focus survive). The
+  // badge stays "error" (set by the outcome effect), mirroring the SPA: the fresh
+  // data is shown, the rejected edit is not, and editing resumes on the next load.
+  useEffect(() => {
+    // Only react to a genuine loader-revision change (a revalidation delivered
+    // fresh data). Successful self-saves skip revalidation, so this ref only lags
+    // behind when a conflict-triggered re-run has landed new loader data.
+    if (initialRevision === adoptedLoaderRevision.current) return;
+    // Defer while a save is still in flight: adopting mid-save would clobber the
+    // optimistic state of the in-flight edit and raise a false notice. The outcome
+    // effect above (declared first, so flushed first in this same commit) clears
+    // `saving.current` on the settle edge, so a real conflict resync — whose fresh
+    // loader data lands together with the fetcher settling — still adopts here.
+    if (saving.current) return;
+    adoptedLoaderRevision.current = initialRevision;
+    // A benign catch-up revalidation (the loader merely caught up to the revision
+    // we already confirmed, e.g. an ancestor re-read after our own save) is NOT a
+    // conflict: reconcile the ref but keep the current state and skip the notice.
+    if (initialRevision === confirmedRevision) return;
+    setProject(initialState);
+    setGrid(projectWbsGrid(initialState, { role: projectionRole }));
+    setConfirmedRevision(initialRevision);
+    // The rejected edit is discarded and the fresh server state adopted; editing
+    // resumes at the new revision (mirrors the SPA's post-`reload()` editable grid).
+    setSaveState("saved");
+    setNotice(
+      `This project changed elsewhere and was reloaded at revision ${initialRevision}. Your edit was not saved.`,
+    );
+  }, [initialRevision, initialState, projectionRole, confirmedRevision]);
+
+  // Apply one or more commands as a single atomic edit. The whole batch is applied
+  // locally first via the shared `deriveOptimisticState` (which folds
+  // `applyProjectCommand` and, for a `task.generateSubtasks` batch, the scheduler
+  // over just the new leaf ids — EXACTLY the server unit-of-work transition, §0),
+  // then the grid is recomputed with the loader's projection role. The scheduler
+  // branch lives INSIDE the try (the 4a P0 fix): a throw — an unplaceable task or
+  // a capacity-stripped GENERAL view feeding the scheduler — becomes a notice +
+  // no-op, never an uncaught throw that silently drops the edit.
+  //
+  // Connected mode (ADR 0012 Step 4b) then snapshots the pre-optimistic state for
+  // rollback, marks the save in flight (block-during-save), and dispatches the
+  // batch with the CONFIRMED revision. There is NO post-save reload: on success
+  // the outcome effect just advances the confirmed revision (the no-re-settle
+  // win). Preview mode applies locally and persists nothing.
   const executeCommands = useCallback(
     (commands: readonly ProjectCommand[]): boolean => {
       if (commands.length === 0) return false;
       if (saving.current) return false;
-      // ADR 0012 §4a deviation (fable review): the generateSubtasks scheduler
-      // branch is INSIDE this try. The SPA left `applyEffortSchedule` outside its
-      // try because connected mode never ran it and preview always had full
-      // capacity; the port makes it unconditional (the no-re-settle change), which
-      // newly exposes two throwing paths — a legitimately unplaceable task, and a
-      // capacity-stripped GENERAL view feeding NaN capacity into the scheduler. Both
-      // must surface as a notice + no-op, never an uncaught throw that silently
-      // drops the edit. (GENERAL write semantics are decided deliberately in 4b.)
       let optimistic: ProjectState;
       try {
-        let candidate: ProjectState = project;
-        for (const command of commands) candidate = applyProjectCommand(candidate, command);
-        optimistic = candidate;
-        if (commands.some((command) => command.type === "task.generateSubtasks")) {
-          const existingTaskIds = new Set(project.tasks.map((task) => task.id));
-          const newTaskIds = new Set(
-            candidate.tasks.filter((task) => !existingTaskIds.has(task.id)).map((task) => task.id),
-          );
-          optimistic = applyEffortSchedule(candidate, newTaskIds);
-        }
+        optimistic = deriveOptimisticState(project, commands);
       } catch (error) {
         setNotice(error instanceof Error ? error.message : "The edit could not be applied");
         return false;
       }
+      const nextGrid = projectWbsGrid(optimistic, { role: projectionRole });
+      if (connected) {
+        // Snapshot BEFORE mutating so a rejected save restores state + grid
+        // (original `App.tsx:994–995`).
+        rollbackSnapshot.current = { project, grid };
+        saving.current = true;
+        settleWasInFlight.current = false;
+        setSaveState("saving");
+      }
       setProject(optimistic);
-      setGrid(projectWbsGrid(optimistic, { role: projectionRole }));
+      setGrid(nextGrid);
       setNotice(null);
-      onExecute?.(commands, initialRevision);
+      onExecute?.(commands, confirmedRevision);
       return true;
     },
-    [initialRevision, onExecute, project, projectionRole],
+    [connected, confirmedRevision, grid, onExecute, project, projectionRole],
   );
 
   const executeCommand = useCallback(

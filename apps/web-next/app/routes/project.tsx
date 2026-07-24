@@ -2,6 +2,7 @@ import { Link, Outlet } from "react-router";
 import type { Route } from "./+types/project";
 import { createProjectAccessMiddleware } from "~/middleware/project-access.server";
 import { requireProjectAccess } from "~/server/project/project-access";
+import { skipRevalidationOnSelfSave } from "~/server/project/self-save-revalidation";
 
 // The `/projects/:id` access gate. Its middleware validates the id, checks the
 // principal's membership, and throws 404 BEFORE any child loader runs on a
@@ -16,6 +17,11 @@ export async function loader({ context }: Route.LoaderArgs) {
   const { project, membership } = await requireProjectAccess(context);
   return { project, membership };
 }
+
+// ADR 0012 Step 4b — a successful WBS self-save must not force this layout to
+// re-read the project row. Skip revalidation for our own successful action
+// submissions; a conflict still revalidates (default) so the resync is honoured.
+export const shouldRevalidate = skipRevalidationOnSelfSave;
 
 export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   const { project } = loaderData;

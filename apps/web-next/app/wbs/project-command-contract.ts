@@ -2,7 +2,10 @@ import type { DependencyType, ProjectCommand, ProjectTask } from "@vecta/applica
 import { z } from "zod";
 
 export const UuidSchema = z.string().uuid();
-export const RevisionSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
+// The revision is a Postgres int64 (bigint) rendered as a decimal string; int64's
+// max (9223372036854775807) is 19 digits, so 20 chars caps it with a digit of
+// slack while rejecting an unbounded-length numeric string at the boundary.
+export const RevisionSchema = z.string().regex(/^(0|[1-9][0-9]*)$/).max(20);
 
 const IsoDateSchema = z.iso.date();
 const MetaTextSchema = z.string().max(2_000);
@@ -18,7 +21,16 @@ const DependencySchema = z.object({
   lagWorkingDays: z.number().int().min(0).max(3_650),
 });
 
-const DailyPlanSchema = z.record(IsoDateSchema, z.number().nonnegative());
+// A task's per-day planned minutes, keyed by ISO date. Capped at ~10 years of
+// distinct days (365 * 10 ≈ 3,660) so a single task can't smuggle an unbounded
+// map through the contract; a real plan spans weeks or months, never a decade.
+const DAILY_PLAN_MAX_ENTRIES = 3_660;
+const DailyPlanSchema = z
+  .record(IsoDateSchema, z.number().nonnegative())
+  .refine(
+    (plan) => Object.keys(plan).length <= DAILY_PLAN_MAX_ENTRIES,
+    `Daily plan may not exceed ${DAILY_PLAN_MAX_ENTRIES} entries`,
+  );
 
 const TaskFieldsSchema = z.object({
   parentId: UuidSchema.nullable(),
@@ -132,6 +144,43 @@ export const ApiCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("template.update"), templateId: UuidSchema, changes: TemplateChangesSchema }),
   z.object({ type: z.literal("template.delete"), templateId: UuidSchema }),
 ]);
+
+// ADR 0012 Step 4b — the write-path batch envelope. The client posts a whole
+// multi-command edit (e.g. a sibling reorder = several `task.update`s) as ONE
+// action request; the route action chains their revisions server-side. Each
+// entry carries a client-generated idempotency key (mirrors the SPA's
+// per-command `crypto.randomUUID()`), so a replayed POST dedupes through the
+// command receipts. `expectedRevision` is the confirmed revision the batch is
+// applied on top of (string on the wire, `bigint` once parsed).
+export const CommandEntrySchema = z
+  .object({
+    command: ApiCommandSchema,
+    idempotencyKey: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+// The largest single user gesture emits one command per task it touches; the
+// worst case is a full sibling-group reorder (`reorderSiblingCommands` renumbers a
+// whole sibling group), and the biggest such group in a realistic tree — even the
+// SSR stress project's 500 root siblings — stays under this bound. 1,000 covers
+// that comfortably while rejecting a payload that could only be a bug or abuse
+// (down from the original 5,000, which was sized to the whole-project task cap and
+// would fan a pathological batch out into thousands of DB transactions).
+const MAX_COMMANDS_PER_BATCH = 1_000;
+
+export const CommandBatchSchema = z
+  .object({
+    expectedRevision: RevisionSchema,
+    commands: z.array(CommandEntrySchema).min(1).max(MAX_COMMANDS_PER_BATCH),
+  })
+  .strict()
+  // Each command carries a client-minted idempotency key; a duplicate within one
+  // batch would make the second command replay the first's receipt instead of
+  // executing, silently dropping an edit. Reject the batch at the boundary.
+  .refine((batch) => {
+    const keys = batch.commands.map((entry) => entry.idempotencyKey);
+    return new Set(keys).size === keys.length;
+  }, "Duplicate idempotency key within one batch");
 
 // The wire never carries `seq`: the display No. is assigned server-side from the
 // project counter (§F-1), so the command task omits it.

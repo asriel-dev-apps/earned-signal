@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/projects";
 import { loadProjectList } from "~/server/project/project-list.server";
+import { skipRevalidationOnSelfSave } from "~/server/project/self-save-revalidation";
 
 export function meta() {
   return [{ title: "プロジェクト | VECTA" }];
@@ -9,6 +10,10 @@ export function meta() {
 export async function loader({ context }: Route.LoaderArgs) {
   return loadProjectList(context);
 }
+
+// ADR 0012 Step 4b — the project list shares the revalidation economy: a WBS
+// self-save on `/projects/:id/wbs` never triggers a workspace-wide list re-read.
+export const shouldRevalidate = skipRevalidationOnSelfSave;
 
 export default function Projects({ loaderData }: Route.ComponentProps) {
   const { projects } = loaderData;
