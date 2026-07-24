@@ -94,11 +94,55 @@ reintroduces drift and nothing fails loudly.
      `executeCommands` returns false + a notice, **no throw, state unchanged** (pins 4a's P0 fix — the
      `applyEffortSchedule` branch now lives inside the `try`).
 
-### 4c — master / template / member routes
+### 4c — master / template / member routes (fable-reviewed; route mapping user-decided)
 - `MasterScreen`/`TemplateSection` use the same `client.load()`/`execute()` seams
-  (`MasterScreen.tsx` ~271–339) → mechanical after 4b. **Spec-parity wrinkle**: the old app has ONE
-  マスタ screen behind a tab; Step 3 created `members`/`templates`/`dashboard` routes. Distribute the
-  existing content across them; invent no new panels; leave `dashboard` a stub.
+  (`MasterScreen.tsx` ~271–339) → mechanical after 4b. **Spec-parity**: port each panel **byte-faithful**
+  (fields, labels, Japanese testids, keyboard semantics, units/clamps, empty states, notices); invent/drop
+  NOTHING; leave `dashboard` a stub.
+- **Route mapping — DECIDED = Option A** (user-confirmed 2026-07-24): the SPA's single マスタ screen has 4
+  panels (工程・プロダクト・メンバー・サブタスクテンプレート) with no home for 工程/プロダクト in the
+  Step-3 route set. Add a new **`/projects/:id/masters`** route = **工程 + プロダクト** (`MasterList`×2).
+  **`/members`** = the existing **`MemberList`** only (name / 稼働カレンダー / 日次キャパシティ). **`/templates`**
+  = **`TemplateSection`**. Rationale: the user wants `/members` reserved to grow into a fuller **member-management
+  / permissions / settings screen later** — so it must NOT be overloaded with 工程/プロダクト now (those are
+  project master data, not member admin). ADR line 76's route set is open-ended (`{…,members,templates,…}`),
+  so `/masters` is ADR-consistent. Each panel appears in exactly ONE route. **Do NOT build the richer
+  member-management UI now** (unrequested → spec-parity); `/members` hosts only the existing MemberList.
+- Per-route subtitle = faithful split of the SPA's combined `マスタ管理 · 工程 / プロダクト / メンバー /
+  サブタスクテンプレート`: masters→`マスタ管理 · 工程 / プロダクト`, members→`マスタ管理 · メンバー`,
+  templates→`マスタ管理 · サブタスクテンプレート`.
+- **Data plane (full reuse)**: each master route loader = the same shape as `project.wbs.tsx` (requireProjectAccess
+  → shared session → `ProjectWorkspaceRepository.load` → `projectWorkspaceView(current, projectionRoleForProjectRole(role))`
+  → `{revision, stateView, projectionRole}`). **Factor a shared loader helper** reused by wbs + master routes so no
+  loader ever bypasses the projection choke point (D18: a GENERAL members payload must contain NO
+  `dailyCapacityMinutes` — stripped on the wire, not hidden in UI; pin with a test). Each route gets its own
+  `action` reusing the 4b core (`applyCommands` is command-agnostic; masters/members/templates don't touch the
+  scheduler). **Factor a shared action helper** parameterized by the success `kind`.
+- **Client save pipeline**: mirror 4b (optimistic apply + `saving.current` block + rollback + `role="alert"`
+  notice + per-route confirmed-revision + VERSION_CONFLICT→409→revalidate→adopt). **Delete the SPA's post-save
+  `reload()`** (`MasterScreen.tsx:316–323`) — that + its "could not refresh" string die by design (the instant-save
+  delta). Batch size 1, per-command `crypto.randomUUID()` keys, JSON `fetcher.submit` — identical to wbs.
+- **`shouldRevalidate` (`self-save-revalidation.ts`)**: extend the self-save skip to a SET of kinds
+  (`wbs-save | masters-save | members-save | templates-save`); keep the conflict-forces-revalidate branch. Each
+  new action returns its own `kind`. Sibling leaf routes are never simultaneously active, so no cross-suppression.
+- **No role-gating in these screens** (SPA has none): a GENERAL viewer sees the 8h capacity placeholder with
+  controls enabled and gets a server-side 403 on write — reproduce this, do NOT add disabled states or a viewer
+  banner (Cut list).
+- **Decomposition — two commits**: **4c-1** = content port (masters/members/templates routes + loaders + actions
+  + ported panels + shared helpers + `shouldRevalidate` kinds + tests); leave the provisional `project.tsx` header
+  as-is (just add a `/masters` nav link) so the content diff is parity-auditable. **4c-2** = header reconciliation:
+  make `project.tsx`'s layout header the ported tier-1 **app-bar** (BrandLockup + ThemeToggle [effect/handler
+  apply only — root inline script already does load-time] + identity email + Sign out→POST `/logout` + `NavLink`
+  active nav), **delete the provisional `<h1>{project.name}` + bare-link nav** (4a/Step-3 scaffolding, not SPA
+  content — cleanup, not parity removal). Preserve testids `auth-bar`/`theme-toggle`/`theme-system|light|dark`/
+  `auth-identity` (sign-out testid rename = a decision, keep `google-sign-out` unless told). Leave each screen's
+  tier-2 `app-header` (subtitle + save badge) UNTOUCHED — the SPA itself is two-tier. `/projects` list header is a
+  known cosmetic gap, out of scope.
+- **Landmines**: Japanese-embedded testids (don't romanize); rename inputs = Enter-commit+Escape-revert, but
+  MemberList name + step-name = Enter only (no Escape) — don't harmonize; capacity hours×60 clamp 1..1440 fallback
+  480; weight %→basis-points ×100 clamp 0..10000 step 0.1; lag `Math.trunc` ≥0; first-step dependency stripping on
+  step remove/move + first-step `—`; adding a template selects it, selection defaults to first ordered; ordering
+  `sortOrder` then `id.localeCompare`, `nextSortOrder = max+1`; empty states `（未登録）`/`（ステップ未登録）`.
 
 ### 4d — behavior deltas the ADR authorizes
 - Queue-not-block (FIFO chaining `expectedRevision` off the last confirmed revision, dropped with the
