@@ -97,6 +97,14 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   run; IDOR/tenant + memoization + malformed/uppercase-id pinned) + persistence testcontainers test. Fable
   security review: **no open P0**; fixes applied (canonical-lowercase-only UUID guard, identical-404 payload
   assert, `close().catch` so close errors don't mask query errors). Root `pnpm check` green. Not deployed.
+  **4c-1 DONE** (`7ec561d`): master/member/template panels ported byte-faithful into `/projects/:id/{masters
+  (new: 工程+プロダクト), members, templates}` (mapping A; `/members` reserved to grow into member-admin);
+  data plane reuses 4b (shared loader through `projectWorkspaceView`, shared action over `applyCommands`),
+  fable parity review found no violations. Also hardened: web-next tsconfig `noEmit` + gitignore
+  `apps/web-next/**/*.js` (a stray `tsc` had transpiled JS next to the TS sources — never track those).
+  **NEXT within Step 4 = 4c-2** (header): make `project.tsx`'s layout the ported tier-1 app-bar
+  (brand + theme toggle + identity + sign-out→/logout + active nav), delete the provisional `<h1>`/bare-link
+  nav, leave each screen's tier-2 header alone (see `docs/agents/adr-0012-step4-plan.md` §4c). Then 4d.
 - **NEXT — ADR 0012 Step 4**: port the **WBS grid** + master/template/member screens into `/projects/:id/*`.
   Full fable-reviewed execution plan (decomposition + load-bearing invariants) is in
   **`docs/agents/adr-0012-step4-plan.md`** — implement from it (delete that doc when Step 4 is done). TL;DR:

@@ -4,10 +4,10 @@ Active plan for Step 4 (port the WBS grid + master/template/member screens into
 `apps/web-next` `/projects/:id/*`). Delete this doc when Step 4 is complete. Steps 1–3
 are done; this builds on the Step-3 access gate + `requireProjectAccess(context)`.
 
-**Progress**: 4-pre DONE (`37ad335`), 4a DONE (`135e4b6`), 4b DONE (`70581fb`, fable-reviewed —
-the found P0 "dead conflict resync under RR's status>=400 revalidation skip" is fixed + proven by a
-router-level 409 test; batch partial-commit resyncs; input caps + error mapping added).
-**NEXT = 4c** (master/template/member routes). 4d after.
+**Progress**: 4-pre (`37ad335`), 4a (`135e4b6`), 4b (`70581fb`), **4c-1 DONE** (`7ec561d`, fable
+parity review: no violations, panels byte-faithful; also set web-next tsconfig `noEmit` + gitignore
+`apps/web-next/**/*.js` after a stray `tsc` had transpiled JS next to sources).
+**NEXT = 4c-2** (header reconciliation — see §4c "Decomposition"). 4d after.
 
 ## §0 The load-bearing invariant (why "instant save, no re-settle" is sound here)
 The server write path (`packages/persistence/src/project-command-unit-of-work.ts` ~279–297)
