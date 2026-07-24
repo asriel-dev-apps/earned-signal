@@ -104,10 +104,14 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   `apps/web-next/**/*.js` (a stray `tsc` had transpiled JS next to the TS sources — never track those).
   **NEXT within Step 4 = 4c-2** (header): make `project.tsx`'s layout the ported tier-1 app-bar
   (brand + theme toggle + identity + sign-out→/logout + active nav), delete the provisional `<h1>`/bare-link
-  nav, leave each screen's tier-2 header alone (see `docs/agents/adr-0012-step4-plan.md` §4c). Then 4d.
-- **NEXT — ADR 0012 Step 4**: port the **WBS grid** + master/template/member screens into `/projects/:id/*`.
-  Full fable-reviewed execution plan (decomposition + load-bearing invariants) is in
-  **`docs/agents/adr-0012-step4-plan.md`** — implement from it (delete that doc when Step 4 is done). TL;DR:
+  nav, leave each screen's tier-2 header alone. Then 4d.
+- **ADR 0012 Step 4 — DONE** (all sub-slices; fable-reviewed; pushed; **195 web-next tests**): the **WBS grid**
+  + master/member/template screens are ported into `/projects/:id/*` — SSR no-flash grid, optimistic
+  **queue-not-block** saves through the framework-free `applyCommands` core (Step 5 reuses it), and the tier-1
+  app-bar. Commits: 4-pre `37ad335`, 4a `135e4b6`, 4b `70581fb`, 4c-1 `7ec561d`, 4c-2 `9531f8d`, 4d `514d0a7`.
+  `apps/web` untouched; root `pnpm check` green. (The sub-slice narrative below is retained history — its
+  interim "NEXT = 4c/4c-2" markers are superseded; the `adr-0012-step4-plan.md` execution plan is removed now
+  that Step 4 is complete.) TL;DR of what shipped:
   loader **SSRs the state view** (no flash), grid **client-hydrates** (virtualizer `initialRect` is the crux —
   spike first); `action` applies a one-POST command batch with **`expectedRevision`**, client keeps its
   optimistic + client-derived state with **no post-save re-settle** (`useState` survives revalidation;
@@ -129,10 +133,15 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   `client.load()/execute()` seams → mechanical after 4b); leave `dashboard` a stub; reconcile the
   provisional double-header (layout chrome + grid's own `app-header`). Then 4d (queue-not-block +
   `shouldRevalidate` hardening).
-- **Then**: Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` over the command core (token-auth, never the
-  cookie); Step 6 verify → careful cutover deploy (`apps/web` deleted, `web-next`→`web`) → then vision
-  features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare
-  DO + WebSocket, free) later.
+- **NEXT — ADR 0012 Step 5**: mount **Hono `/api/*` (`@hono/zod-openapi`, typed + OpenAPI) + `/mcp`** on the
+  same Worker over the command core — reuse the framework-free `applyCommands` core + the project-list /
+  workspace reads. These are the **external / token-auth** surfaces: they **never** accept the cookie session
+  (CSRF) — identity arrives per request in a token, so this is where `PostgresProjectAccessGrantResolver` (the
+  `(issuer,subject)` + email seam) belongs, NOT the in-memory grant the cookie surface uses. `workers/app.ts`
+  already dispatches `/api` + `/mcp` → Hono (skeleton today: `/api/health` ok, `/mcp` 501 placeholder). Then
+  **Step 6**: verify → careful cutover deploy (`apps/web` deleted, `web-next` → `web`) → then vision features
+  (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare DO +
+  WebSocket, free) later.
 - **ADR 0012 cutover gates / debt** (before treating the migration done):
   - **Prod principal identity (R1, P1-2)**: the old app resolved access via a `subject="email:<addr>"`
     fallback (admin-seed path); web-next matches **exact `(issuer,subject)`** only. If the prod admin
@@ -141,11 +150,15 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
     one-time deliberate migration). Do NOT add the email fallback to the session login.
   - **web-next Neon-reader debt**: web-next has a direct `drizzle-orm` dep + two thin Neon read-seams that
     import persistence schema/conn: `app/server/auth/principal-directory.neon.server.ts` and
-    `app/server/project/project-reader.neon.server.ts`. **Consider consolidating before/during Step 4**:
-    move both Drizzle impls into `@vecta/persistence` (beside `project-access.ts`/`project-list.ts`), keep the
-    `PrincipalDirectory`/`ProjectReader` interfaces in web-next, drop the direct `drizzle-orm` dep. The
-    project-list read already lives in persistence (the right precedent). Interim: keep both `drizzle-orm`
-    pins (0.45.2) in lockstep.
+    `app/server/project/project-reader.neon.server.ts`. **Consider consolidating before/around Step 5** (the
+    API/MCP surface adds more reads over the same tables): move both Drizzle impls into `@vecta/persistence`
+    (beside `project-access.ts`/`project-list.ts`), keep the `PrincipalDirectory`/`ProjectReader` interfaces in
+    web-next, drop the direct `drizzle-orm` dep. The project-list read already lives in persistence (the right
+    precedent). Interim: keep both `drizzle-orm` pins (0.45.2) in lockstep.
+  - **Save-queue 1000-command cap (from 4d, deferred)**: the coalescing pending buffer can exceed the
+    `CommandBatchSchema` 1000-command cap under sustained heavy reorders queued behind a slow save → the drain
+    422s and the queue is erased. Low-probability. Follow-up fix = chunk the drain at the cap (successive
+    drains) rather than let it grow unbounded (`app/wbs/save-queue.ts` pending-append).
   - **Local dev**: real login needs `.dev.vars` (OIDC client secret + `SESSION_SECRET`) + the workerd
     compat-date toggle noted under Step 1.
   - **SSR-over-HTTP smoke (from 4a)**: 4a proved the SSR grid via `renderToString` (no-DOM) + bundle grep,
