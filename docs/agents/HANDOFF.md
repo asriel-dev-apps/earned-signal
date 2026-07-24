@@ -133,22 +133,45 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   `client.load()/execute()` seams → mechanical after 4b); leave `dashboard` a stub; reconcile the
   provisional double-header (layout chrome + grid's own `app-header`). Then 4d (queue-not-block +
   `shouldRevalidate` hardening).
-- **ADR 0012 Step 5 — 5a `/api` DONE** (`90216f4`, fable security review: no P0): the **external / token-auth
-  Hono `/api/*` (`@hono/zod-openapi`)** REST mouth over the command core. `applyCommands` gained an injectable
-  identity/grant seam (cookie surface byte-identical; token surface = verified `AuthenticatedIdentity` +
-  `PostgresProjectAccessGrantResolver`, AGENT scope-fenced, `(issuer,subject)`+`email:` fallback). Ported
-  oidc-auth (Bearer, RS256) + edge-security (bounded body, rate limits, `secureResponse`, no CORS); routes
-  health/projects/workspace/commands/openapi; read path projects GENERAL server-side; **never** consults the
-  cookie. Bundle 503 KiB gzip (~16% of free 3 MB). 231 web-next + 45 persistence tests.
-  **NEXT = 5b `/mcp`**: port the historical stateless MCP server (git `f9146c6~1:apps/web/src/mcp.ts`, ADR 0003)
-  re-targeted at the batch core — `agents createMcpHandler` + `@modelcontextprotocol/sdk` (re-pin the proven
-  `agents@0.17.4`+SDK `1.29.0`; if it fights the `@cloudflare/vite-plugin`+RR pipeline, try latest agents then
-  `@hono/mcp`), 3 tools (list/get/apply), Bearer audience `MCP_RESOURCE_URL` + RFC 9728 metadata at
-  `/.well-known/oauth-protected-resource/mcp` (add that dispatch prefix to `workers/app.ts`). **Full plan in
-  `docs/agents/adr-0012-step5-plan.md`** (§MCP + the 5b test list). Then
-  **Step 6**: verify → careful cutover deploy (`apps/web` deleted, `web-next` → `web`) → then vision features
-  (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare DO +
-  WebSocket, free) later.
+- **ADR 0012 Step 5 — DONE** (fable-reviewed, no open P0, pushed): the two **external / token-auth** mouths of
+  the command core on the same Worker. **5a `/api`** (`0b1f9ff`): Hono `@hono/zod-openapi` REST — `applyCommands`
+  gained an injectable identity/grant seam (cookie surface byte-identical; token surface = verified
+  `AuthenticatedIdentity` + `PostgresProjectAccessGrantResolver`, AGENT scope-fenced, `(issuer,subject)`+`email:`
+  fallback, grant resolved once/batch); ported oidc-auth (Bearer, RS256) + edge-security (bounded body, rate
+  limits, `secureResponse`, no CORS); routes health/projects/workspace/commands/openapi; GENERAL projected
+  server-side; cookie never consulted; malformed→400. **5b `/mcp`** (`5b56bd2`): stateless remote MCP server
+  (`agents@0.17.4` `createMcpHandler` + `@modelcontextprotocol/sdk@1.29.0`, the proven pins — built cleanly, no
+  fallback), 3 tools (list/get/apply) delegating to the SAME core paths as `/api`; audience `MCP_RESOURCE_URL`
+  (distinct → no cross-surface replay); RFC 9728 metadata at `/.well-known/oauth-protected-resource/mcp`;
+  non-POST→405; no ACAO; per-surface `mcp` rate bucket. **249 web-next + 45 persistence tests; bundle 800 KiB
+  gzip (~27% of free 3 MB); root `pnpm check` green.** `docs/agents/adr-0012-step5-plan.md` removed (Step 5 done).
+- **NEXT — ADR 0012 Step 6 (CUTOVER — needs the user; a production deploy + user-only secrets, NOT autonomous)**.
+  The whole migration BUILD (Steps 1–5) is done in `apps/web-next`, on the branch, not deployed. Step 6 =
+  **(A) pre-cutover verification** [SSR-over-HTTP smoke + a `wrangler dev` POST-/mcp smoke behind the workerd
+  compat-date toggle; local, needs `.dev.vars`]; **(B) provision prod config/secrets** [see the checklist
+  below]; **(C) the cutover deploy** — deploy `apps/web-next` as the `vecta` worker, verify served bundle hash +
+  login + `/api/health` + `/mcp` metadata, allow ~30 s propagation, then delete `apps/web` and rename
+  `web-next`→`web`. **(D) vision features** (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands) are
+  follow-on work, not the cutover. Real-time = Phase 1 (Cloudflare DO + WebSocket, free) later.
+- **Step 6 cutover checklist — user-required inputs (blockers)**:
+  1. **Google OAuth *confidential* client secret** — ADR 0012 amended auth to a **server-side authorization-code
+     flow**, which needs `OIDC_CLIENT_SECRET` (the old app used a client-side flow with NO secret). Create/enable a
+     confidential client secret in Google Cloud Console and register the **redirect URI** `https://<host>/auth/callback`.
+  2. **`SESSION_SECRET`** (+ optional `SESSION_SECRET_PREVIOUS`) — new; signs the httpOnly cookie session. Generate a
+     strong random secret. Both go in `.dev.vars` locally and `wrangler secret put` in prod.
+  3. **`MCP_RESOURCE_URL`** — the `/mcp` audience / RFC 9728 resource id, canonical form path `/mcp`
+     (e.g. `https://<host>/mcp`); a `vars` entry per environment.
+  4. **`OIDC_*` vars** per env in `apps/web-next/wrangler.jsonc` (issuer `https://accounts.google.com`, jwks
+     `https://www.googleapis.com/oauth2/v3/certs`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI`, `OIDC_AUTH_ENDPOINT`,
+     `OIDC_TOKEN_ENDPOINT`) + the **3 `ratelimits` bindings** (PRE_AUTH/AUTH/COMPUTE) + `DATABASE_URL` secret
+     (existing Keychain `vecta-database-url`). Audience for `/api` = `OIDC_CLIENT_ID`.
+  5. **Verify prod `principals.subject`** carry the real Google `sub` (not `email:<addr>`) — see R1 above. The `/api`
+     `email:` fallback softens this for the token surface but the **cookie login still needs it**; do the one-time
+     check/migration before cutover.
+  6. **Local smokes** (behind the workerd compat-date toggle, with `.dev.vars`): (a) view-source of `/projects/:id/wbs`
+     shows `data-row-id` rows on first paint (SSR no-flash); (b) a `wrangler dev` POST to `/mcp` (initialize) succeeds
+     (closes the CI-doesn't-run-workerd residual).
+  Only after 1–6 is the cutover deploy (§C) run. The deploy itself is outward-facing — confirm with the user.
 - **ADR 0012 cutover gates / debt** (before treating the migration done):
   - **Prod principal identity (R1, P1-2)**: the old app resolved access via a `subject="email:<addr>"`
     fallback (admin-seed path); web-next matches **exact `(issuer,subject)`** only. If the prod admin
