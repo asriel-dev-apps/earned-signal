@@ -138,7 +138,10 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   workspace reads. These are the **external / token-auth** surfaces: they **never** accept the cookie session
   (CSRF) — identity arrives per request in a token, so this is where `PostgresProjectAccessGrantResolver` (the
   `(issuer,subject)` + email seam) belongs, NOT the in-memory grant the cookie surface uses. `workers/app.ts`
-  already dispatches `/api` + `/mcp` → Hono (skeleton today: `/api/health` ok, `/mcp` 501 placeholder). Then
+  already dispatches `/api` + `/mcp` → Hono (skeleton today: `/api/health` ok, `/mcp` 501 placeholder).
+  **Full fable-reviewed plan (port-heavy — prior art in `apps/web/src/{api,oidc-auth,edge-security}.ts` + a
+  complete MCP server in git `f9146c6~1:apps/web/src/mcp.ts`; the load-bearing `applyCommands` identity/grant
+  seam; endpoints/tools; edge-security; 5a `/api` then 5b `/mcp`) is in `docs/agents/adr-0012-step5-plan.md`.** Then
   **Step 6**: verify → careful cutover deploy (`apps/web` deleted, `web-next` → `web`) → then vision features
   (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare DO +
   WebSocket, free) later.
