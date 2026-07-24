@@ -133,15 +133,19 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   `client.load()/execute()` seams → mechanical after 4b); leave `dashboard` a stub; reconcile the
   provisional double-header (layout chrome + grid's own `app-header`). Then 4d (queue-not-block +
   `shouldRevalidate` hardening).
-- **NEXT — ADR 0012 Step 5**: mount **Hono `/api/*` (`@hono/zod-openapi`, typed + OpenAPI) + `/mcp`** on the
-  same Worker over the command core — reuse the framework-free `applyCommands` core + the project-list /
-  workspace reads. These are the **external / token-auth** surfaces: they **never** accept the cookie session
-  (CSRF) — identity arrives per request in a token, so this is where `PostgresProjectAccessGrantResolver` (the
-  `(issuer,subject)` + email seam) belongs, NOT the in-memory grant the cookie surface uses. `workers/app.ts`
-  already dispatches `/api` + `/mcp` → Hono (skeleton today: `/api/health` ok, `/mcp` 501 placeholder).
-  **Full fable-reviewed plan (port-heavy — prior art in `apps/web/src/{api,oidc-auth,edge-security}.ts` + a
-  complete MCP server in git `f9146c6~1:apps/web/src/mcp.ts`; the load-bearing `applyCommands` identity/grant
-  seam; endpoints/tools; edge-security; 5a `/api` then 5b `/mcp`) is in `docs/agents/adr-0012-step5-plan.md`.** Then
+- **ADR 0012 Step 5 — 5a `/api` DONE** (`90216f4`, fable security review: no P0): the **external / token-auth
+  Hono `/api/*` (`@hono/zod-openapi`)** REST mouth over the command core. `applyCommands` gained an injectable
+  identity/grant seam (cookie surface byte-identical; token surface = verified `AuthenticatedIdentity` +
+  `PostgresProjectAccessGrantResolver`, AGENT scope-fenced, `(issuer,subject)`+`email:` fallback). Ported
+  oidc-auth (Bearer, RS256) + edge-security (bounded body, rate limits, `secureResponse`, no CORS); routes
+  health/projects/workspace/commands/openapi; read path projects GENERAL server-side; **never** consults the
+  cookie. Bundle 503 KiB gzip (~16% of free 3 MB). 231 web-next + 45 persistence tests.
+  **NEXT = 5b `/mcp`**: port the historical stateless MCP server (git `f9146c6~1:apps/web/src/mcp.ts`, ADR 0003)
+  re-targeted at the batch core — `agents createMcpHandler` + `@modelcontextprotocol/sdk` (re-pin the proven
+  `agents@0.17.4`+SDK `1.29.0`; if it fights the `@cloudflare/vite-plugin`+RR pipeline, try latest agents then
+  `@hono/mcp`), 3 tools (list/get/apply), Bearer audience `MCP_RESOURCE_URL` + RFC 9728 metadata at
+  `/.well-known/oauth-protected-resource/mcp` (add that dispatch prefix to `workers/app.ts`). **Full plan in
+  `docs/agents/adr-0012-step5-plan.md`** (§MCP + the 5b test list). Then
   **Step 6**: verify → careful cutover deploy (`apps/web` deleted, `web-next` → `web`) → then vision features
   (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare DO +
   WebSocket, free) later.
@@ -174,6 +178,14 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   - **Shared-core hygiene (deferred, not now)**: `projectWbsGrid`/projection sorts use `localeCompare`
     (`packages/application/src/project-projection.ts:211`); byte-identical both SSR sides today (lowercase-hex
     data), but a codepoint compare would make determinism unconditional. A core pass, out of Step-4 scope.
+  - **Step-5 `/api` deploy-recipe additions**: 5a added **3 `ratelimits` bindings** to `apps/web-next/wrangler.jsonc`
+    (PRE_AUTH/AUTH/COMPUTE) — the Step-6 cutover deploy config MUST carry them or the public API loses its
+    throttle. 5b will add a `MCP_RESOURCE_URL` var (RFC 9728) — carry it too. `/api` auth reuses the existing
+    OIDC `vars` (audience = `OIDC_CLIENT_ID`), no new secret.
+  - **AGENT read-view policy (deferred decision, from 5a)**: `/api` scopes the GET workspace projection by
+    `projectRole` only, so an AGENT with EDITOR role reads `dailyCapacityMinutes` even though its writes are
+    scope-fenced. If agent tokens should be least-privilege on reads, map `principalType==="AGENT"` → GENERAL
+    (or gate on a read scope). A product-policy call — left as-is (EDITOR-consistent) pending a decision.
 - `docs/design/0004-performance-realtime-architecture.md` is **superseded by ADR 0012** (its Phase-0/1
   framing is resolved there).
 - **Merge-to-main workflow**: user proposed branch → push → merge to main → deploy-on-main; not yet

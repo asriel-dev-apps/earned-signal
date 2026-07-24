@@ -1,7 +1,13 @@
 # ADR 0012 Step 5 — Hono /api + /mcp over the command core (fable-reviewed)
 
 Execution plan for Step 5 (external, token-auth surfaces on the same Worker). Delete when Step 5 is
-complete. Step 5 is **mostly a PORT** — the repo has proven prior art:
+complete.
+
+**Progress**: **5a `/api` DONE** (fable security review: no P0; `applyCommands` identity/grant seam,
+Bearer auth [RS256], edge-security + 3 ratelimits, `listForIdentity` union, bundle 503 KiB gzip). **NEXT
+= 5b `/mcp`** (see the MCP section below).
+
+Step 5 is **mostly a PORT** — the repo has proven prior art:
 - `apps/web/src/api.ts` — production `@hono/zod-openapi` API (route/`app.openapi`/`app.doc`/`securitySchemes` shape).
 - `apps/web/src/oidc-auth.ts` — framework-free jose **Bearer** verification with a JWKS-factory seam (testable, no network).
 - `apps/web/src/edge-security.ts` — framework-free bounded-body / rate-limit / request-log / `secureResponse`.
