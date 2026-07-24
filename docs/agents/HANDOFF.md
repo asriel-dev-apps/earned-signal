@@ -110,10 +110,17 @@ independently verifies (`pnpm check` + scope/leak grep + screenshots), commits, 
   SSR grid (proving slice) → **4b** write path → **4c** master/template/member → **4d** queue + revalidate.
   **Spec-parity**: mirror the real spreadsheet; add nothing not in `apps/web`. The single most important test:
   client-optimistic transition === the unit-of-work transition for every command (see plan §0).
-  **Progress**: **4-pre DONE** (`37ad335`) + **4a DONE** (`135e4b6`, fable-reviewed, no open P0) — the SSR grid
-  renders real rows in first paint (virtualizer `initialRect` verified) and edits work in preview mode
-  (nothing persists). **NEXT = 4b** (write path): see the plan's "4b" §, esp. the carried obligations
-  (confirmed-revision state, rollback snapshot, §0 convergence test PRIVILEGED-only, scheduler-throw notice).
+  **Progress**: **4-pre** (`37ad335`) + **4a** (`135e4b6`) + **4b DONE** (`70581fb`) — all fable-reviewed. 4a =
+  SSR grid renders real rows in first paint (virtualizer `initialRect` verified). 4b = optimistic saves
+  through the command core: framework-free action core (Step-5 reuses it), server-sourced authz (VIEWER
+  fail-closed), confirmed-revision advance + rollback snapshot + conflict/partial-commit adopt with **no
+  re-settle**. Fable P0 in 4b (RR 8.2.0 skips revalidation for status>=400 → conflict resync was dead) is
+  **fixed + proven** by a router-level 409 test; §0 convergence pinned for all command types (PRIVILEGED;
+  GENERAL server-denied). 113 web-next tests. **NEXT = 4c**: distribute the SPA's single マスタ tab content
+  across the `/projects/:id/{members,templates}` routes (`MasterScreen`/`TemplateSection` use the same
+  `client.load()/execute()` seams → mechanical after 4b); leave `dashboard` a stub; reconcile the
+  provisional double-header (layout chrome + grid's own `app-header`). Then 4d (queue-not-block +
+  `shouldRevalidate` hardening).
 - **Then**: Step 5 mount Hono `/api/*` (zod-openapi) + `/mcp` over the command core (token-auth, never the
   cookie); Step 6 verify → careful cutover deploy (`apps/web` deleted, `web-next`→`web`) → then vision
   features (Gantt, dashboard, budget, CSV, member admin, LLM-via-commands). Real-time = Phase 1 (Cloudflare
