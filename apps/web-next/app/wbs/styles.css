@@ -1151,6 +1151,7 @@ body {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
+  text-decoration: none;
   cursor: pointer;
 }
 
