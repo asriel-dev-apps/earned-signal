@@ -98,6 +98,19 @@ The authenticated SSR-no-flash check (`/projects/:id/wbs` has `data-row-id` rows
 **deferred to the post-deploy prod view-source (Phase 5.5)**. Do NOT build a dev-only session bypass just
 to smoke it locally (that would ship an auth backdoor); the `renderToString` test coverage stands pre-deploy.
 
+**✅ Phase 2 VALIDATED (secrets-free local smoke, run pre-cutover):** the built bundle **boots in real
+workerd** via `wrangler dev -c build/server/wrangler.json --compatibility-date 2026-07-15 --port 8787`
+("Ready", all bindings loaded, **no `cloudflare:workers`/`agents` module-load error** — closes the
+"CI-doesn't-run-workerd" residual). `/api/health`→200; `/mcp`→401 + `WWW-Authenticate resource_metadata`;
+`/.well-known/oauth-protected-resource/mcp`→200; `/`→302 `/login`→302 to the Google OIDC **PKCE** URL (state/
+nonce/S256) + sets `__Secure-oidc_tx` (auth-code flow initiates correctly); `/apifoo`→RR SSR 404 (dispatch
+correct). Gotchas confirmed: (a) **`/mcp` returns 403 "host not permitted" unless the request Host matches
+`MCP_RESOURCE_URL`'s host** — locally a placeholder artifact (spoof `-H 'Host: <resource-host>'` → 401); in
+prod set `MCP_RESOURCE_URL=https://<HOST>/mcp` and the real Host matches → 401 naturally. (b) The
+`--compatibility-date 2026-07-15` flag is CLI-only — it does **not** leak into `build/server/wrangler.json`
+(still `2026-07-17`); Phase 4.2's grep confirms. (c) For the Phase-5 prod `/` check use a manual-redirect
+fetch (`ax`/curl that follows redirects will chase the real `accounts.google.com` URL).
+
 ## Phase 3 — Optional zero-traffic canary
 
 `wrangler versions upload` a non-serving version to worker `vecta` and smoke its preview URL (`/`,
