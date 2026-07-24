@@ -4,6 +4,8 @@ import {
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
+  type ProjectAccessGrant,
+  type ProjectAccessGrantResolver,
   type ProjectCommand,
   type ProjectCommandExecution,
   type ProjectCommandRequest,
@@ -247,6 +249,53 @@ describe("applyCommands partial-commit resync (P1-2 batch atomicity)", () => {
     expect(result).toEqual({ ok: false, code: "INVALID", message: "first command is invalid" });
     expect(uow.executeCount).toBe(1);
     expect(uow.revision).toBe(5n);
+  });
+});
+
+describe("applyCommands grant resolution (per-batch memo)", () => {
+  it("resolves the injected grant ONCE for a multi-command batch, yet authorizes every command", async () => {
+    // The token surface injects a Postgres grant resolver; the authorizer resolves
+    // once per command, but the resolve key (identity, tenant, project) is constant
+    // across the batch, so the per-request memo must collapse N commands to ONE
+    // resolution — while still executing (i.e. authorizing) all of them.
+    let resolveCount = 0;
+    const grant: ProjectAccessGrant = {
+      principalId: "p-1",
+      principalType: "HUMAN",
+      projectRole: "EDITOR",
+      allowedScopes: [],
+    };
+    const grantResolver: ProjectAccessGrantResolver = {
+      async resolve() {
+        resolveCount += 1;
+        return grant;
+      },
+    };
+    const uow = new FakeProjectCommandUnitOfWork(project, 5n);
+    const result = await applyCommands(
+      {
+        session: fakeSession(),
+        tenantId: TENANT_ID,
+        projectId: project.id,
+        commands: withKeys([
+          { type: "task.update", taskId: leaf.id, changes: { sortOrder: 3 } },
+          { type: "task.update", taskId: otherLeaf.id, changes: { sortOrder: 4 } },
+          { type: "task.update", taskId: leaf.id, changes: { name: "Renamed" } },
+        ]),
+        expectedRevision: 5n,
+      },
+      {
+        grantResolver,
+        identity: { issuer: "https://issuer.example.test", subject: "sub-1", scopes: [] },
+        unitOfWorkFor: () => uow,
+      },
+    );
+
+    expect(result).toEqual({ ok: true, revision: 8n });
+    // One DB resolution for the whole batch, but all three commands were authorized
+    // and executed.
+    expect(resolveCount).toBe(1);
+    expect(uow.executeCount).toBe(3);
   });
 });
 

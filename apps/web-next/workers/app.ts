@@ -1,10 +1,10 @@
-import { Hono } from "hono";
 import {
   createRequestHandler,
   RouterContextProvider,
   type ServerBuild,
 } from "react-router";
 import { appContext } from "../app/server/context";
+import { handleApiRequest } from "../app/server/api";
 
 const reactRouterHandler = createRequestHandler(
   // React Router's generated virtual-build exports type each optional field as
@@ -16,33 +16,37 @@ const reactRouterHandler = createRequestHandler(
   import.meta.env.MODE,
 );
 
-// External API + MCP surface (ADR 0012 §Decision 3). The full `/api` (zod-openapi)
-// and `/mcp` server land in later steps; this is the dispatch skeleton only.
-// These surfaces are cookie-session-free by construction: they are dispatched to
-// Hono here and never reach the React Router auth middleware.
-const api = new Hono<{ Bindings: Env }>();
+// External API + MCP surface (ADR 0012 §Decision 3). `/api` (the token-auth
+// zod-openapi surface) is live as of Step 5a; `/mcp` lands in Step 5b. Both are
+// cookie-session-free by construction: they are dispatched here and never reach
+// the React Router auth middleware.
 
-api.get("/api/health", (c) => c.json({ status: "ok" }));
+/** Exact-or-subpath match so `/apifoo` falls through to React Router, not `/api`. */
+export function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
 
-api.all("/mcp", (c) =>
-  c.json({ error: "mcp not implemented (ADR 0012 step 5)" }, 501),
-);
-api.all("/mcp/*", (c) =>
-  c.json({ error: "mcp not implemented (ADR 0012 step 5)" }, 501),
-);
+/** Exact-or-subpath match so `/mcpfoo` falls through to React Router, not `/mcp`. */
+export function isMcpPath(pathname: string): boolean {
+  return pathname === "/mcp" || pathname.startsWith("/mcp/");
+}
+
+function mcpNotImplemented(): Response {
+  // Step 5b skeleton — the stateless remote MCP server ports here next.
+  return Response.json(
+    { error: "mcp not implemented (ADR 0012 step 5b)" },
+    { status: 501 },
+  );
+}
 
 export default {
   fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
-    // Exact-or-subpath match so `/apifoo`/`/mcpfoo` fall through to React Router
-    // instead of being misrouted to the API/MCP surface.
-    if (
-      pathname === "/api" ||
-      pathname.startsWith("/api/") ||
-      pathname === "/mcp" ||
-      pathname.startsWith("/mcp/")
-    ) {
-      return api.fetch(request, env, ctx);
+    if (isApiPath(pathname)) {
+      return handleApiRequest(request, env, ctx);
+    }
+    if (isMcpPath(pathname)) {
+      return mcpNotImplemented();
     }
     // React Router v8 requires the load context to be a `RouterContextProvider`
     // (a plain object no longer type-checks or works). Seed it with the Worker

@@ -7,6 +7,7 @@ import {
   ProjectCommandValidationError,
   ProjectNotFoundError,
   ProjectVersionConflictError,
+  type AuthenticatedIdentity,
   type ProjectAccessGrant,
   type ProjectAccessGrantResolver,
   type ProjectCommand,
@@ -59,14 +60,20 @@ export interface CommandWithKey {
 
 export interface ApplyCommandsInput {
   readonly session: DbSession;
-  readonly actor: CommandActor;
   readonly tenantId: string;
   readonly projectId: string;
-  /** The actor's resolved project role (from the shell gate's membership). */
-  readonly projectRole: ProjectRole;
   readonly commands: readonly CommandWithKey[];
   /** The confirmed revision the batch is applied on top of. */
   readonly expectedRevision: bigint;
+  /**
+   * The cookie surface's already-known actor. Present with {@link projectRole}
+   * to build the in-memory-grant default; the token surface omits both and
+   * injects {@link ApplyCommandsDeps.identity} + {@link ApplyCommandsDeps.grantResolver}
+   * instead (the actor is then derived from the resolved grant).
+   */
+  readonly actor?: CommandActor;
+  /** The actor's resolved project role (from the shell gate's membership). */
+  readonly projectRole?: ProjectRole;
 }
 
 /**
@@ -77,7 +84,11 @@ export interface ApplyCommandsInput {
 export type ApplyCommandsResult =
   | { readonly ok: true; readonly revision: bigint }
   | { readonly ok: false; readonly code: "VERSION_CONFLICT"; readonly actualRevision: bigint }
-  | { readonly ok: false; readonly code: "FORBIDDEN" }
+  // `reason` is present ONLY for the agent-plan-approval denial, so the cookie
+  // surface's ordinary access-denied result stays `{ ok: false, code: "FORBIDDEN" }`
+  // byte-identical; the token surface reads `reason` to distinguish the stable
+  // `AGENT_APPROVAL_REQUIRED` REST error from `PROJECT_ACCESS_DENIED`.
+  | { readonly ok: false; readonly code: "FORBIDDEN"; readonly reason?: "AGENT_APPROVAL_REQUIRED" }
   | { readonly ok: false; readonly code: "NOT_FOUND" }
   | { readonly ok: false; readonly code: "INVALID"; readonly message: string };
 
@@ -88,6 +99,20 @@ export interface ApplyCommandsDeps {
    * core is exercised with no real database.
    */
   readonly unitOfWorkFor?: (database: PersistenceDatabase) => ProjectCommandUnitOfWork;
+  /**
+   * The verified caller identity (ADR 0012 Step 5 — the token surface's half of
+   * the identity/grant seam). Absent for the cookie surface, which derives the
+   * documented stub identity from the input {@link CommandActor}.
+   */
+  readonly identity?: AuthenticatedIdentity;
+  /**
+   * The grant resolver the authorizer runs against. The token surface injects a
+   * `PostgresProjectAccessGrantResolver` over the request `DbSession` (so AGENT
+   * scopes in `grant.allowedScopes` and the `(issuer,subject)`+`email:` fallback
+   * are consulted); absent for the cookie surface, which builds the in-memory
+   * grant from the input {@link CommandActor} + {@link ApplyCommandsInput.projectRole}.
+   */
+  readonly grantResolver?: ProjectAccessGrantResolver;
 }
 
 /**
@@ -96,10 +121,15 @@ export interface ApplyCommandsDeps {
  * the full role check (only OWNER/EDITOR may write; VIEWER is denied) and the
  * agent-plan rules against this grant.
  */
-function grantResolverForActor(
-  actor: CommandActor,
-  projectRole: ProjectRole,
+function cookieGrantResolver(
+  actor: CommandActor | undefined,
+  projectRole: ProjectRole | undefined,
 ): ProjectAccessGrantResolver {
+  if (actor === undefined || projectRole === undefined) {
+    throw new Error(
+      "applyCommands requires actor + projectRole unless a grantResolver is injected",
+    );
+  }
   const grant: ProjectAccessGrant = {
     principalId: actor.principalId,
     principalType: actor.principalType,
@@ -112,6 +142,51 @@ function grantResolverForActor(
   return { resolve: async () => grant };
 }
 
+/**
+ * Wrap a grant resolver so a whole batch shares ONE resolution.
+ * `createProjectCommandAuthorizer` resolves the grant once per command, but the
+ * resolve key `(identity, tenantId, projectId)` is constant across a batch, so
+ * the injected `PostgresProjectAccessGrantResolver` would otherwise run ~N
+ * identical authz queries for an N-command batch. The per-request memo collapses
+ * them to a single DB round trip; every command is still authorized against the
+ * resolved grant because the role check and the per-command agent-scope/plan-field
+ * rules run in the authorizer against each command, not in the resolver.
+ */
+function memoizeGrantResolver(
+  resolver: ProjectAccessGrantResolver,
+): ProjectAccessGrantResolver {
+  const cache = new Map<string, Promise<ProjectAccessGrant | null>>();
+  return {
+    resolve(request) {
+      const key = JSON.stringify([
+        request.identity.issuer,
+        request.identity.subject,
+        request.identity.email ?? null,
+        request.tenantId,
+        request.projectId,
+      ]);
+      let pending = cache.get(key);
+      if (pending === undefined) {
+        pending = resolver.resolve(request);
+        cache.set(key, pending);
+      }
+      return pending;
+    },
+  };
+}
+
+/**
+ * The stub identity for the cookie surface: the in-memory resolver returns its
+ * grant regardless of it, so its content is never inspected (the Postgres
+ * resolver the token surface injects would key on it instead).
+ */
+function cookieStubIdentity(actor: CommandActor | undefined): AuthenticatedIdentity {
+  if (actor === undefined) {
+    throw new Error("applyCommands requires actor unless an identity is injected");
+  }
+  return { issuer: "cookie-session", subject: actor.principalId, scopes: [] };
+}
+
 export async function applyCommands(
   input: ApplyCommandsInput,
   deps: ApplyCommandsDeps = {},
@@ -120,12 +195,22 @@ export async function applyCommands(
   const unitOfWorkFor =
     deps.unitOfWorkFor ?? ((database) => new PostgresProjectCommandUnitOfWork(database));
 
-  const authorizer = createProjectCommandAuthorizer(grantResolverForActor(actor, projectRole));
-  const service = createProjectCommandService(unitOfWorkFor(session.database()));
+  // The identity/grant seam (ADR 0012 Step 5, finding 2). The token surface
+  // injects a verified identity + a Postgres grant resolver; the cookie surface
+  // injects neither and gets today's documented in-memory grant + stub identity,
+  // so its behaviour is byte-identical to before the seam existed.
+  // The injected (token-surface Postgres) resolver is memoized per request so a
+  // multi-command batch drives ONE authz resolution, not one per command. The
+  // cookie surface's in-memory resolver is left unwrapped (its resolve is a
+  // constant, so its path stays byte-identical).
+  const grantResolver =
+    deps.grantResolver === undefined
+      ? cookieGrantResolver(actor, projectRole)
+      : memoizeGrantResolver(deps.grantResolver);
+  const identity = deps.identity ?? cookieStubIdentity(actor);
 
-  // A stub identity: the in-memory resolver returns the grant regardless of it,
-  // so its content is never inspected (the Postgres resolver would key on it).
-  const identity = { issuer: "cookie-session", subject: actor.principalId, scopes: [] as const };
+  const authorizer = createProjectCommandAuthorizer(grantResolver);
+  const service = createProjectCommandService(unitOfWorkFor(session.database()));
 
   try {
     // Authorize every command BEFORE executing any, so a denied actor persists
@@ -179,7 +264,14 @@ export async function applyCommands(
     if (error instanceof ProjectVersionConflictError) {
       return { ok: false, code: "VERSION_CONFLICT", actualRevision: error.actualRevision };
     }
-    if (error instanceof ProjectAccessDeniedError || error instanceof AgentPlanApprovalRequiredError) {
+    if (error instanceof AgentPlanApprovalRequiredError) {
+      // An AGENT tried to change a plan field: distinct from a plain access
+      // denial so the token surface can surface the stable AGENT_APPROVAL_REQUIRED
+      // REST error. The cookie surface never inspects `reason`, so its FORBIDDEN
+      // handling is unchanged.
+      return { ok: false, code: "FORBIDDEN", reason: "AGENT_APPROVAL_REQUIRED" };
+    }
+    if (error instanceof ProjectAccessDeniedError) {
       return { ok: false, code: "FORBIDDEN" };
     }
     if (error instanceof ProjectNotFoundError) {

@@ -96,4 +96,99 @@ describe("PostgresProjectListReader", () => {
 
     expect(result).toEqual([]);
   });
+
+  it("listForIdentity matches the direct (issuer, subject), the email fallback, and their union", async () => {
+    // Direct subject match resolves the same set as listForPrincipal.
+    const direct = await reader.listForIdentity({
+      issuer: "https://identity.example.test/",
+      subject: "principal-1",
+      scopes: [],
+    });
+    expect(direct).toEqual([
+      { id: ALPHA_ID, tenantId: TENANT_ID, name: "Alpha project", role: "VIEWER" },
+      { id: GAMMA_ID, tenantId: TENANT_ID, name: "Gamma project", role: "OWNER" },
+    ]);
+
+    // A principal seeded before its provider subject is known is keyed as
+    // `email:<addr>`; with no direct match it resolves through the email key alone
+    // (ADR 0012 Step 5a).
+    const emailPrincipalId = "90000000-0000-4000-8000-0000000000ee";
+    await client.query(
+      `insert into principals (id, issuer, subject, type, display_name)
+       values ($1, 'https://identity.example.test/', 'email:seed@example.test', 'HUMAN', 'Seeded by email')`,
+      [emailPrincipalId],
+    );
+    await client.query(
+      "insert into tenant_memberships (tenant_id, principal_id, role) values ($1, $2, 'MEMBER')",
+      [TENANT_ID, emailPrincipalId],
+    );
+    await client.query(
+      `insert into project_memberships (tenant_id, project_id, principal_id, role)
+       values ($1, $2, $3, 'EDITOR')`,
+      [TENANT_ID, BETA_ID, emailPrincipalId],
+    );
+
+    const viaEmail = await reader.listForIdentity({
+      issuer: "https://identity.example.test/",
+      subject: "unknown-provider-subject",
+      email: "seed@example.test",
+      scopes: [],
+    });
+    expect(viaEmail).toEqual([
+      { id: BETA_ID, tenantId: TENANT_ID, name: "Beta project", role: "EDITOR" },
+    ]);
+
+    // When the identity has BOTH a direct-subject principal and an email-keyed
+    // principal, the reader returns the UNION (deduped by project) so the email
+    // principal's Beta membership — writable per-project via the resolver's
+    // fallback — is not absent from the list. Sorted by name.
+    const union = await reader.listForIdentity({
+      issuer: "https://identity.example.test/",
+      subject: "principal-1",
+      email: "seed@example.test",
+      scopes: [],
+    });
+    expect(union).toEqual([
+      { id: ALPHA_ID, tenantId: TENANT_ID, name: "Alpha project", role: "VIEWER" },
+      { id: BETA_ID, tenantId: TENANT_ID, name: "Beta project", role: "EDITOR" },
+      { id: GAMMA_ID, tenantId: TENANT_ID, name: "Gamma project", role: "OWNER" },
+    ]);
+  });
+
+  it("listForIdentity dedups a project shared by the direct and email principals, direct role winning", async () => {
+    // The email-keyed principal is a member of Gamma too (where the direct subject
+    // is OWNER) with a DIFFERENT role, plus Beta which only it can see. The union
+    // must contain Gamma exactly once, carrying the direct-subject role (OWNER) —
+    // mirroring the resolver's per-project "direct subject, else email" precedence.
+    const emailPrincipalId = "90000000-0000-4000-8000-0000000000ef";
+    await client.query(
+      `insert into principals (id, issuer, subject, type, display_name)
+       values ($1, 'https://identity.example.test/', 'email:seed@example.test', 'HUMAN', 'Seeded by email')`,
+      [emailPrincipalId],
+    );
+    await client.query(
+      "insert into tenant_memberships (tenant_id, principal_id, role) values ($1, $2, 'MEMBER')",
+      [TENANT_ID, emailPrincipalId],
+    );
+    await client.query(
+      `insert into project_memberships (tenant_id, project_id, principal_id, role) values
+         ($1, $2, $4, 'EDITOR'),
+         ($1, $3, $4, 'VIEWER')`,
+      [TENANT_ID, BETA_ID, GAMMA_ID, emailPrincipalId],
+    );
+
+    const union = await reader.listForIdentity({
+      issuer: "https://identity.example.test/",
+      subject: "principal-1",
+      email: "seed@example.test",
+      scopes: [],
+    });
+    expect(union).toEqual([
+      { id: ALPHA_ID, tenantId: TENANT_ID, name: "Alpha project", role: "VIEWER" },
+      { id: BETA_ID, tenantId: TENANT_ID, name: "Beta project", role: "EDITOR" },
+      // Deduped: Gamma appears once, with the DIRECT subject's OWNER (not the
+      // email principal's VIEWER).
+      { id: GAMMA_ID, tenantId: TENANT_ID, name: "Gamma project", role: "OWNER" },
+    ]);
+  });
 });
