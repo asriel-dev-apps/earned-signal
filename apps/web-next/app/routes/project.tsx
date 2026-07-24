@@ -34,6 +34,8 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
           {" · "}
           <Link to="dashboard">ダッシュボード</Link>
           {" · "}
+          <Link to="masters">マスタ</Link>
+          {" · "}
           <Link to="members">メンバー</Link>
           {" · "}
           <Link to="templates">テンプレート</Link>

@@ -6,6 +6,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
+    // Vite/React Router does the building; tsc is typecheck-only. `noEmit` keeps a
+    // bare `tsc` (without --noEmit) from transpiling .js next to every source file.
+    "noEmit": true,
     "rootDirs": [".", "./.react-router/types"],
     "paths": {
       "~/*": ["./app/*"]
